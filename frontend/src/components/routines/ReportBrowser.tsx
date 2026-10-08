@@ -586,10 +586,10 @@ export function ReportBrowser({
       // Hosted, the pane already sizes and paints; full screen, this is the page.
       className={
         hosted
-          ? "flex min-h-0 w-full flex-1 overflow-hidden outline-none"
+          ? "flex min-h-0 w-full flex-1 flex-col md:flex-row overflow-hidden outline-none"
           : page
-            ? "flex h-full min-h-0 w-full overflow-hidden outline-none"
-            : "fixed inset-0 z-50 flex bg-[var(--color-bg)]"
+            ? "flex h-full min-h-0 w-full flex-col md:flex-row overflow-hidden outline-none"
+            : "fixed inset-0 z-50 flex flex-col md:flex-row bg-[var(--color-bg)]"
       }
       tabIndex={hosted ? -1 : undefined}
       onKeyDown={hosted ? handleKey : undefined}
@@ -618,7 +618,7 @@ export function ReportBrowser({
       )}
 
       {/* Main content */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Top bar — wraps rather than widening the column: at pane width the
             actions drop to a second row, and the routine's name keeps its own.
             Left to overflow it would lay the whole column out wider than the

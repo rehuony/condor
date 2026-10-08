@@ -258,10 +258,13 @@ export function DockPortfolio({ server }: { server: string }) {
     );
   }
 
-  const total = data?.total_usd ?? 0;
+  const total = data?.equity_usd ?? data?.total_usd ?? 0;
 
   return (
     <div className="flex flex-col">
+      <div className="px-3 text-[10px] text-[var(--color-text-muted)]">
+        {data?.equity_usd != null ? "Account equity" : "Wallet balance"}
+      </div>
       {/* The total, and the only thing that makes a total judgeable beside it. */}
       <div className="flex items-baseline gap-2 px-3 pb-1 pt-1.5">
         <span className="font-mono text-lg tabular-nums">
@@ -271,7 +274,7 @@ export function DockPortfolio({ server }: { server: string }) {
           <span
             className="font-mono text-[11px] tabular-nums"
             style={{ color: pnlColor(change.abs) }}
-            title="Change over the last 24 hours"
+            title="Change over the last 24 hours, including deposits and withdrawals; not trading PnL"
           >
             {formatCurrencyPnl(fromUsd(change.abs), currencySymbol)}
             {change.pct !== null &&
@@ -285,6 +288,14 @@ export function DockPortfolio({ server }: { server: string }) {
             24h unknown
           </span>
         )}
+      </div>
+
+      <div className="px-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
+        24h {history?.valuation === "equity" ? "equity" : "balance"} change · includes transfers
+        <br />
+        Unrealized {data?.unrealized_pnl_usd != null
+          ? formatCurrencyPnl(fromUsd(data.unrealized_pnl_usd), currencySymbol)
+          : "unavailable"}
       </div>
 
       {/* How the total is made up, and of what. "By asset" is the default

@@ -108,7 +108,9 @@ agents/
 
 ### Risk + permissions
 
-`auto_approve_with_risk_check(...)` is wired in as the ACP permission callback. Every tool call the LLM tries to make is intercepted: trading-side tools are checked against `RiskLimits` (max exposure, max drawdown, max open executors); read-only tools are auto-approved. The agent literally cannot exceed its limits — the framework refuses on its behalf.
+`auto_approve_with_risk_check(...)` checks named trading tools against `RiskLimits` and preserves owned stops when the risk state is blocked. Live ticks require a client that enforces this callback before tool execution. PydanticAI supplies that boundary; ACP bridges currently do not guarantee that every MCP call requests permission, so their live ticks and model-driven shutdown cleanup are refused. Deterministic shutdown remains available.
+
+Dry runs additionally enforce their trading and code-execution restrictions at MCP dispatch, including routines and delegation. This does not sandbox a model host's native shell or filesystem tools. A successful rehearsal alone is not authorization for live trading, and live routines/snippets still hold an unrestricted API client; their internal operations do not pass through the named-tool risk checks.
 
 ---
 

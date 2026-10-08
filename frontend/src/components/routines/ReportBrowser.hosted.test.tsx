@@ -175,8 +175,8 @@ describe("ReportBrowser hosted in the pane", () => {
     expect(browser().className).not.toContain("fixed");
     expect(browser().className).not.toContain("inset-0");
     // The sidebar opens on its rail, which is what makes it fit at pane width.
-    expect(container.querySelector(".w-12")).toBeTruthy();
-    expect(container.querySelector(".w-64")).toBeNull();
+    expect(container.querySelector('[class~="md:w-12"]')).toBeTruthy();
+    expect(container.querySelector('[class~="md:w-64"]')).toBeNull();
   });
 
   it("leaves the window's keys to the conversation", async () => {
@@ -232,7 +232,7 @@ describe("ReportBrowser on its own page", () => {
     await render();
 
     expect(browser().className).toContain("fixed inset-0");
-    expect(container.querySelector(".w-64")).toBeTruthy();
+    expect(container.querySelector('[class~="md:w-64"]')).toBeTruthy();
 
     await press("ArrowDown", window);
     expect(heading()).toBe("Beta Check");
@@ -336,7 +336,7 @@ describe("ReportBrowser header, for an agent-owned routine", () => {
     await render({ initialSourceTypeFilter: "all" });
 
     const rows = Array.from(
-      container.querySelectorAll(".w-64 button"),
+      container.querySelectorAll('[class~="md:w-64"] button'),
     ).map((b) => b.textContent ?? "");
     expect(rows.some((t) => t.includes("brigado/mm regime detector"))).toBe(true);
   });

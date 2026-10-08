@@ -107,11 +107,31 @@ def build_llm_client(
     )
 
 
+def guarded_tool_error(client: Any, execution_mode: str | None) -> str | None:
+    """Whether this unattended mode lacks an enforced tool-permission boundary.
+
+    Dry runs also refuse trading at MCP dispatch. Live risk checks depend on
+    every invocation reaching the callback, which an ACP request handler alone
+    cannot guarantee. This checks a capability, not a model's name.
+    """
+    if execution_mode not in (None, "dry_run") and not getattr(
+        client, "enforces_tool_permissions", False
+    ):
+        return (
+            "Autonomous trading requires a client that enforces the risk gate "
+            "before every tool call. This backend does not provide that guarantee; "
+            "live ticks and model-driven shutdown cleanup are disabled. "
+            "Deterministic shutdown remains available."
+        )
+    return None
+
+
 async def agent_key_error(
     agent_key: str,
     *,
     user_id: int | None = None,
     base_url_override: str | None = None,
+    execution_mode: str | None = None,
 ) -> str | None:
     """Why ``agent_key`` cannot run here, or ``None`` when nothing says so yet.
 
@@ -130,7 +150,7 @@ async def agent_key_error(
     """
     key = (agent_key or "").strip()
     if not key:
-        return None  # no key = the ACP default, always addressable
+        return guarded_tool_error(acp_client.ACPClient, execution_mode)
     if not pydantic_ai.is_pydantic_ai_model(key):
         base = key.split(":", 1)[0]
         if base.split("@", 1)[0] in pydantic_ai.PYDANTIC_AI_PREFIXES:
@@ -141,7 +161,7 @@ async def agent_key_error(
                 pydantic_ai.PYDANTIC_AI_PREFIXES
             )
             return f"unknown model provider '{base}' (known: {', '.join(known)})"
-        return None
+        return guarded_tool_error(acp_client.ACPClient, execution_mode)
 
     if base_url_override and pydantic_ai.model_prefix(key) == "openrouter":
         # OpenRouter's key is the install's; it only ever goes to OpenRouter.

@@ -601,8 +601,12 @@ const ROUTES: {
         (a, b) => (b.notional_value ?? 0) - (a.notional_value ?? 0),
       )[0];
       return {
-        total: m.value(data?.total_usd),
-        [window ? `change (${window})` : "change"]: m.pnl(change),
+        total: m.value(data?.equity_usd ?? data?.total_usd),
+        valuation: data ? (data.equity_usd != null ? "equity" : "wallet balance") : undefined,
+        [window ? `change (${window})` : "change"]: change != null
+          ? `${m.pnl(change)} (${history?.valuation ?? "wallet"}; includes transfers)`
+          : undefined,
+        "account unrealized": m.pnl(data?.unrealized_pnl_usd),
         currency: data ? m.currency : undefined,
         assets: data?.connectors.reduce((n, c) => n + c.balances.length, 0),
         venues: names(venues),

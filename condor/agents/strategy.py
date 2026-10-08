@@ -356,6 +356,11 @@ class StrategyStore:
         return True
 
     def _save(self, strategy: Strategy) -> None:
+        from .config import AgentConfig
+
+        # Validate before forking or writing so a refused risk configuration
+        # cannot replace a usable playbook or leave a half-created one behind.
+        AgentConfig.from_dict(strategy.default_config)
         meta = {
             "name": strategy.name,
             "description": strategy.description,

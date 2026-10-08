@@ -1,11 +1,37 @@
 """Fetch market data (prices, candles) from Hummingbot API."""
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from condor.rates import find_rate, merge_price_pool
 
 logger = logging.getLogger(__name__)
+
+
+def _is_rate_limit_error(error: Exception) -> bool:
+    """Recognize SDK HTTP errors, including older APIs wrapping Binance errors."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        response = getattr(error, "response", None)
+        status = (
+            getattr(error, "status", None)
+            or getattr(error, "status_code", None)
+            or getattr(response, "status_code", None)
+        )
+        if status in (418, 429):
+            return True
+        # Older Hummingbot APIs wrap upstream errors in an HTTP 500 detail. Match
+        # explicit error fields, not arbitrary numbers in URLs or candle data.
+        if re.search(
+            r"(?:HTTP status is\s+(?:418|429)\b|[\"']?code[\"']?\s*:\s*-1003\b)",
+            str(error),
+            re.IGNORECASE,
+        ):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
 
 
 async def fetch_current_price(
@@ -148,7 +174,8 @@ async def fetch_historical_candles(
             and would rather return nothing than a full unrelated window.
         fallback_on_error: Treat a failing historical call as an empty result and
             continue to the fallback, instead of propagating. Callers that abort
-            on failure (WS backfill, REST poll) leave it off.
+            on failure (WS backfill, REST poll) leave it off. Rate limits always
+            propagate: a fallback would spend more of the same exchange quota.
         strict: Passed through to `normalize_candle`. Rows dropped instead of
             raised are logged once per call at warning, so a payload bug is
             still discoverable rather than silently thinning the series.
@@ -176,7 +203,7 @@ async def fetch_historical_candles(
                 end_time=end_time,
             )
         except Exception as e:
-            if not fallback_on_error:
+            if not fallback_on_error or _is_rate_limit_error(e):
                 raise
             logger.warning(
                 "get_historical_candles failed: %s — falling back to get_candles", e

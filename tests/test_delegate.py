@@ -372,8 +372,8 @@ def test_stopped_delegation_records_nothing(tmp_path, monkeypatch):
     ] == []
 
 
-def test_completion_text_clips_a_long_result(tmp_path, monkeypatch):
-    """The shared helper truncates, so a huge answer cannot bloat the replay."""
+def test_completion_text_keeps_the_complete_result():
+    """Delivery and transcript keep the answer; replay applies its own budget."""
     from condor.agents.delegate import DelegateTask, _completion_text
 
     dt = DelegateTask(
@@ -387,8 +387,8 @@ def test_completion_text_clips_a_long_result(tmp_path, monkeypatch):
         result="y" * 5000,
     )
     text = _completion_text(dt)
-    assert text.endswith("…")
-    assert len(text) < 1600
+    assert text.endswith(dt.result)
+    assert not text.endswith("…")
 
 
 def test_session_key_resolution_never_raises():
@@ -943,7 +943,7 @@ def _stream_client(events):
         async def stop(self):
             pass
 
-        async def prompt_stream(self, text):
+        async def prompt_stream(self, text, *, timeout_s=None):
             for event in events:
                 yield event
 

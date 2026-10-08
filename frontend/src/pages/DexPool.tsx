@@ -391,7 +391,7 @@ export function DexPool() {
   const pairLabel = poolLabel(pool);
 
   return (
-    <div className="-m-6 flex h-[calc(100%+3rem)] flex-col">
+    <div className="-m-3 flex min-h-full flex-col sm:-m-6 lg:h-[calc(100%+3rem)]">
       {/* Nothing on this page fails loudly when the budget is spent — the chart
           just stops moving and the stats freeze — so it is said here instead. */}
       <UpstreamNotice state={upstream} className="shrink-0 border-b" />
@@ -492,7 +492,7 @@ export function DexPool() {
       </div>
 
       {/* Interval / lookback */}
-      <div className="flex shrink-0 items-center gap-4 border-b border-[var(--color-border)] px-3 py-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 sm:gap-4 border-b border-[var(--color-border)] px-3 py-1.5">
         <div className="flex items-center gap-1">
           <span className="text-[11px] text-[var(--color-text-muted)]">Interval</span>
           {DEX_INTERVALS.map((iv) => (
@@ -528,8 +528,8 @@ export function DexPool() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className="flex min-w-0 flex-1 flex-col min-h-[480px] lg:min-h-0">
           {/* What you already hold here, above the chart that shows where it sits */}
           <LpPositionBar
             executors={executors}
@@ -628,14 +628,14 @@ export function DexPool() {
         </div>
 
         <div
-          className="group/vdrag relative w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] transition-colors hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20"
+          className="group/vdrag relative hidden lg:block w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] transition-colors hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20"
           onMouseDown={startHDrag}
         >
           <div className="absolute inset-y-0 left-1/2 my-auto h-12 w-px -translate-x-1/2 rounded bg-amber-400/60 transition-colors group-hover/vdrag:bg-amber-400" />
         </div>
 
         <div
-          className="flex shrink-0 flex-col border-l border-[var(--color-border)]"
+          className="trade-config-panel flex shrink-0 flex-col border-l border-[var(--color-border)]"
           style={{ width: rightPanelWidth }}
         >
           <div className="flex border-b border-[var(--color-border)]">

@@ -198,6 +198,11 @@ def data_dir() -> Path:
     return _PROJECT_ROOT / DATA_DIRNAME
 
 
+def research_dir() -> Path:
+    """Locally generated research artifacts, kept outside the Git index."""
+    return runtime_root() / "research"
+
+
 def stock_agents_root() -> Path:
     """The shipped agent library: ``<repo>/agents``, tracked and read-only.
 

@@ -26,9 +26,9 @@ import { LogsSection } from "@/components/bots/LogsSection";
 import { PnlEvolutionChart } from "@/components/bots/PnlEvolutionChart";
 import { ExecutorChart } from "@/components/charts/ExecutorChart";
 import { DetailPanel } from "@/components/perf/ExecutorTable";
-import { ExecutorRows, StopConfirmDialog } from "@/components/perf/ExecutorRows";
+import { DeleteConfirmDialog, ExecutorRows, StopConfirmDialog } from "@/components/perf/ExecutorRows";
 import { ControllerToggle } from "@/components/perf/ControllerToggle";
-import { useExecutorStop } from "@/components/perf/executorActions";
+import { useExecutorDelete, useExecutorStop } from "@/components/perf/executorActions";
 import {
   agentBucketLabel,
   agentOptions,
@@ -65,6 +65,7 @@ import {
   formatCurrencyPnl,
   formatRuntimeHours,
   isExecutorActive,
+  isExecutorTerminated,
   pnlColor,
   shortBotName,
   toMs,
@@ -675,6 +676,9 @@ export function PerfBrowser({
   // which is now any scope rather than one page (FEAT-086).
   const stop = useExecutorStop(server);
   const [detail, setDetail] = useState<ExecutorInfo | null>(null);
+  const deletion = useExecutorDelete(server, (ids) => {
+    setDetail((current) => current && ids.includes(current.id) ? null : current);
+  });
   // The run whose archived database is open, if any. The drill-in is its own
   // view rather than a pane, because the archive is a different database with
   // its own controllers and its own history.
@@ -2291,11 +2295,11 @@ export function PerfBrowser({
   });
 
   return (
-    <div className="flex h-full min-h-0 bg-[var(--color-bg)]">
+    <div className="flex h-full min-h-0 flex-col md:flex-row bg-[var(--color-bg)]">
       {/* Left sidebar: the scope picker */}
       <div
-        className={`flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
-          isCompact ? "w-12" : "w-72"
+        className={`flex min-h-0 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
+          isCompact ? "w-full max-h-32 md:w-12 md:max-h-none" : "w-full max-h-[35%] md:w-72 md:max-h-none"
         }`}
       >
         {/* Header: what is in scope, and what has been narrowed out of it.
@@ -2921,6 +2925,15 @@ export function PerfBrowser({
               </div>
             )}
 
+            {activeExec && isExecutorTerminated(activeExec.status) && (
+              <button onClick={() => deletion.request([activeExec.id])}
+                disabled={deletion.pending}
+                className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] hover:bg-[var(--color-red)]/10 disabled:opacity-50">
+                <Trash2 className="h-3.5 w-3.5" />
+                {deletion.deletingIds.has(activeExec.id) ? "Deleting…" : "Delete history"}
+              </button>
+            )}
+
             {activeExec && isExecutorActive(activeExec.status) && (
               <button
                 onClick={() => stop.request([activeExec.id])}
@@ -2976,7 +2989,7 @@ export function PerfBrowser({
         </div>
 
         {/* Body: report pane (+ config drawer) */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
           {/* The centre column. It scrolls only as a safety valve: the strip,
               the chart's floor and an open band all fit a normal window, and on
               a short one the reader can reach the rows that no longer do rather
@@ -3384,6 +3397,7 @@ export function PerfBrowser({
                     <ExecutorRows
                       executors={scopedExecutors}
                       stop={stop}
+                      deletion={deletion}
                       selectedId={detail?.id ?? null}
                       onSelect={setDetail}
                       rateFormatPnl={rateFormatPnl}
@@ -3418,7 +3432,7 @@ export function PerfBrowser({
               supports. A controller's config, or a bot's logs — never both,
               and never one belonging to a scope the user has left. */}
           {openDrawer && (
-            <div className="w-[380px] xl:w-[440px] shrink-0 border-l border-[var(--color-border)] flex flex-col bg-[var(--color-surface)]">
+            <div className="w-full max-h-[50%] lg:max-h-none lg:w-[380px] xl:w-[440px] shrink-0 border-l border-[var(--color-border)] flex flex-col bg-[var(--color-surface)]">
               {openDrawer === "config" && activeCtrl ? (
                 <YamlConfigEditor
                   // Same: an editor keyed on the config id alone kept its unsaved
@@ -3465,10 +3479,17 @@ export function PerfBrowser({
           onClose={() => setDetail(null)}
           onStop={(id) => stop.request([id])}
           stopping={stop.stoppingIds.has(detail.id)}
+          onDelete={(id) => deletion.request([id])}
+          deleting={deletion.deletingIds.has(detail.id)}
           rateFormatPnl={rateFormatPnl}
           rateFormatValue={rateFormatValue}
           rateFormatDetailed={rateFormatDetailed}
         />
+      )}
+
+      {deletion.error && <p role="alert" className="px-3 py-2 text-xs text-[var(--color-red)]">{deletion.error}</p>}
+      {deletion.pendingIds && (
+        <DeleteConfirmDialog ids={deletion.pendingIds} onConfirm={deletion.confirm} onCancel={deletion.cancel} />
       )}
 
       {stop.pendingIds && (

@@ -214,7 +214,7 @@ def test_a_turn_stopped_before_it_spoke_is_not_reported_as_no_response():
 
     asyncio.run(drive())
 
-    assert "stopped" in bot.edits[-1]
+    assert "stopped" in bot.edits[-1].lower()
     assert "no response" not in bot.edits[-1]
 
 

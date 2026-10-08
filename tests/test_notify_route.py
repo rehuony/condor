@@ -13,10 +13,14 @@ dependency but is not installed in this venv.
 import asyncio
 
 import pytest
+from aiohttp import ClientConnectorError
+from bs4 import BeautifulSoup
 from fastapi import HTTPException
+from telegram.error import BadRequest
 
 from condor.web.models import WebUser
 from condor.web.routes.agents import NotifyRequest, notify_user
+from mcp_servers.condor.exceptions import APIError
 from mcp_servers.condor.tools import notification as notification_tool
 
 # The pushes below target chat 1 — the caller's own private chat. A foreign
@@ -39,7 +43,14 @@ class _FakeBot:
     async def send_message(self, **kw):
         self.calls.append(kw)
         if kw.get("parse_mode") and self.raises_with_parse_mode:
-            raise RuntimeError("can't parse entities")
+            raise BadRequest("can't parse entities")
+        visible = (
+            BeautifulSoup(kw["text"], "html.parser").get_text()
+            if kw.get("parse_mode") == "HTML"
+            else kw["text"]
+        )
+        if len(visible.encode("utf-16-le")) // 2 > 4096:
+            raise BadRequest("Message is too long")
         return {"ok": self.ok}
 
 
@@ -179,7 +190,7 @@ def test_bad_markdown_is_retried_as_plain_text(monkeypatch, notes):
     )
 
     assert result["sent"] is True
-    assert [c.get("parse_mode") for c in fake.calls] == ["Markdown", None]
+    assert [c.get("parse_mode") for c in fake.calls] == ["HTML", None]
 
 
 def test_a_web_session_with_no_chat_records_without_pushing(monkeypatch, bot, notes):
@@ -219,75 +230,98 @@ def test_the_tool_goes_through_the_main_process_and_never_touches_telegram(monke
     monkeypatch.setattr(
         notification_tool.settings, "session_key", "web:1:slot-1", raising=False
     )
-    monkeypatch.setattr(notification_tool.httpx, "AsyncClient", _no_direct_http)
+    monkeypatch.setattr(notification_tool, "Bot", _no_direct_bot)
 
-    assert asyncio.run(notification_tool.send_notification("hello")) == {"sent": True}
+    assert asyncio.run(notification_tool.send_notification("hello")) == {
+        "sent": True,
+        "recorded": True,
+    }
     method, path, body = calls[0]
     assert (method, path) == ("POST", "/agents/notify")
     assert body["session_key"] == "web:1:slot-1"
     assert body["text"] == "hello"
 
 
-def test_a_recorded_only_notification_is_reported_as_sent(monkeypatch):
-    """A dashboard session has no chat to push to; the note is the delivery."""
+def test_a_recorded_only_notification_is_not_reported_as_sent(monkeypatch):
+    """A bell entry must never masquerade as a Telegram delivery receipt."""
 
     async def fake_call(*a, **kw):
         return {"sent": False, "recorded": True}
 
     monkeypatch.setattr(notification_tool, "call_main_api", fake_call)
-    monkeypatch.setattr(notification_tool.httpx, "AsyncClient", _no_direct_http)
+    monkeypatch.setattr(notification_tool, "Bot", _no_direct_bot)
 
-    assert asyncio.run(notification_tool.send_notification("hello")) == {"sent": True}
+    assert asyncio.run(notification_tool.send_notification("hello")) == {
+        "sent": False,
+        "recorded": True,
+    }
 
 
 def test_the_tool_falls_back_to_direct_telegram_when_the_main_api_is_down(monkeypatch):
-    async def fake_call(*a, **kw):
-        raise RuntimeError("connection refused")
-
     posted: list[dict] = []
-    monkeypatch.setattr(notification_tool, "call_main_api", fake_call)
+    monkeypatch.setattr(notification_tool, "call_main_api", _offline)
     monkeypatch.setattr(notification_tool.settings, "bot_token", "T", raising=False)
     monkeypatch.setattr(notification_tool.settings, "chat_id", 42, raising=False)
-    monkeypatch.setattr(
-        notification_tool.httpx, "AsyncClient", _direct_http(posted, {"ok": True})
-    )
+    monkeypatch.setattr(notification_tool, "Bot", _direct_bot(posted))
 
-    assert asyncio.run(notification_tool.send_notification("hello")) == {"sent": True}
+    assert asyncio.run(notification_tool.send_notification("hello")) == {
+        "sent": True,
+        "recorded": False,
+    }
     assert posted[0]["chat_id"] == 42
 
 
-def test_a_route_that_could_not_deliver_falls_back_too(monkeypatch):
+def test_a_route_that_could_not_deliver_is_not_replayed(monkeypatch):
     async def fake_call(*a, **kw):
         return {"sent": False, "recorded": False}
 
-    posted: list[dict] = []
     monkeypatch.setattr(notification_tool, "call_main_api", fake_call)
-    monkeypatch.setattr(notification_tool.settings, "bot_token", "T", raising=False)
-    monkeypatch.setattr(notification_tool.settings, "chat_id", 42, raising=False)
-    monkeypatch.setattr(
-        notification_tool.httpx, "AsyncClient", _direct_http(posted, {"ok": True})
+    monkeypatch.setattr(notification_tool, "Bot", _no_direct_bot)
+
+    assert asyncio.run(notification_tool.send_notification("hello")) == {
+        "sent": False,
+        "recorded": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "reason", ["request timed out", "API error (403): Access denied"]
+)
+def test_an_unconfirmed_or_rejected_request_is_never_replayed(monkeypatch, reason):
+    async def failed(*args, **kwargs):
+        raise APIError(reason)
+
+    monkeypatch.setattr(notification_tool, "call_main_api", failed)
+    monkeypatch.setattr(notification_tool, "Bot", _no_direct_bot)
+
+    result = asyncio.run(notification_tool.send_notification("hello"))
+
+    assert result["sent"] is False
+    assert reason in result["error"]
+    assert "not replayed" in result["error"]
+    # Whether the dashboard recorded a timed-out call is unknown.
+    assert "recorded" not in result
+
+
+# ── Bot stand-ins for the direct path ──
+
+
+async def _offline(*args, **kwargs):
+    raise APIError("connection refused") from ClientConnectorError(
+        None, ConnectionRefusedError("connection refused")
     )
 
-    assert asyncio.run(notification_tool.send_notification("hello")) == {"sent": True}
-    assert len(posted) == 1
 
-
-# ── httpx stand-ins for the direct path ──
-
-
-class _no_direct_http:
+class _no_direct_bot:
     def __init__(self, *a, **kw):
         raise AssertionError("the tool must not talk to Telegram directly here")
 
 
-def _direct_http(posted: list, reply: dict):
-    class _Resp:
-        def json(self):
-            return reply
-
-    class _Client:
+def _direct_bot(posted: list, fail_on: int | None = None):
+    class _Bot(_FakeBot):
         def __init__(self, *a, **kw):
-            pass
+            super().__init__()
+            self.calls = posted
 
         async def __aenter__(self):
             return self
@@ -295,11 +329,118 @@ def _direct_http(posted: list, reply: dict):
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, json=None):
-            posted.append(json)
-            return _Resp()
+        async def send_message(self, **kw):
+            result = await super().send_message(**kw)
+            if len(self.calls) == fail_on:
+                raise BadRequest("second page rejected")
+            return result
 
-    return _Client
+    return _Bot
+
+
+@pytest.mark.parametrize("parse_mode", ["Markdown", "HTML", ""])
+def test_long_notification_reaches_telegram_and_is_recorded_once(
+    monkeypatch, bot, notes, parse_mode
+):
+    from condor.notifications import list_for
+
+    _resolves_to(monkeypatch, "conv-1")
+    text = "中文🔎 & 数据 " * 600 + "\n\nTG-RESTART-END"
+    if parse_mode == "Markdown":
+        text = "**测试标题**\n\n" + text
+    elif parse_mode == "HTML":
+        text = "<b>测试标题</b>\n\n" + text.replace("&", "&amp;")
+
+    async def call_route(method, path, body, timeout=None):
+        return await notify_user(NotifyRequest(**body), user=CALLER)
+
+    monkeypatch.setattr(notification_tool, "call_main_api", call_route)
+    monkeypatch.setattr(notification_tool.settings, "chat_id", CALLER.id)
+    monkeypatch.setattr(notification_tool.settings, "session_key", "web:1:s")
+    monkeypatch.setattr(notification_tool, "Bot", _no_direct_bot)
+
+    result = asyncio.run(notification_tool.send_notification(text, parse_mode))
+
+    assert result == {"sent": True, "recorded": True}
+    assert len(bot.calls) > 1
+    visible = "".join(
+        (
+            BeautifulSoup(c["text"], "html.parser").get_text()
+            if c.get("parse_mode") == "HTML"
+            else c["text"]
+        )
+        for c in bot.calls
+    )
+    assert visible.count("中文🔎 & 数据 ") == 600
+    assert visible.endswith("TG-RESTART-END")
+    if parse_mode:
+        assert "<b>测试标题</b>" in bot.calls[0]["text"]
+    assert notes == [(CALLER.id, "conv-1", text, "notification")]
+    assert [n.text for n in list_for(CALLER.id)] == [text]
+
+
+@pytest.mark.parametrize("http_response", [False, True])
+def test_partial_delivery_reports_failure_without_replaying_sent_pages(
+    monkeypatch, bot, notes, http_response
+):
+    from condor.notifications import list_for
+
+    _resolves_to(monkeypatch, "conv-1")
+    original_send = bot.send_message
+
+    async def reject_second_page(**kw):
+        result = await original_send(**kw)
+        if len(bot.calls) == 2:
+            if http_response:
+                return {"ok": False, "description": "second page rejected"}
+            raise BadRequest("second page rejected")
+        return result
+
+    async def call_route(method, path, body, timeout=None):
+        return await notify_user(NotifyRequest(**body), user=CALLER)
+
+    monkeypatch.setattr(bot, "send_message", reject_second_page)
+    monkeypatch.setattr(notification_tool, "call_main_api", call_route)
+    monkeypatch.setattr(notification_tool.settings, "chat_id", CALLER.id)
+    monkeypatch.setattr(notification_tool.settings, "session_key", "web:1:s")
+    monkeypatch.setattr(notification_tool, "Bot", _no_direct_bot)
+    text = "消息🔎 " * 2400 + "最后一段"
+
+    result = asyncio.run(notification_tool.send_notification(text))
+
+    assert result == {"sent": False, "recorded": True, "error": "second page rejected"}
+    assert len(bot.calls) == 2
+    assert len(notes) == 1
+    assert [n.text for n in list_for(CALLER.id)] == [text]
+
+
+@pytest.mark.parametrize("parse_mode", ["Markdown", "HTML"])
+@pytest.mark.parametrize("fail_on", [None, 2])
+def test_direct_fallback_splits_long_messages_and_reports_partial_failure(
+    monkeypatch, parse_mode, fail_on
+):
+    posted = []
+    monkeypatch.setattr(notification_tool, "call_main_api", _offline)
+    monkeypatch.setattr(notification_tool.settings, "bot_token", "T")
+    monkeypatch.setattr(notification_tool.settings, "chat_id", 42)
+    monkeypatch.setattr(notification_tool, "Bot", _direct_bot(posted, fail_on))
+    body = "测试🔎 " * 2000 + "TG-RESTART-END"
+    text = f"<b>{body}</b>" if parse_mode == "HTML" else f"**{body}**"
+
+    result = asyncio.run(notification_tool.send_notification(text, parse_mode))
+
+    assert len(posted) >= 2
+    assert result["sent"] is (fail_on is None)
+    assert result["recorded"] is False
+    if fail_on:
+        assert len(posted) == fail_on
+        assert result["error"] == "second page rejected"
+    else:
+        assert "error" not in result
+        visible = "".join(
+            BeautifulSoup(c["text"], "html.parser").get_text() for c in posted
+        )
+        assert visible == body
 
 
 # ── The rung every other test here stubs away ──
@@ -355,8 +496,8 @@ def test_a_telegram_less_install_files_the_notification_once(
         )
     )
 
-    # Nothing reached Telegram, and the caller is told so honestly; the tool
-    # counts ``recorded`` as delivery, so it still succeeds.
+    # Nothing reached Telegram. Both the route and tool report the bell
+    # delivery independently, without claiming that Telegram received it.
     assert result == {"sent": False, "recorded": True}
     items = list_for(CALLER.id)
     assert [(n.text, n.kind) for n in items] == [("the thing happened", "agent")]

@@ -119,6 +119,8 @@ class _HttpBot:
         data = {"chat_id": chat_id, "text": text}
         if kw.get("parse_mode"):
             data["parse_mode"] = kw["parse_mode"]
+        if kw.get("disable_web_page_preview") is not None:
+            data["disable_web_page_preview"] = kw["disable_web_page_preview"]
         return await self._post("sendMessage", data)
 
     async def send_photo(self, *a, **kw):
@@ -150,7 +152,14 @@ class _HttpBot:
 
     async def edit_message_text(self, *a, **kw):
         data = {k: v for k, v in kw.items() if v is not None}
+        if hasattr(data.get("reply_markup"), "to_dict"):
+            data["reply_markup"] = data["reply_markup"].to_dict()
+        elif "reply_markup" in kw and kw["reply_markup"] is None:
+            data["reply_markup"] = {"inline_keyboard": []}
         return await self._post("editMessageText", data)
+
+    async def delete_message(self, **kw):
+        return await self._post("deleteMessage", kw)
 
     def has_token(self) -> bool:
         """Can this actually deliver? Without a token every send is a no-op.

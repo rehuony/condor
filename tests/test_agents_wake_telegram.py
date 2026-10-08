@@ -10,6 +10,7 @@ uses.
 import asyncio
 
 import pytest
+from telegram.error import BadRequest
 
 from condor.agents import delegate as delegate_module
 from condor.runtime import SessionKey
@@ -165,8 +166,9 @@ def test_a_note_reaches_the_chat_instead_of_returning_false(bot, live_session):
     assert bot.sent == [
         {
             "chat_id": 42,
-            "text": "⚙️ pool\\-scan finished: 3 pools",
-            "parse_mode": "MarkdownV2",
+            "text": "⚙️ pool-scan finished: 3 pools",
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
         }
     ]
 
@@ -188,7 +190,7 @@ def test_markup_telegram_rejects_is_retried_as_plain_text(monkeypatch, live_sess
     class _PickyBot(_FakeBot):
         async def send_message(self, **kw):
             if kw.get("parse_mode"):
-                raise RuntimeError("can't parse entities")
+                raise BadRequest("can't parse entities")
             self.sent.append(kw)
             return _Message(1)
 
@@ -205,7 +207,9 @@ def test_markup_telegram_rejects_is_retried_as_plain_text(monkeypatch, live_sess
     )
 
     assert shown is True
-    assert fake.sent == [{"chat_id": 42, "text": "boom *unbalanced"}]
+    assert fake.sent == [
+        {"chat_id": 42, "text": "⚙️ boom *unbalanced", "disable_web_page_preview": True}
+    ]
 
 
 def test_a_chat_this_process_cannot_reach_does_not_raise(monkeypatch, live_session):

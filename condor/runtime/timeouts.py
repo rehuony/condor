@@ -62,6 +62,12 @@ class TimeoutPolicy:
     # answers used to park the caller forever, holding a per-user session slot
     # and the session-creation lock behind it (CORR-333).
     agent_handshake: int = 120
+    # Background builds/research need more time than an interactive turn.
+    # Their per-stream deadline is passed explicitly, leaving chat budgets alone.
+    delegate_default: int = 3600
+    delegate_max: int = 7200
+    # Bound teardown even when a provider stops responding during shutdown.
+    agent_cleanup: int = 30
     # Wall-clock budget for one agent session: a strategy tick's LLM turn, and
     # the shutdown cleanup pass that runs under the same ceiling. 10 minutes.
     tick_default: int = 600
@@ -108,6 +114,17 @@ class TimeoutPolicy:
                     f.name.upper(),
                     raw,
                 )
+        for name in ("delegate_default", "delegate_max", "agent_cleanup"):
+            if name in overrides and overrides[name] <= 0:
+                log.warning(
+                    "Ignoring non-positive timeout %s=%s", name, overrides[name]
+                )
+                overrides.pop(name)
+        default = overrides.get("delegate_default", cls.delegate_default)
+        maximum = overrides.get("delegate_max", cls.delegate_max)
+        if maximum < default:
+            log.warning("Raising delegate_max to delegate_default (%ss)", default)
+            overrides["delegate_max"] = default
         return cls(**overrides)
 
 

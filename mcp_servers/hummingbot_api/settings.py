@@ -9,7 +9,7 @@ import aiohttp
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
-from mcp_servers._profiles import parse_profile_flags
+from mcp_servers._profiles import parse_execution_mode, parse_profile_flags
 from mcp_servers.hummingbot_api.exceptions import ConfigurationError
 
 CONFIG_DIR = Path.home() / ".hummingbot_mcp"
@@ -84,6 +84,7 @@ class Settings(BaseModel):
     # mute file and passes the names, which is what keeps a market-data server
     # free of the agent registry.
     muted_tools: tuple[str, ...] = Field(default=())
+    execution_mode: str = Field(default="")
 
     # Connection settings
     connection_timeout: float = Field(default=30.0)
@@ -136,6 +137,7 @@ def get_settings() -> Settings:
             log_level=os.getenv("HUMMINGBOT_LOG_LEVEL", "INFO"),
             tool_profile=tool_profile,
             muted_tools=muted_tools,
+            execution_mode=parse_execution_mode(),
         )
     except Exception as e:
         raise ConfigurationError(f"Failed to load configuration: {e}")

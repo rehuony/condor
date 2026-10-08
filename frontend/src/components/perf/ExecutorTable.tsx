@@ -4,6 +4,7 @@ import {
   Circle,
   Clock,
   Square,
+  Trash2,
   TrendingUp,
   X,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import {
   formatPrice,
   formatPct,
   isExecutorActive,
+  isExecutorTerminated,
 } from "@/lib/formatters";
 
 // ── Sort types ──
@@ -129,9 +131,11 @@ const ExecutorRow = memo(function ExecutorRow({
   isSelected,
   isChecked,
   isStopping,
+  isDeleting,
   onRowClick,
   onToggleSelect,
   onStop,
+  onDelete,
   fmtPnl,
   fmtVol,
   fmtDet,
@@ -141,11 +145,13 @@ const ExecutorRow = memo(function ExecutorRow({
   /** Only meaningful when `onToggleSelect` is given. */
   isChecked?: boolean;
   isStopping: boolean;
+  isDeleting: boolean;
   onRowClick: (ex: ExecutorInfo) => void;
   /** Omitted by hosts with no bulk action: no checkbox cell is drawn without it. */
   onToggleSelect?: (id: string) => void;
   /** Omitted by read-only hosts: no Stop control is drawn without it. */
   onStop?: (id: string) => void;
+  onDelete?: (id: string) => void;
   fmtPnl: RowFormatter;
   fmtVol: RowFormatter;
   fmtDet: RowFormatter;
@@ -231,6 +237,13 @@ const ExecutorRow = memo(function ExecutorRow({
             <Square className="h-3.5 w-3.5" />
           </button>
         )}
+        {onDelete && isExecutorTerminated(ex.status) && (
+          <button onClick={() => onDelete(ex.id)} disabled={isDeleting}
+            className="p-1 rounded hover:bg-[var(--color-red)]/10 text-[var(--color-text-muted)] hover:text-[var(--color-red)] disabled:opacity-50"
+            title="Delete executor history" aria-label="Delete executor history">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -256,6 +269,8 @@ export function ExecutorTable({
   selectedExecutorId,
   onStop,
   stoppingIds,
+  onDelete,
+  deletingIds,
   rateFormatPnl,
   rateFormatValue,
   rateFormatDetailed,
@@ -276,6 +291,9 @@ export function ExecutorTable({
   /** Omit for a read-only table: rows then draw no Stop control. */
   onStop?: (id: string) => void;
   stoppingIds?: Set<string>;
+  /** History deletion is only available in hosts that explicitly opt in. */
+  onDelete?: (id: string) => void;
+  deletingIds?: Set<string>;
   rateFormatPnl?: (val: number, quote: string) => string;
   rateFormatValue?: (val: number, quote: string) => string;
   rateFormatDetailed?: (val: number, quote: string) => string;
@@ -342,9 +360,11 @@ export function ExecutorTable({
                 isSelected={selectedExecutorId === ex.id}
                 isChecked={selectedIds?.has(ex.id) ?? false}
                 isStopping={stoppingIds?.has(ex.id) ?? false}
+                isDeleting={deletingIds?.has(ex.id) ?? false}
                 onRowClick={onRowClick}
                 onToggleSelect={onToggleSelect}
                 onStop={onStop}
+                onDelete={onDelete}
                 fmtPnl={fmtPnl}
                 fmtVol={fmtVol}
                 fmtDet={fmtDet}
@@ -378,6 +398,8 @@ export function DetailPanel({
   onClose,
   onStop,
   stopping,
+  onDelete,
+  deleting,
   rateFormatPnl,
   rateFormatValue,
   rateFormatDetailed,
@@ -388,6 +410,8 @@ export function DetailPanel({
   /** Omit for a read-only panel: no Stop button is drawn without it. */
   onStop?: (id: string) => void;
   stopping?: boolean;
+  onDelete?: (id: string) => void;
+  deleting?: boolean;
   rateFormatPnl?: (val: number, quote: string) => string;
   rateFormatValue?: (val: number, quote: string) => string;
   rateFormatDetailed?: (val: number, quote: string) => string;
@@ -474,6 +498,13 @@ export function DetailPanel({
               >
                 <Square className="h-3 w-3" />
                 {stopping ? "Stopping\u2026" : "Stop"}
+              </button>
+            )}
+            {onDelete && isExecutorTerminated(executor.status) && (
+              <button onClick={() => onDelete(executor.id)} disabled={deleting}
+                className="flex items-center gap-1.5 rounded-md bg-[var(--color-red)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                <Trash2 className="h-3 w-3" />
+                {deleting ? "Deleting…" : "Delete history"}
               </button>
             )}
             <button

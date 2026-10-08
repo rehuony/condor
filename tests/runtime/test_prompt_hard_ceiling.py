@@ -113,3 +113,46 @@ def test_ceiling_stops_a_stream_that_never_goes_idle(monkeypatch):
     assert done.stop_reason == "timeout"
     # Cancelled at the agent, not merely abandoned (CORR-140's reasoning).
     assert "session/cancel" in client._process.stdin.methods()
+
+
+def test_background_stream_can_outlive_the_chat_ceiling(monkeypatch):
+    monkeypatch.setattr(timeouts, "TIMEOUTS", _FastCeiling(prompt_cancel=0.2))
+    client = _client()
+
+    async def scenario():
+        async def finish():
+            for _ in range(20):
+                client._event_queue.put_nowait(TextChunk(text="."))
+                await asyncio.sleep(0.02)
+            stdin = client._process.stdin
+            await client._peer.handle_line(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": stdin.prompt_id,
+                        "result": {"stopReason": "end_turn"},
+                    }
+                ),
+                stdin,
+            )
+
+        producer = asyncio.create_task(finish())
+        try:
+            return [event async for event in client.prompt_stream("build", timeout_s=2)]
+        finally:
+            await producer
+
+    events = asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+    assert events[-1].stop_reason == "end_turn"
+    assert "session/cancel" not in client._process.stdin.methods()
+
+
+def test_silent_stream_stops_at_deadline_without_waiting_for_heartbeat():
+    client = _client()
+
+    async def scenario():
+        return [event async for event in client.prompt_stream("silent", timeout_s=0.02)]
+
+    events = asyncio.run(asyncio.wait_for(scenario(), timeout=1))
+    assert events[-1].stop_reason == "timeout"
+    assert "session/cancel" in client._process.stdin.methods()

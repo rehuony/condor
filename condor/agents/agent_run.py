@@ -49,6 +49,7 @@ from condor.agents.run_records import KIND_CONSULT, record_run
 from condor.preferences import resolve_custom_endpoint
 from condor.runtime import context as runtime_context
 from condor.runtime import toolsets
+from condor.runtime.timeouts import TIMEOUTS
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ async def run_agent_to_completion(
     event_sink=None,
     delegate_worker: bool = False,
     ask_target: bool = False,
+    timeout_s: float | None = None,
 ) -> str:
     """Load the Agent ``slug``, run its brain to completion on ``task``, return text.
 
@@ -199,17 +201,49 @@ async def run_agent_to_completion(
 
     chunks: list[str] = []
     stop_reason = ""
-    await client.start()
+    failed = True
     try:
-        async for event in client.prompt_stream(prompt):
+        # Startup can spawn processes before failing or being cancelled too.
+        await client.start()
+        stream_kwargs = {"timeout_s": timeout_s} if timeout_s is not None else {}
+        async for event in client.prompt_stream(prompt, **stream_kwargs):
             if event_sink is not None:
                 event_sink(event)
             if isinstance(event, TextChunk):
                 chunks.append(event.text)
             elif isinstance(event, PromptDone):
                 stop_reason = event.stop_reason
+        failed = stop_reason in FAILED_STOP_REASONS
     finally:
-        await client.stop()
+
+        async def cleanup():
+            async with asyncio.timeout(TIMEOUTS.agent_cleanup):
+                await client.stop()
+
+        # An outer timeout/user stop may arrive *during* normal teardown. Keep
+        # teardown on its own bounded task so it can finish reaping the process
+        # tree; propagate cancellation only after it settles.
+        closing = asyncio.create_task(cleanup())
+        cancelled = None
+        while not closing.done():
+            try:
+                await asyncio.shield(closing)
+            except asyncio.CancelledError as exc:
+                if closing.cancelled():
+                    raise
+                cancelled = exc
+            except Exception:
+                break  # handled below without replacing the original failure
+        try:
+            closing.result()
+        except Exception:
+            # Teardown must not replace a timeout, cancellation or startup error
+            # with an unrelated cleanup exception.
+            if not failed and cancelled is None:
+                raise
+            log.exception("Failed to clean up agent %s", slug)
+        if cancelled is not None:
+            raise cancelled
 
     answer = "".join(chunks)
     # Neither client raises when the session dies: the turn just ends on a

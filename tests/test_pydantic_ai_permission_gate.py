@@ -13,6 +13,7 @@ that the tool function was NOT called — not merely that a denial was logged.
 
 import asyncio
 
+import pytest
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -212,6 +213,105 @@ def test_reset_clears_decisions_between_turns():
     gate.reset()
 
     assert gate.consume("call-1", "manage_bots")[0] is False
+
+
+def test_identity_binds_the_tool_name_and_never_falls_back_from_an_unknown_id():
+    gate = PermissionGate()
+    gate.record("read-1", "get_market_data", True)
+    assert gate.consume("read-1", "create_grid_executor")[0] is False
+    assert gate.consume("unseen-id", "get_market_data")[0] is False
+    assert gate.consume(None, "get_market_data")[0] is False
+    assert gate.consume("read-1", "get_market_data")[0] is True
+
+
+@pytest.mark.parametrize("call_id", ["reused", None])
+def test_an_unconsumed_allow_cannot_be_reassigned_to_an_ambiguous_call(call_id):
+    gate = PermissionGate()
+    gate.record(call_id, "create_grid_executor", True)
+    approved, reason = gate.record(call_id, "create_grid_executor", False, "risk limit")
+    assert not approved and "identity" in reason
+    assert gate.consume(call_id, "create_grid_executor")[0] is False
+    assert gate.consume(call_id, "create_grid_executor")[0] is False
+
+
+def test_a_provider_without_ids_can_make_one_unambiguous_call():
+    gate = PermissionGate()
+    gate.record(None, "get_market_data", True)
+    assert gate.consume("unseen-id", "get_market_data")[0] is False
+    assert gate.consume(None, "get_market_data")[0] is True
+    assert gate.consume(None, "get_market_data")[0] is False
+
+
+def test_a_used_id_cannot_be_reauthorized_in_a_later_response_of_the_turn():
+    gate = PermissionGate()
+    gate.record("one", "get_market_data", True)
+    assert gate.consume("one", "get_market_data")[0] is True
+    assert gate.record("one", "get_market_data", True)[0] is False
+    assert gate.consume("one", "get_market_data")[0] is False
+    gate.reset()
+    assert gate.record("one", "get_market_data", True)[0] is True
+    assert gate.consume("one", "get_market_data")[0] is True
+
+
+@pytest.mark.parametrize("same_name", [False, True])
+@pytest.mark.parametrize("duplicate_id", [False, True])
+def test_real_dispatch_cannot_borrow_another_calls_approval(same_name, duplicate_id):
+    """Exercise pydantic-ai's ID-indexed dispatch, not just the gate helper.
+
+    Duplicate IDs can cause the last tool to be dispatched twice. A read's
+    approval, or a smaller create's approval, must never license the rejected
+    create. Distinct IDs preserve the ordinary approved call.
+    """
+    calls = []
+    toolset = FunctionToolset()
+
+    async def get_market_data(required: int):
+        calls.append(("read", required))
+        return "read"
+
+    async def create_grid_executor(controller_id: str, total_amount_quote: float):
+        calls.append(("create", total_amount_quote))
+        return "created"
+
+    toolset.add_function(get_market_data)
+    toolset.add_function(create_grid_executor)
+    first_name = "create_grid_executor" if same_name else "get_market_data"
+    first_args = (
+        {"controller_id": "owned", "total_amount_quote": 1}
+        if same_name
+        else {"required": 1}
+    )
+
+    def respond(messages, info):
+        if any(
+            isinstance(p, ToolCallPart)
+            for m in messages
+            for p in getattr(m, "parts", [])
+        ):
+            return ModelResponse(parts=[TextPart("done")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(first_name, first_args, tool_call_id="first"),
+                ToolCallPart(
+                    "create_grid_executor",
+                    {"controller_id": "owned", "total_amount_quote": 100},
+                    tool_call_id="first" if duplicate_id else "second",
+                ),
+            ]
+        )
+
+    callback = auto_approve_with_risk_check(
+        RiskEngine(RiskLimits(max_position_size_quote=10)),
+        RiskState(is_blocked=not same_name),
+        agent_id="owned",
+    )
+    client = PydanticAIClient("openai:gpt-4o", permission_callback=callback)
+    client._agent = Agent(
+        FunctionModel(respond), toolsets=client._gate_toolsets([toolset])
+    )
+    events = _drive(client)
+    assert calls == ([] if duplicate_id else [("create" if same_name else "read", 1)])
+    assert any(isinstance(event, PromptDone) for event in events)
 
 
 # ---------------------------------------------------------------------------

@@ -194,6 +194,10 @@ class TickEngine:
     _finished: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self):
+        from .config import AgentConfig
+
+        # Check overrides before allocating a session or persisting any config.
+        AgentConfig.from_dict(self.config)
         # The journal/sessions/learnings hang off the *strategy* dir (one level
         # below the Agent), so each playbook keeps its own operational history
         # while the Agent's brain (memory/skills) stays shared at the parent.
@@ -1549,6 +1553,7 @@ def build_gated_client(
         server_name=engine.config.get("server_name"),
         agent_slug=engine.agent.slug,
         tick=True,
+        execution_mode=execution_mode,
     )
     permission_cb = auto_approve_with_risk_check(
         engine.risk,
@@ -1564,9 +1569,9 @@ def build_gated_client(
     # Shared factory (ARCH-192). Engine specifics: an explicit model_base_url
     # in the run config still wins over the owner's saved custom endpoint.
     # Same allowlist the agent gets when delegated to; empty => unrestricted.
-    from condor.runtime.llm_client import build_llm_client
+    from condor.runtime.llm_client import build_llm_client, guarded_tool_error
 
-    return build_llm_client(
+    client = build_llm_client(
         engine._agent_key(),
         mcp_servers=mcp_servers,
         permission_callback=permission_cb,
@@ -1574,3 +1579,6 @@ def build_gated_client(
         user_id=engine.user_id,
         base_url_override=engine.config.get("model_base_url") or None,
     )
+    if problem := guarded_tool_error(client, execution_mode):
+        raise RuntimeError(problem)
+    return client

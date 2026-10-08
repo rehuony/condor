@@ -1,6 +1,6 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Element, ElementContent } from "hast";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   Copy,
   CornerDownLeft,
   CornerDownRight,
+  FileText,
   Loader2,
   RotateCw,
   ShieldAlert,
@@ -23,11 +24,16 @@ import { useAuthedImage } from "@/hooks/useAuthedImage";
 import { agentColor } from "@/lib/agentColor";
 import { copyText } from "@/lib/clipboard";
 import { splitStreamedMarkdown } from "@/lib/markdownStream";
+import { researchLink } from "@/lib/research-links";
 import { ChartSlot, ChartSlotHost } from "./ChartSlots";
 import { RunStrip } from "./ToolCallStatus";
 
 /** One array, so the plugin list is never a fresh prop on a streamed frame. */
 const GFM = [remarkGfm];
+
+function markdownUrl(url: string) {
+  return researchLink(url)?.href ?? defaultUrlTransform(url);
+}
 
 /** Flatten a rendered subtree back into the source text it was parsed from. */
 function nodeText(children: ReactNode): string {
@@ -119,6 +125,18 @@ function numericColumns(node?: Element): string | undefined {
  */
 function markdownComponents(live: boolean): Components {
   return {
+    a({ href = "", children, title }) {
+      const file = researchLink(href);
+      if (!file) return <a href={href} title={title}>{children}</a>;
+      // Old transcripts sometimes use the entire local path as the label too.
+      const label = researchLink(nodeText(children)) ? file.path.split("/").pop() : children;
+      return (
+        <a href={file.href} target="_blank" rel="noopener noreferrer" title={`Preview ${file.path}`}>
+          <FileText aria-hidden="true" className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" />
+          {label}
+        </a>
+      );
+    },
     pre({ children, ...props }) {
       const child = Array.isArray(children) ? children[0] : children;
       if (isValidElement<{ className?: string; children?: ReactNode }>(child)) {
@@ -153,7 +171,7 @@ const STATIC_COMPONENTS = markdownComponents(false);
  */
 const FrozenMarkdown = memo(function FrozenMarkdown({ text }: { text: string }) {
   return (
-    <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS}>
+    <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS} urlTransform={markdownUrl}>
       {text}
     </ReactMarkdown>
   );
@@ -188,7 +206,7 @@ function StreamedMarkdown({ text }: { text: string }) {
         <FrozenMarkdown key={i} text={chunk} />
       ))}
       {tail && (
-        <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS}>
+        <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS} urlTransform={markdownUrl}>
           {tail}
         </ReactMarkdown>
       )}
@@ -350,7 +368,7 @@ export const ChatMessageView = memo(function ChatMessageView({
           </div>
         </div>
         <div className="chat-markdown text-sm text-[var(--color-text-muted)]">
-          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS}>
+          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS} urlTransform={markdownUrl}>
             {message.text}
           </ReactMarkdown>
         </div>
@@ -389,7 +407,7 @@ export const ChatMessageView = memo(function ChatMessageView({
           </div>
         </div>
         <div className="chat-markdown text-sm text-[var(--color-text-muted)]">
-          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS}>
+          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS} urlTransform={markdownUrl}>
             {message.text}
           </ReactMarkdown>
         </div>
@@ -485,7 +503,7 @@ export const ChatMessageView = memo(function ChatMessageView({
             {live ? (
               <StreamedMarkdown text={message.text} />
             ) : (
-              <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS}>
+              <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS} urlTransform={markdownUrl}>
                 {message.text}
               </ReactMarkdown>
             )}

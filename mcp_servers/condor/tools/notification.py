@@ -7,8 +7,10 @@ fallback for when the main process is unreachable: a notification must never be
 lost because the web app is down.
 """
 
-import httpx
+from aiohttp import ClientConnectorError
+from telegram import Bot
 
+from condor.telegram_text import send_text
 from mcp_servers.condor.condor_client import call_main_api
 from mcp_servers.condor.settings import settings
 
@@ -17,7 +19,8 @@ async def send_notification(text: str, parse_mode: str = "Markdown") -> dict:
     """Send a message to the user.
 
     Returns:
-        {"sent": true} on success, {"error": "..."} on failure.
+        ``sent`` means every Telegram page was accepted. ``recorded`` means the
+        dashboard saved the notice, independently. Failures include ``error``.
     """
     try:
         result = await call_main_api(
@@ -31,46 +34,49 @@ async def send_notification(text: str, parse_mode: str = "Markdown") -> dict:
                 # announcement came from, so the chat keeps a trace of it.
                 "session_key": settings.session_key,
             },
+            timeout=60,
         )
-    except Exception:
-        result = None
+    except Exception as exc:
+        # Only a failed connection proves the main process never received the
+        # request. A timeout, rejection or lost response must not replay pages
+        # that may already be on Telegram, or bypass a rejected request.
+        if isinstance(exc.__cause__, ClientConnectorError):
+            return await _send_direct(text, parse_mode)
+        return {
+            "sent": False,
+            "error": f"Main process did not confirm delivery; notification was not replayed: {exc}",
+        }
 
-    # "recorded" counts as delivered: a web session's user reads the note in the
-    # conversation they are looking at, and pushing it to Telegram too is not
-    # what makes it arrive. Anything else falls through to the direct path --
-    # the main process may be down, or have no way to reach the chat.
-    if isinstance(result, dict) and (result.get("sent") or result.get("recorded")):
-        return {"sent": True}
+    # A dashboard record is not a Telegram receipt. Preserve both outcomes,
+    # including a failed or partial Telegram delivery. Replaying the whole
+    # notification here would duplicate pages the main process already sent.
+    if isinstance(result, dict) and ("sent" in result or "recorded" in result):
+        return result
 
-    return await _send_direct(text, parse_mode)
+    return {
+        "sent": False,
+        "error": "Main process returned no delivery result; notification was not replayed",
+    }
 
 
 async def _send_direct(text: str, parse_mode: str) -> dict:
     """Last-resort Telegram push, straight from this subprocess."""
     if not settings.bot_token:
-        return {"error": "TELEGRAM_BOT_TOKEN not configured"}
+        return {
+            "sent": False,
+            "recorded": False,
+            "error": "TELEGRAM_BOT_TOKEN not configured",
+        }
     if not settings.chat_id:
-        return {"error": "CONDOR_CHAT_ID not configured"}
+        return {
+            "sent": False,
+            "recorded": False,
+            "error": "CONDOR_CHAT_ID not configured",
+        }
 
-    url = f"https://api.telegram.org/bot{settings.bot_token}/sendMessage"
-    payload = {
-        "chat_id": settings.chat_id,
-        "text": text,
-        "parse_mode": parse_mode,
-    }
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload)
-            data = resp.json()
-            if data.get("ok"):
-                return {"sent": True}
-            # Retry without parse_mode if formatting fails
-            if "can't parse" in data.get("description", "").lower():
-                payload.pop("parse_mode")
-                resp = await client.post(url, json=payload)
-                data = resp.json()
-                if data.get("ok"):
-                    return {"sent": True}
-            return {"error": data.get("description", "Unknown Telegram API error")}
-    except Exception as e:
-        return {"error": f"Failed to send: {e}"}
+        async with Bot(token=settings.bot_token) as bot:
+            await send_text(bot, settings.chat_id, text, parse_mode=parse_mode)
+        return {"sent": True, "recorded": False}
+    except Exception as exc:
+        return {"sent": False, "recorded": False, "error": str(exc)}

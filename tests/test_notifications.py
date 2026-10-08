@@ -350,6 +350,44 @@ def test_delegation_completion_lights_the_bell_once(store, known_users):
     assert items[0].kind == "delegation"
 
 
+def test_long_delegation_delivers_its_tail_and_records_only_one_notification(
+    store, known_users
+):
+    from condor.agents.delegate import DelegateTask, _completion_text, _notify_done
+    from condor.telegram_text import plain_text
+
+    result = (
+        "结论：等待。\n\n"
+        + "依据🪙 " * 1900
+        + "\n\n最终风险：[原始公告](https://example.com/source)"
+    )
+    dt = DelegateTask(
+        task_id="t-long",
+        agent_slug="scout",
+        user_id=USER_A,
+        chat_id=USER_A,
+        server_name=None,
+        task="scan",
+        status="done",
+        result=result,
+    )
+    messages = []
+
+    class Bot:
+        async def send_message(self, **kw):
+            messages.append(kw)
+            return {"ok": True}
+
+    asyncio.run(_notify_done(dt, Bot()))
+    assert len(messages) > 2
+    text = "".join(plain_text(m["text"]) for m in messages)
+    assert text.count("依据🪙") == 1900
+    assert text.endswith("最终风险：原始公告 (https://example.com/source)")
+    assert len(list_for(USER_A)) == 1
+    assert list_for(USER_A)[0].text == _completion_text(dt)
+    assert list_for(USER_A)[0].text.endswith(result)
+
+
 def test_delegation_over_the_bell_ladder_is_not_recorded_twice(
     store, known_users, monkeypatch
 ):

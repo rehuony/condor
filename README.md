@@ -285,6 +285,21 @@ WEB_HOST=0.0.0.0                         # Optional. Overrides the dashboard bin
                                          # read the Local mode warning first.
 ```
 
+For Nginx on the same host, set these values in `.env` and restart Condor:
+
+```bash
+WEB_HOST=127.0.0.1
+WEB_PORT=8080
+WEB_URL=https://dashboard.example.com
+```
+
+Replace the example domain with your public domain. `WEB_HOST` and `WEB_PORT`
+control the listener; `WEB_URL` controls Telegram `/web` login links. An explicit
+`WEB_PORT` takes precedence over the port in `WEB_URL`. Without `WEB_PORT`, the
+URL's port is used (443 for HTTPS, 80 for HTTP), or 8088 when neither is set.
+Configure Nginx to proxy to `http://127.0.0.1:8080`, including WebSocket upgrades.
+Keep `CONDOR_MODE=telegram` for Telegram authentication.
+
 > **OpenRouter:** Add `OPENROUTER_API_KEY` to `.env`, then in `/agent → Change LLM`
 > select **OpenRouter — Pick Model**. The picker fetches the live catalog and shows
 > only models that support tool-calling. Get a key at

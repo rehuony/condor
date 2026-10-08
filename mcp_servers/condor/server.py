@@ -430,15 +430,17 @@ async def delegate(
             then draft the summary"). With "resume" you must end your turn after
             starting the task: you will be woken with the answer.
         timeout_sec: Wall-clock budget for the whole background task, in seconds
-            (for start). Omit it (0) for the default of 900s. This knob only
-            goes UP: 900s is also the floor, and a smaller number is raised back
-            to it, so do not try to give a task less. Raise it when you KNOW the
+            (for start). Omit it (0) for the default of 3600s (60 minutes).
+            This knob only goes UP: the default is also the floor, and a smaller
+            number is raised back to it. Raise it when you KNOW the
             job is long — several routines to build, a research sweep, a
             multi-step backtest — because a task that outlives its budget is
-            cut off mid-run and loses whatever it had not finished. The ceiling
-            is 1800s: an agent session has its own ~31-minute hard stop, so
-            asking for more only delays the same cut-off. For work bigger than
-            that, split it across delegations.
+            stopped with partial progress preserved, not reported as completed.
+            The default ceiling is 7200s (120 minutes); deployments may override
+            both limits. The background model stream follows this budget.
+            Save progress during long work and reserve the final two minutes
+            for a checkpoint and handoff. For work bigger than that, split it
+            across delegations.
         context: Extra context for the agent — relevant numbers, the user's
             intent (for ask).
 
@@ -459,11 +461,15 @@ async def send_notification(
     """Send a Telegram message to the user.
 
     Args:
-        text: Message text to send.
-        parse_mode: Telegram parse mode. Default: "Markdown".
+        text: Full message text; long messages are split automatically.
+        parse_mode: Standard Markdown or Telegram HTML. Default: "Markdown".
 
     Returns:
-        {"sent": true} on success, {"error": "..."} on failure.
+        ``sent`` is true only when every Telegram page was accepted.
+        ``recorded`` separately reports delivery to the dashboard. A recorded
+        notice with sent=false did NOT reach Telegram in full. Delivery
+        failures also include ``error``; do not resend the whole notice after
+        a partial failure, as earlier pages may already have arrived.
     """
     return await notification.send_notification(text, parse_mode)
 
@@ -1352,6 +1358,7 @@ def register_tools(
     server: FastMCP,
     profile: str = DEFAULT_TOOL_PROFILE,
     muted: Iterable[str] = (),
+    execution_mode: str = "",
 ) -> None:
     """Register this profile's tools on ``server``, minus the muted ones.
 
@@ -1359,13 +1366,15 @@ def register_tools(
     rather than widening to ``full``, ``muted`` only ever subtracts — live once,
     in ``mcp_servers/_profiles.py``.
     """
-    _register_tools(server, TOOL_PROFILES, profile, muted)
+    _register_tools(server, TOOL_PROFILES, profile, muted, execution_mode)
 
 
 # Registration happens at import: ``mcp`` is a module-level singleton and the
 # profile and the mute list are resolved from argv at import (settings), so the
 # server object is complete for anything that inspects it before startup.
-register_tools(mcp, settings.tool_profile, settings.muted_tools)
+register_tools(
+    mcp, settings.tool_profile, settings.muted_tools, settings.execution_mode
+)
 
 
 if __name__ == "__main__":

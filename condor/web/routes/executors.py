@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 from condor.asyncutil import SingleFlight
+from condor.fetchers import raw_api
 from condor.fetchers.executors import EXECUTORS_POLL_MAX, MAX_EXECUTORS_FETCH
 from condor.fetchers.executors import extract_executors_list as _extract_executors_list
 from condor.fetchers.executors import fetch_all_executors, summarize_executors_by_quote
@@ -44,6 +46,8 @@ _PERIOD_TTLS: dict[str, int] = {"1D": 60, "1W": 300, "1M": 900}
 
 # (server, period) -> (computed_at, summary). Bounded by servers x periods.
 _summary_cache: dict[tuple[str, str], tuple[float, ExecutorPeriodSummary]] = {}
+# A deletion must also retire any history walk already in flight for that server.
+_summary_generation: dict[str, int] = {}
 
 # One executor walk per server at a time, shared by every concurrent caller
 # (PERF-580). The TTL cache above only helps a request that arrives *after* an
@@ -281,6 +285,7 @@ async def _walk_and_summarize(server: str, client) -> dict[str, ExecutorPeriodSu
     also refreshed is still served from cache for its own 300s.
     """
     now = time.time()
+    generation = _summary_generation.get(server, 0)
     executors = await fetch_all_executors(client)
 
     summaries: dict[str, ExecutorPeriodSummary] = {}
@@ -291,7 +296,8 @@ async def _walk_and_summarize(server: str, client) -> dict[str, ExecutorPeriodSu
             summarize_executors_by_quote(executors, now - window),
         )
         summaries[window_period] = summary
-        _summary_cache[(server, window_period)] = (now, summary)
+        if generation == _summary_generation.get(server, 0):
+            _summary_cache[(server, window_period)] = (now, summary)
     return summaries
 
 
@@ -337,7 +343,8 @@ async def executors_summary(
     client = await cm.get_client(name)
     try:
         summaries = await _summary_walks.run(
-            name, lambda: _walk_and_summarize(name, client)
+            (name, _summary_generation.get(name, 0)),
+            lambda: _walk_and_summarize(name, client),
         )
     except Exception as e:
         logger.exception("Failed to summarize executors for server %s", name)
@@ -443,6 +450,39 @@ async def stop_executor_endpoint(
         summary=f"Stop executor {executor_id[:12]}...{suffix}",
     )
     return {"status": "ok", "result": result}
+
+
+@router.delete("/servers/{name}/executors/{executor_id}")
+async def delete_executor_endpoint(
+    name: str,
+    executor_id: str,
+    user: WebUser = Depends(require_server_access),
+):
+    """Delete finished history; upstream validates status and unresolved LP exposure."""
+    client = await get_config_manager().get_client(name)
+    try:
+        result = await raw_api.request(
+            client,
+            "delete",
+            f"/executors/{quote(executor_id, safe='')}",
+            unsupported=None,
+        )
+    except Exception as e:
+        error = upstream_error("Failed to delete executor history", e)
+        if getattr(e, "status", None) in (404, 409):
+            error.status_code = e.status
+        raise error
+
+    get_server_data_service().invalidate(name, ServerDataType.EXECUTORS)
+    _summary_generation[name] = _summary_generation.get(name, 0) + 1
+    for period in _PERIOD_SECONDS:
+        _summary_cache.pop((name, period), None)
+    record_ui_deed(
+        user,
+        verb="delete_executor",
+        summary=f"Delete executor history {executor_id[:12]}...",
+    )
+    return result
 
 
 @router.get("/servers/{name}/executors/positions")

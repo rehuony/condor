@@ -17,6 +17,18 @@
   instead of reimplementing what it already does by hand.
 - **Short tool chains.** 1–5 calls per response or tick. One skill-driven flow
   beats a long chain of raw calls that reconstructs what the playbook says.
+- **Research has one readable entry point.** New research belongs under
+  `.condor/research/<topic>/<YYYY-MM-DD>/<HHmmss>-<short-id>/report.md`
+  (UTC date/time, lowercase kebab-case topic, unique short id). Keep datasets
+  in `data/`, figures in `assets/`, and scripts/logs/checkpoints in `work/`;
+  create only what is needed. The report has YAML `title`, `summary`, and
+  timezone-aware `created_at`, then a matching H1 and concise findings,
+  evidence/method, risks, next steps, and linked sources/attachments.
+  Follow `agents/_defaults/research-artifacts.md` and its report template;
+  the `research_artifacts` skill carries the same procedure when available.
+  Pass the destination and this standard to delegated researchers. Return
+  descriptive `/research/<relative-path>/report.md` links, never local absolute
+  paths. Preserve existing artifacts and references when updating an old study.
 - **Never end a turn with a background task outstanding.** If you launch a Bash
   command with `run_in_background`, collect its output before you answer. Prefer
   a foreground command with a generous `timeout` — a task that finishes after

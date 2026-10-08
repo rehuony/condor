@@ -5,7 +5,7 @@
 // every scope that has them (FEAT-086), so both moved out here rather than
 // being reimplemented beside the new table.
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
 import { api, type ExecutorInfo } from "@/lib/api";
@@ -125,5 +125,70 @@ export function useExecutorStop(server: string): ExecutorStop {
     request,
     confirm,
     cancel,
+  };
+}
+
+export interface ExecutorDelete {
+  deletingIds: Set<string>;
+  pendingIds: string[] | null;
+  error: string | null;
+  pending: boolean;
+  request: (ids: string[]) => void;
+  confirm: (ids: string[]) => void;
+  cancel: () => void;
+}
+
+/** Deletion is confirmed, and partial failures keep their rows and report the reason. */
+export function useExecutorDelete(
+  server: string,
+  onDeleted?: (ids: string[]) => void,
+): ExecutorDelete {
+  const queryClient = useQueryClient();
+  const [pendingIds, setPendingIds] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: (ids: string[]) => Promise.allSettled(ids.map((id) => api.deleteExecutor(server, id))),
+    onSuccess: async (results, ids) => {
+      const deleted = ids.filter((_, i) => results[i].status === "fulfilled");
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+      if (failed.length) {
+        const reason = failed[0].reason;
+        setError(`Failed to delete ${failed.length} of ${ids.length} records: ${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+      if (!deleted.length) return;
+
+      await queryClient.cancelQueries({ queryKey: ["executors-infinite", server] });
+      queryClient.setQueriesData<InfiniteData<{ executors: ExecutorInfo[]; next_cursor: string | null }>>(
+        { queryKey: ["executors-infinite", server] },
+        (data) => data && ({
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page, executors: page.executors.filter((ex) => !deleted.includes(ex.id)),
+          })),
+        }),
+      );
+      onDeleted?.(deleted);
+      await Promise.all([
+        "executors-infinite", "executors", "dex-lp-executors", "executors-summary", "perf-history",
+      ].map((root) => queryClient.invalidateQueries({ queryKey: [root, server] })));
+    },
+  });
+
+  return {
+    deletingIds: new Set(mutation.isPending ? mutation.variables : []),
+    pendingIds,
+    error,
+    pending: mutation.isPending,
+    request: (ids) => {
+      if (!ids.length || mutation.isPending) return;
+      setError(null);
+      setPendingIds([...new Set(ids)]);
+    },
+    confirm: (ids) => {
+      if (mutation.isPending) return;
+      setPendingIds(null);
+      mutation.mutate(ids);
+    },
+    cancel: () => setPendingIds(null),
   };
 }

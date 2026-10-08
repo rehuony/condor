@@ -62,6 +62,19 @@ def test_deep_link_falls_back_to_index(client):
     assert resp.content == INDEX_HTML.read_bytes()
 
 
+def test_old_research_bookmark_redirects_without_exposing_a_local_directory(client):
+    resp = client.get(
+        "/Users/alice/project/.condor/research/topic/REVIEW.zh-CN.md",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/research/topic/REVIEW.zh-CN.md"
+    assert not resp.content
+    # The target serves only the app shell. Research bytes still require auth.
+    resp = client.get(resp.headers["location"])
+    assert resp.content == INDEX_HTML.read_bytes()
+
+
 def test_shell_is_never_served_from_cache_without_asking(client):
     """The SPA shell revalidates on every load.
 

@@ -1,24 +1,4 @@
-"""A delegated task can be given a longer budget than the default (ARCH-310).
-
-``delegate(action="start")` used to run at whatever the route defaulted to --
-900s -- because the MCP tool never sent a budget at all. The knob existed on the
-wire (``timeout_s`` on the request body, threaded to ``start_delegation``'s
-``asyncio.wait_for``) but nothing could reach it, so a background job bigger
-than fifteen minutes was cut off mid-run with no recourse.
-
-Pinned here: the tool declares the parameter and forwards it, omitting the key
-entirely when the caller asked for nothing so the default lives in exactly one
-place; the route honours a caller's budget, keeps 900s otherwise, and refuses a
-budget that would kill the worker instantly or outlive the agent session's own
-hard ceiling.
-
-The knob only goes UP. A model handed itself 300s for a real background run and
-had the answer cut off, so 900s is a floor as well as the default: a smaller ask
-is raised to it rather than refused.
-
-Sync tests driving coroutines with ``asyncio.run`` (pytest-asyncio is not
-installed in this venv), fakes in the style of test_agents_chat_id_ownership.py.
-"""
+"""Delegation budgets: one-hour default, two-hour ceiling, end-to-end wiring."""
 
 import asyncio
 from types import SimpleNamespace
@@ -75,25 +55,25 @@ def _delegate(monkeypatch, req: DelegateRequest):
 # -- The route: whose budget is it --
 
 
-def test_a_caller_can_buy_more_than_the_default_fifteen_minutes(monkeypatch):
+def test_a_caller_can_request_two_hours(monkeypatch):
     started, result = _delegate(
-        monkeypatch, DelegateRequest(task="build three routines", timeout_s=1800)
+        monkeypatch, DelegateRequest(task="build three routines", timeout_s=7200)
     )
 
     assert result["task_id"] == "t-1"
-    assert started[0]["timeout_s"] == 1800
+    assert started[0]["timeout_s"] == 7200
 
 
 def test_asking_for_nothing_still_gets_todays_default(monkeypatch):
-    """Backwards compatibility: an unchanged caller runs exactly as before."""
+    """An unchanged caller receives the longer default."""
     started, _ = _delegate(monkeypatch, DelegateRequest(task="scan pools"))
 
-    assert started[0]["timeout_s"] == 900
-    assert DEFAULT_DELEGATE_TIMEOUT_S == 900
+    assert started[0]["timeout_s"] == 3600
+    assert DEFAULT_DELEGATE_TIMEOUT_S == 3600
 
 
 def test_the_routes_default_is_the_runners_default(monkeypatch):
-    """Two copies of 900 exist (route body, runner signature) -- pin the drift."""
+    """The route and runner read the same policy."""
     assert DEFAULT_DELEGATE_TIMEOUT_S == delegate_module.DEFAULT_TIMEOUT_S
 
 
@@ -122,14 +102,14 @@ def test_a_budget_under_the_floor_is_raised_to_it(monkeypatch, budget):
 
 def test_the_floor_is_the_default(monkeypatch):
     """Asking for nothing and asking for less must land on the same budget."""
-    assert MIN_DELEGATE_TIMEOUT_S == DEFAULT_DELEGATE_TIMEOUT_S == 900
+    assert MIN_DELEGATE_TIMEOUT_S == DEFAULT_DELEGATE_TIMEOUT_S == 3600
 
 
 def test_a_budget_over_the_floor_is_still_the_callers(monkeypatch):
     """The floor must not flatten the one thing the knob was added for."""
-    started, _ = _delegate(monkeypatch, DelegateRequest(task="t", timeout_s=1200))
+    started, _ = _delegate(monkeypatch, DelegateRequest(task="t", timeout_s=5400))
 
-    assert started[0]["timeout_s"] == 1200
+    assert started[0]["timeout_s"] == 5400
 
 
 def test_a_budget_past_the_session_ceiling_is_refused_with_the_limit(monkeypatch):
@@ -144,16 +124,12 @@ def test_a_budget_past_the_session_ceiling_is_refused_with_the_limit(monkeypatch
     assert str(MAX_DELEGATE_TIMEOUT_S) in exc.value.detail
 
 
-def test_the_ceiling_stays_under_the_acp_prompt_hard_stop():
-    """A budget the agent session cannot honour would be a promise, not a knob.
-
-    ``ACPClient.prompt_stream`` stops a prompt at ``TIMEOUTS.prompt_hard_stop``,
-    so an outer budget past that only delays the same cut-off. Read from the
-    policy the stream itself reads, so raising one and not the other fails here.
-    """
+def test_background_budgets_are_independent_of_chat():
     from condor.runtime.timeouts import TIMEOUTS
 
-    assert MAX_DELEGATE_TIMEOUT_S <= TIMEOUTS.prompt_hard_stop
+    assert DEFAULT_DELEGATE_TIMEOUT_S == TIMEOUTS.delegate_default == 3600
+    assert MAX_DELEGATE_TIMEOUT_S == TIMEOUTS.delegate_max == 7200
+    assert TIMEOUTS.prompt_overall == 1800
 
 
 # -- The MCP tool: can a caller reach it at all --
@@ -183,9 +159,9 @@ def _start_body(monkeypatch, **kwargs) -> dict:
 
 
 def test_the_tool_forwards_the_budget_the_caller_asked_for(monkeypatch):
-    body = _start_body(monkeypatch, timeout_sec=1800)
+    body = _start_body(monkeypatch, timeout_sec=7200)
 
-    assert body["timeout_s"] == 1800
+    assert body["timeout_s"] == 7200
 
 
 def test_the_tool_sends_no_budget_when_none_was_asked_for(monkeypatch):
@@ -209,6 +185,7 @@ def test_the_declared_tool_lets_a_model_pass_a_budget():
     doc = server.delegate.__doc__ or ""
     # Acceptance criterion: the docstring states the default and the override.
     assert "timeout_sec" in doc
-    assert "900" in doc
+    assert "3600" in doc
+    assert "7200" in doc
     # The floor is only useful to a model that is told it exists.
     assert "floor" in doc

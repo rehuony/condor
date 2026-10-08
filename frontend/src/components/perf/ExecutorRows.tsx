@@ -1,4 +1,4 @@
-import { Download, Square, X } from "lucide-react";
+import { Download, Square, Trash2, X } from "lucide-react";
 import { useCallback, useMemo, useState, type FormEvent } from "react";
 
 import {
@@ -6,11 +6,11 @@ import {
   type SortDir,
   type SortKey,
 } from "@/components/perf/ExecutorTable";
-import { exportExecutorsCsv, type ExecutorStop } from "@/components/perf/executorActions";
+import { exportExecutorsCsv, type ExecutorDelete, type ExecutorStop } from "@/components/perf/executorActions";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { type ExecutorInfo } from "@/lib/api";
 import { stopKeepCopy } from "@/lib/executorStopCopy";
-import { isExecutorActive } from "@/lib/formatters";
+import { isExecutorActive, isExecutorTerminated } from "@/lib/formatters";
 
 /**
  * The choice that makes stopping an executor two different actions.
@@ -99,6 +99,36 @@ export function StopConfirmDialog({
   );
 }
 
+export function DeleteConfirmDialog({ ids, onConfirm, onCancel }: {
+  ids: string[];
+  onConfirm: (ids: string[]) => void;
+  onCancel: () => void;
+}) {
+  useEscapeKey(true, onCancel);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
+      <div role="dialog" aria-modal="true" aria-labelledby="delete-executor-title"
+        className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4"
+        onClick={(e) => e.stopPropagation()}>
+        <h3 id="delete-executor-title" className="text-sm font-semibold">
+          Delete {ids.length} terminated {ids.length === 1 ? "record" : "records"}?
+        </h3>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          This permanently removes the selected executor history and performance snapshots,
+          and changes historical statistics. It does not cancel orders or close positions.
+          Export CSV first if you want to keep a copy.
+        </p>
+        <div className="flex items-center gap-2 justify-end">
+          <button type="button" onClick={onCancel} autoFocus
+            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-surface-hover)]">Cancel</button>
+          <button type="button" onClick={() => onConfirm(ids)}
+            className="rounded-md bg-[var(--color-red)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90">Confirm Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** What a selection lets you do to it, drawn only while there is one. */
 function BulkActionBar({
   count,
@@ -106,12 +136,20 @@ function BulkActionBar({
   onExport,
   onClear,
   stopping,
+  activeCount,
+  deleteCount,
+  onDelete,
+  deleting,
 }: {
   count: number;
   onStop: () => void;
   onExport: () => void;
   onClear: () => void;
   stopping: boolean;
+  activeCount: number;
+  deleteCount: number;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   if (count === 0) return null;
   return (
@@ -125,14 +163,22 @@ function BulkActionBar({
         <Download className="h-3 w-3" />
         Export CSV
       </button>
-      <button
+      {activeCount > 0 && <button
         onClick={onStop}
         disabled={stopping}
         className="flex items-center gap-1.5 rounded-md bg-[var(--color-red)] px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90 transition-colors disabled:opacity-50"
       >
         <Square className="h-3 w-3" />
         {stopping ? "Stopping…" : "Stop Selected"}
-      </button>
+      </button>}
+      {deleteCount > 0 && <button
+        onClick={onDelete}
+        disabled={deleting}
+        className="flex items-center gap-1.5 rounded-md bg-[var(--color-red)] px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+      >
+        <Trash2 className="h-3 w-3" />
+        {deleting ? "Deleting…" : `Delete Terminated (${deleteCount})`}
+      </button>}
       <button
         onClick={onClear}
         className="rounded p-1 hover:bg-[var(--color-surface-hover)] transition-colors"
@@ -162,6 +208,7 @@ function BulkActionBar({
 export function ExecutorRows({
   executors,
   stop,
+  deletion,
   selectedId,
   onSelect,
   rateFormatPnl,
@@ -170,6 +217,7 @@ export function ExecutorRows({
 }: {
   executors: ExecutorInfo[];
   stop: ExecutorStop;
+  deletion?: ExecutorDelete;
   selectedId: string | null;
   onSelect: (ex: ExecutorInfo) => void;
   rateFormatPnl?: (val: number, quote: string) => string;
@@ -236,6 +284,10 @@ export function ExecutorRows({
         onExport={() => exportExecutorsCsv(selected.length > 0 ? selected : executors)}
         onClear={() => setSelectedIds(new Set())}
         stopping={stop.pending}
+        activeCount={selected.filter((ex) => isExecutorActive(ex.status)).length}
+        deleteCount={deletion ? selected.filter((ex) => isExecutorTerminated(ex.status)).length : 0}
+        onDelete={() => deletion?.request(selected.filter((ex) => isExecutorTerminated(ex.status)).map((ex) => ex.id))}
+        deleting={deletion?.pending ?? false}
       />
       {stop.error && (
         <p className="px-3 py-1.5 text-[11px] text-[var(--color-red)] bg-[var(--color-red)]/5">
@@ -256,6 +308,8 @@ export function ExecutorRows({
           selectedExecutorId={selectedId}
           onStop={handleStopOne}
           stoppingIds={stop.stoppingIds}
+          onDelete={deletion ? (id) => deletion.request([id]) : undefined}
+          deletingIds={deletion?.deletingIds}
           rateFormatPnl={rateFormatPnl}
           rateFormatValue={rateFormatValue}
           rateFormatDetailed={rateFormatDetailed}

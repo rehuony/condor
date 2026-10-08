@@ -169,6 +169,51 @@ def test_fallback_on_error_swallows_the_range_failure():
     assert client.market_data.candles_calls == [("binance", "BTC-USDT", "1m", 5)]
 
 
+@pytest.mark.parametrize("status", [418, 429])
+def test_rate_limit_never_starts_a_fallback_feed(status):
+    from aiohttp import ClientResponseError, RequestInfo
+    from multidict import CIMultiDict, CIMultiDictProxy
+    from yarl import URL
+
+    url = URL("http://api/market-data/historical-candles")
+    error = ClientResponseError(
+        RequestInfo(url, "POST", CIMultiDictProxy(CIMultiDict()), url),
+        (),
+        status=status,
+        headers={"Retry-After": "120"},
+    )
+    client = FakeClient(historical_exc=error, candles=DICT_ROWS)
+    with pytest.raises(ClientResponseError) as caught:
+        _fetch(client, start_time=100, limit=500, fallback_on_error=True)
+    assert caught.value is error
+    assert caught.value.headers["Retry-After"] == "120"
+    assert client.market_data.candles_calls == []
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        'HTTP status is 418. Error: {"code":-1003,"msg":"IP banned"}',
+        "HTTP status is 429. Error: Too many requests",
+        'Internal error fetching historical candles: {"code": -1003}',
+    ],
+)
+def test_legacy_wrapped_binance_rate_limits_do_not_trigger_fallback(detail):
+    error = RuntimeError(detail)
+    client = FakeClient(historical_exc=error, candles=DICT_ROWS)
+    with pytest.raises(RuntimeError) as caught:
+        _fetch(client, start_time=100, limit=500, fallback_on_error=True)
+    assert caught.value is error
+    assert client.market_data.candles_calls == []
+
+
+def test_an_unrelated_number_does_not_disable_fallback():
+    client = FakeClient(
+        historical_exc=RuntimeError("failed request for 429 candles"), candles=DICT_ROWS
+    )
+    assert _fetch(client, start_time=100, limit=500, fallback_on_error=True) == EXPECTED
+
+
 def test_a_failing_fallback_always_propagates():
     client = FakeClient(historical=[])
 

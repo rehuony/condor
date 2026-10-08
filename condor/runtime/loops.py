@@ -433,6 +433,20 @@ class LoopSupervisor:
         config = load_full_config(strategy.home, strategy.default_config)
         config["restart_on_boot"] = True
 
+        # A fresh session starts a fresh journal. Until its drawdown history can
+        # be carried across sessions, an automatic restart must not reset a
+        # configured loss barrier to zero.
+        limits = config.get("risk_limits", {})
+        if any(
+            limits.get(name, -1) >= 0
+            for name in ("max_drawdown_pct", "shutdown_drawdown_pct")
+        ):
+            raise ValueError(
+                "Cannot automatically restart a loop with drawdown limits: "
+                "the previous risk history is not restored into a new session. "
+                "Review the previous session and positions before a manual start."
+            )
+
         engine = TickEngine(
             agent=agent,
             strategy=strategy,

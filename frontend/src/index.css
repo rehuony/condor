@@ -332,3 +332,135 @@ body {
   padding-left: 0.75em;
   color: var(--color-text-muted);
 }
+
+/* Research documents keep file controls outside the reading column. */
+.research-view-toggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.research-view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.research-view-toggle button:hover { color: var(--color-text); }
+.research-view-toggle button[aria-pressed="true"] {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.research-view-toggle button:focus-visible,
+.research-table:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.research-summary {
+  color: color-mix(in srgb, var(--color-text) 75%, var(--color-text-muted));
+  font-size: 1.0625rem;
+  line-height: 1.85;
+  text-wrap: pretty;
+}
+
+.research-markdown {
+  font-size: 1rem;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+
+.research-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 2.25em 0 0.85em;
+  font-weight: 600;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.research-markdown h1 { font-size: 1.5rem; }
+.research-markdown h2 { font-size: 1.25rem; }
+.research-markdown h3 { font-size: 1.0625rem; }
+.research-markdown :is(h4, h5, h6) { font-size: 1rem; }
+.research-markdown > :first-child { margin-top: 0; }
+.research-markdown > :last-child { margin-bottom: 0; }
+.research-markdown p { margin: 1.1em 0; }
+.research-markdown strong { font-weight: 600; }
+.research-markdown :is(ul, ol) { margin: 1.1em 0; padding-left: 1.5em; }
+.research-markdown li { padding-left: 0.25em; margin: 0.4em 0; }
+.research-markdown li::marker { color: var(--color-text-muted); }
+.research-markdown li :is(ul, ol) { margin: 0.5em 0; }
+.research-markdown a { color: var(--color-primary); text-underline-offset: 4px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--color-primary) 45%, transparent); }
+.research-markdown a:hover { text-decoration-color: currentColor; }
+.research-markdown img { display: block; height: auto; margin: 1.5rem auto; border-radius: 8px; }
+
+.research-table {
+  margin: 1.5rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+.research-markdown table { width: 100%; border-collapse: collapse; font-size: 0.875rem; line-height: 1.65; font-variant-numeric: tabular-nums; }
+.research-markdown :is(th, td) { min-width: 7.5rem; padding: 0.875rem 1rem; border-bottom: 1px solid var(--color-border); text-align: left; overflow-wrap: normal; }
+.research-markdown th { background: var(--color-surface-hover); font-size: 0.8125rem; font-weight: 500; white-space: nowrap; }
+.research-markdown tr:last-child td { border-bottom: 0; }
+.research-markdown tbody tr:hover { background: color-mix(in srgb, var(--color-surface-hover) 50%, transparent); }
+.research-markdown blockquote {
+  margin: 1.5rem 0;
+  padding: 0.75rem 1.25rem;
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 60%, transparent);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+  color: color-mix(in srgb, var(--color-text) 75%, var(--color-text-muted));
+}
+.research-markdown blockquote > :first-child { margin-top: 0; }
+.research-markdown blockquote > :last-child { margin-bottom: 0; }
+.research-markdown pre,
+.research-source {
+  padding: 1.25rem;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--chat-inset);
+  font-size: 0.8125rem;
+  line-height: 1.8;
+  tab-size: 2;
+}
+.research-markdown pre { margin: 1.5rem 0; }
+.research-markdown code { padding: 0.15em 0.35em; border-radius: 4px; background: var(--chat-inset); font-size: 0.85em; }
+.research-markdown pre code { padding: 0; background: none; font-size: inherit; }
+.research-markdown hr { margin: 2rem 0; border-color: var(--color-border); }
+
+/* Keep the mobile trading form below the chart; desktop retains drag sizing. */
+@media (max-width: 1023px) {
+  .trade-config-panel {
+    width: 100% !important;
+    min-height: 420px;
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+@media (max-width: 639px) {
+  /* iOS zooms focused fields below 16px, displacing the workspace. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .chat-markdown {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}

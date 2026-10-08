@@ -121,6 +121,18 @@ describe("/portfolio", () => {
     expect(line).toContain("USDC $30.0K (24%)");
   });
 
+  it("reports account equity and distinguishes transfers from trading PnL", () => {
+    qc.setQueryData(["portfolio", SRV], {
+      server: SRV, total_usd: 1000, equity_usd: 800, unrealized_pnl_usd: -200,
+      connectors: [],
+    });
+    const line = onScreenLine("/portfolio");
+    expect(line).toContain("total $800");
+    expect(line).toContain("valuation equity");
+    expect(line).toContain("account unrealized -$200");
+    expect(line).toContain("wallet; includes transfers");
+  });
+
   it("names what moved the wrong way over the window on screen", () => {
     // ETH and SOL both rose over the window; nothing fell, so nothing is named.
     expect(onScreenLine("/portfolio")).not.toContain("worst mover");

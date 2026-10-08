@@ -418,6 +418,23 @@ def test_prompt_stream_timeout_emits_single_timeout():
     assert _prompt_done_reasons(events) == ["timeout"]
 
 
+def test_background_prompt_budget_stops_a_hung_provider_and_releases_slot():
+    class SlowRun(_FakeRun):
+        async def __aenter__(self):
+            await asyncio.Event().wait()
+
+    client = PydanticAIClient(model="ollama:x")
+    client._agent = SimpleNamespace(iter=lambda *a, **k: SlowRun([]))
+    client._request_semaphore = asyncio.Semaphore(1)
+
+    async def run():
+        return [event async for event in client.prompt_stream("build", timeout_s=0.01)]
+
+    events = asyncio.run(asyncio.wait_for(run(), timeout=1))
+    assert _prompt_done_reasons(events) == ["timeout"]
+    assert not client._request_semaphore.locked()
+
+
 def test_prompt_stream_runs_without_semaphore_for_cloud_providers():
     # Cloud providers leave _request_semaphore None (PERF-038): prompt_stream
     # must still work, with the serialization guard acting as a no-op.

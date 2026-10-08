@@ -516,6 +516,10 @@ PermissionCallback = Callable[[dict, list[dict]], Awaitable[dict]]
 class ACPClient:
     """Manages the lifecycle of an ACP subprocess agent."""
 
+    # An ACP peer chooses when to request permission. Receiving tool-update
+    # events does not prove a callback ran before an MCP invocation.
+    enforces_tool_permissions = False
+
     def __init__(
         self,
         command: str,
@@ -1079,13 +1083,19 @@ class ACPClient:
         return "".join(chunks)
 
     async def prompt_stream(
-        self, text: str, *, images: list | None = None
+        self,
+        text: str,
+        *,
+        images: list | None = None,
+        timeout_s: float | None = None,
     ) -> AsyncIterator[ACPEvent]:
         """Send a prompt and yield ACP events as they arrive.
 
         ``images`` become ``image`` content blocks *before* the text block,
         which is the order providers document for a prompt that asks about a
         picture — the question reads against something already in view.
+        ``timeout_s`` overrides the stream ceiling for a budgeted background
+        task; ordinary chat turns continue to use the runtime policy.
         """
         assert self._process and self._session_id
 
@@ -1156,7 +1166,7 @@ class ACPClient:
         # Hard ceiling for this stream, kept slightly above the session-level
         # budget by the policy itself so a deployment that raises
         # CONDOR_TIMEOUT_PROMPT_OVERALL is not silently cut short here.
-        max_duration = TIMEOUTS.prompt_hard_stop
+        max_duration = TIMEOUTS.prompt_hard_stop if timeout_s is None else timeout_s
 
         async def _hard_stop(elapsed: float) -> None:
             """End the turn at the agent, not merely here.
@@ -1177,13 +1187,16 @@ class ACPClient:
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(self._event_queue.get(), timeout=30)
+                    remaining = max_duration - (loop.time() - start_time)
+                    event = await asyncio.wait_for(
+                        self._event_queue.get(), timeout=max(0, min(30, remaining))
+                    )
                 except asyncio.TimeoutError:
                     elapsed = loop.time() - start_time
                     if not self.alive:
                         yield PromptDone(stop_reason="disconnected")
                         break
-                    if elapsed > max_duration:
+                    if elapsed >= max_duration:
                         await _hard_stop(elapsed)
                         yield PromptDone(stop_reason="timeout")
                         break

@@ -10,7 +10,9 @@ from condor.fetchers.portfolio import (
     PORTFOLIO_HISTORY_RANGES,
     UNIFIED_ACCOUNT_NOTE,
     balance_value,
+    connector_equity,
     dedupe_unified_accounts,
+    equity_value,
 )
 from condor.server_data_service import ServerDataType, get_server_data_service
 from condor.web.auth import require_server_access
@@ -119,14 +121,20 @@ async def get_portfolio(
                     connector_total += usd_val
 
                 # Filter out zero-value tokens and sort by value descending
-                balances = [b for b in balances if b.usd_value >= 0.01]
+                balances = [b for b in balances if abs(b.usd_value) >= 0.01]
                 balances.sort(key=lambda b: b.usd_value, reverse=True)
 
+                equity = connector_equity(connector_balances, connector_name)
                 connectors.append(
                     ConnectorBalance(
+                        account_name=account_name,
                         connector=connector_name,
                         balances=balances,
                         total_usd=connector_total,
+                        equity_usd=equity,
+                        unrealized_pnl_usd=(
+                            equity - connector_total if equity is not None else None
+                        ),
                         note=(
                             UNIFIED_ACCOUNT_NOTE
                             if (account_name, connector_name) in unified
@@ -136,7 +144,18 @@ async def get_portfolio(
                 )
 
     total_usd = sum(c.total_usd for c in connectors)
-    return PortfolioResponse(server=name, connectors=connectors, total_usd=total_usd)
+    equity = (
+        sum(c.equity_usd for c in connectors if c.equity_usd is not None)
+        if all(c.equity_usd is not None for c in connectors)
+        else None
+    )
+    return PortfolioResponse(
+        server=name,
+        connectors=connectors,
+        total_usd=total_usd,
+        equity_usd=equity,
+        unrealized_pnl_usd=(equity - total_usd if equity is not None else None),
+    )
 
 
 @router.get(
@@ -167,40 +186,43 @@ async def get_portfolio_history(
         logger.debug("Portfolio history keys: %s", list(history.keys()))
 
     entries, keyed = _extract_snapshot_entries(history)
+    # A window must use ONE valuation basis. Old perpetual snapshots have no
+    # floating PnL; mixing wallet and equity would fabricate a gain/loss at the
+    # upgrade boundary. In that case keep a clearly labelled wallet series.
+    use_equity = bool(entries) and all(
+        _has_equity(_snapshot_state(snapshot, keyed)) for _, snapshot in entries
+    )
 
-    # Forward-fill: track per-connector totals so missing exchanges
-    # carry forward their last known value instead of dropping to 0.
+    # Each entry is a snapshot, not a delta. Older API versions omitted empty
+    # connectors; carrying them forward counts transferred money twice.
     points: list[PortfolioHistoryPoint] = []
-    prev_connector_totals: dict[str, float] = {}
     for ts, snapshot in entries:
         total = (
             0 if keyed else snapshot.get("total_value", snapshot.get("total_usd", 0))
         )
-        if total == 0:
+        if use_equity or total == 0:
             # Sum token values from nested structure
             # API returns {timestamp, state: {account: {connector: [balances]}}}
-            cur_totals = _extract_connector_totals(_snapshot_state(snapshot, keyed))
-            if cur_totals and prev_connector_totals:
-                # Forward-fill: for connectors seen before but missing now, use previous value
-                for key, prev_val in prev_connector_totals.items():
-                    if key not in cur_totals:
-                        cur_totals[key] = prev_val
-            if cur_totals:
-                prev_connector_totals = cur_totals
+            cur_totals = _extract_connector_totals(
+                _snapshot_state(snapshot, keyed), use_equity=use_equity
+            )
             total = sum(cur_totals.values())
-        if keyed and total <= 0:
-            # Dict-keyed payloads historically drop zero-total points
-            continue
         points.append(PortfolioHistoryPoint(timestamp=ts, total_usd=float(total)))
 
     points.sort(key=lambda p: p.timestamp)
 
     top_tokens: list[str] = []
     if breakdown and points:
-        top_tokens = _build_token_breakdown(entries, keyed, points)
+        top_tokens = _build_token_breakdown(
+            entries, keyed, points, use_equity=use_equity
+        )
 
     return PortfolioHistoryResponse(
-        server=name, points=points, interval=interval, top_tokens=top_tokens
+        server=name,
+        points=points,
+        interval=interval,
+        top_tokens=top_tokens,
+        valuation="equity" if use_equity else "wallet",
     )
 
 
@@ -254,24 +276,21 @@ def _build_token_breakdown(
     entries: list[tuple[float, Any]],
     keyed: bool,
     points: list[PortfolioHistoryPoint],
+    use_equity: bool = False,
 ) -> list[str]:
     """Populate each point's per-token values, collapsing beyond the top 8 into "Other".
 
     Mutates ``point.tokens`` in place and returns the top token names.
     """
-    # Build token values per timestamp (with forward-fill for missing exchanges)
+    # Use only this snapshot's holdings. A missing token may have been sold
+    # or withdrawn; a past holding is not evidence that it still exists.
     ts_token_map: dict[float, dict[str, float]] = {}
-    prev_token_vals: dict[str, float] = {}
     for ts, snapshot in entries:
-        token_vals = _extract_token_values(_snapshot_state(snapshot, keyed))
+        token_vals = _extract_token_values(
+            _snapshot_state(snapshot, keyed), use_equity=use_equity
+        )
         if not token_vals:
             continue
-        # Forward-fill: tokens present before but missing now keep previous value
-        if prev_token_vals:
-            for tk, tv in prev_token_vals.items():
-                if tk not in token_vals:
-                    token_vals[tk] = tv
-        prev_token_vals = token_vals
         ts_token_map[ts] = token_vals
 
     if not ts_token_map:
@@ -281,7 +300,7 @@ def _build_token_breakdown(
     agg: dict[str, float] = {}
     for tv in ts_token_map.values():
         for token, val in tv.items():
-            agg[token] = agg.get(token, 0) + val
+            agg[token] = agg.get(token, 0) + abs(val)
     top_tokens = sorted(agg, key=lambda t: agg[t], reverse=True)[:8]
     top_set = set(top_tokens)
 
@@ -297,7 +316,7 @@ def _build_token_breakdown(
                 tokens_out[token] = val
             else:
                 other += val
-        if other > 0:
+        if other != 0:
             tokens_out["Other"] = other
         point.tokens = tokens_out
 
@@ -325,29 +344,55 @@ def _parse_timestamp(val: object) -> float:
     return 0.0
 
 
-def _extract_token_values(data: object) -> dict[str, float]:
+def _has_equity(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    data, _ = dedupe_unified_accounts(data)
+    for account in data.values():
+        if not isinstance(account, dict):
+            return False
+        for connector, balances in account.items():
+            if (
+                not isinstance(balances, list)
+                or connector_equity(balances, connector) is None
+            ):
+                return False
+    return True
+
+
+def _extract_token_values(data: object, use_equity: bool = False) -> dict[str, float]:
     """Extract per-token USD values from a portfolio snapshot."""
     tokens: dict[str, float] = {}
     if not isinstance(data, dict):
         return tokens
+    data, _ = dedupe_unified_accounts(data)
     for val in data.values():
         if isinstance(val, dict):
-            for inner in val.values():
+            for connector, inner in val.items():
                 if isinstance(inner, list):
                     for item in inner:
                         if isinstance(item, dict):
                             token = item.get("token", item.get("asset", ""))
-                            usd = balance_value(item)
-                            if token and usd > 0:
+                            usd = (
+                                equity_value(item, connector)
+                                if use_equity
+                                else balance_value(item)
+                            )
+                            if usd is None:
+                                continue
+                            if token and usd != 0:
                                 tokens[token] = tokens.get(token, 0) + usd
     return tokens
 
 
-def _extract_connector_totals(data: object) -> dict[str, float]:
+def _extract_connector_totals(
+    data: object, use_equity: bool = False
+) -> dict[str, float]:
     """Extract per-connector USD totals from a portfolio snapshot."""
     totals: dict[str, float] = {}
     if not isinstance(data, dict):
         return totals
+    data, _ = dedupe_unified_accounts(data)
     for account, val in data.items():
         if isinstance(val, dict):
             for connector, inner in val.items():
@@ -356,7 +401,13 @@ def _extract_connector_totals(data: object) -> dict[str, float]:
                     s = 0.0
                     for item in inner:
                         if isinstance(item, dict):
-                            s += balance_value(item)
+                            value = (
+                                equity_value(item, connector)
+                                if use_equity
+                                else balance_value(item)
+                            )
+                            if value is not None:
+                                s += value
                     totals[key] = s
                 elif isinstance(inner, (int, float)):
                     totals[key] = float(inner)

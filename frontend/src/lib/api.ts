@@ -121,16 +121,21 @@ export interface BalanceItem {
 }
 
 export interface ConnectorBalance {
+  account_name?: string;
   connector: string;
   balances: BalanceItem[];
   total_usd: number;
   note?: string | null;
+  equity_usd?: number | null;
+  unrealized_pnl_usd?: number | null;
 }
 
 export interface PortfolioResponse {
   server: string;
   connectors: ConnectorBalance[];
   total_usd: number;
+  equity_usd?: number | null;
+  unrealized_pnl_usd?: number | null;
 }
 
 export interface PortfolioHistoryPoint {
@@ -144,6 +149,7 @@ export interface PortfolioHistoryResponse {
   points: PortfolioHistoryPoint[];
   interval: string;
   top_tokens?: string[];
+  valuation?: "wallet" | "equity";
 }
 
 export interface BotInfo {
@@ -2832,6 +2838,12 @@ export const api = {
     apiFetch<{ status: string; result: unknown }>(
       `/api/v1/servers/${encodeURIComponent(server)}/executors/${encodeURIComponent(executorId)}/stop?keep_position=${keepPosition}`,
       { method: "POST" },
+    ),
+
+  deleteExecutor: (server: string, executorId: string) =>
+    apiFetch<{ deleted: boolean; executor_id: string }>(
+      `/api/v1/servers/${encodeURIComponent(server)}/executors/${encodeURIComponent(executorId)}`,
+      { method: "DELETE" },
     ),
 
   getPositionsHeld: (server: string) =>

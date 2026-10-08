@@ -2,96 +2,31 @@
 
 import asyncio
 import logging
-import re
-import time
 
 from telegram import Bot, InlineKeyboardMarkup
-from telegram.error import BadRequest, RetryAfter, TimedOut
+from telegram.error import BadRequest
 
 from condor.runtime.events import EventType, RuntimeEvent
+from condor.telegram_text import (
+    MAX_MESSAGE_LEN,
+    plain_text,
+    render_markdown,
+)
+from condor.telegram_text import split_text as _split_text
+from condor.telegram_text import (
+    telegram_call,
+)
 
 from .menu import stop_generating_keyboard
 
 log = logging.getLogger(__name__)
 
 EDIT_INTERVAL = 0.5
-MAX_MESSAGE_LEN = 4096
-
-TOOL_RUNNING = "\u2699\ufe0f"
-TOOL_DONE = "\u2705"
-TOOL_FAILED = "\u274c"
-REASONING = "\U0001f4ad"  # \ud83d\udcad
-
 _THINKING_FRAMES = ["Thinking.", "Thinking..", "Thinking..."]
-_DOT_FRAMES = ["", ".", "..", "..."]
-
-# Shown instead of the Thinking pulse while the turn waits its place in the
-# session queue. Static on purpose — see _edit_loop.
 QUEUED_LABEL = (
     "⏳ Queued — waiting for the current answer to finish.\n/stop interrupts it."
 )
-STOPPED_LABEL = "⏹ _Stopped._"
-
-# How much of the live reasoning to keep on screen (tail chars). Keeps the
-# streamed message small while still showing the agent's current train of thought.
-MAX_REASONING_LEN = 600
-
-# Markdown conversion patterns
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-_ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+?)\*(?!\*)")
-_HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
-_BLOCKQUOTE_RE = re.compile(r"^>\s?(.*)$", re.MULTILINE)
-_HR_RE = re.compile(r"^-{3,}$", re.MULTILINE)
-_TABLE_SEP_RE = re.compile(r"^\|[-| :]+\|$", re.MULTILINE)
-_TABLE_ROW_RE = re.compile(r"^\|(.+)\|$", re.MULTILINE)
-
-
-def _convert_table_row(m: re.Match) -> str:
-    cells = [c.strip() for c in m.group(1).split("|")]
-    return "  ".join(cells)
-
-
-def _to_telegram_markdown(text: str) -> str:
-    """Convert standard Markdown to Telegram Markdown v1."""
-    protected: list[str] = []
-
-    def _protect(m: re.Match) -> str:
-        protected.append(m.group(0))
-        return f"\x00{len(protected) - 1}\x00"
-
-    result = re.sub(r"```[\s\S]*?```|`[^`\n]+`", _protect, text)
-
-    result = _HEADER_RE.sub(r"*\1*", result)
-    result = _BLOCKQUOTE_RE.sub(r"\1", result)
-    result = _HR_RE.sub("", result)
-    result = _TABLE_SEP_RE.sub("", result)
-    result = _TABLE_ROW_RE.sub(_convert_table_row, result)
-    result = _BOLD_RE.sub(r"*\1*", result)
-    result = _ITALIC_RE.sub(r"_\1_", result)
-
-    result = re.sub(r"(\n[ \t]*){3,}", "\n\n", result)
-    result = result.lstrip("\n")
-
-    for i, original in enumerate(protected):
-        result = result.replace(f"\x00{i}\x00", original)
-
-    return result
-
-
-def _split_text(text: str, max_len: int) -> list[str]:
-    """Split text at paragraph boundaries."""
-    chunks = []
-    while len(text) > max_len:
-        split_at = text.rfind("\n\n", 0, max_len)
-        if split_at == -1:
-            split_at = text.rfind("\n", 0, max_len)
-        if split_at == -1:
-            split_at = max_len
-        chunks.append(text[:split_at])
-        text = text[split_at:].lstrip("\n")
-    if text:
-        chunks.append(text)
-    return chunks
+STOPPED_LABEL = "⏹ Stopped."
 
 
 class TelegramStreamer:
@@ -103,10 +38,10 @@ class TelegramStreamer:
         self._message_id = message_id
         self._prefix = prefix
         self._buffer = ""
-        self._thoughts = ""
-        self._active_tools: dict[str, str] = {}
-        self._tool_start_times: dict[str, float] = {}
-        self._finished_tools: list[str] = []
+        self._active_tools: dict[str, bool] = {}
+        self._had_tools = False
+        self._plain_only = False
+        self._parse_failed = False
         self._needs_edit = False
         self._edit_task: asyncio.Task | None = None
         self._done = False
@@ -139,15 +74,10 @@ class TelegramStreamer:
         if event.type == EventType.TEXT:
             self._buffer += event.text
             self._needs_edit = True
-        elif event.type == EventType.THOUGHT:
-            self._thoughts += event.text
-            self._needs_edit = True
         elif event.type == EventType.TOOL_CALL:
             tc_id = event.field("tool_call_id")
-            self._active_tools[tc_id] = self._format_tool_title(
-                event.field("title") or "tool"
-            )
-            self._tool_start_times[tc_id] = time.monotonic()
+            self._active_tools[tc_id] = True
+            self._had_tools = True
             self._needs_edit = True
         elif event.type == EventType.TOOL_UPDATE:
             self._handle_tool_update(event)
@@ -165,20 +95,8 @@ class TelegramStreamer:
     def _handle_tool_update(self, event: RuntimeEvent) -> None:
         tc_id = event.field("tool_call_id")
         status = event.field("status")
-        title = event.field("title")
         if status in ("completed", "failed"):
-            label = self._active_tools.pop(
-                tc_id, self._format_tool_title(title or "tool")
-            )
-            icon = TOOL_DONE if status == "completed" else TOOL_FAILED
-            elapsed = ""
-            start = self._tool_start_times.pop(tc_id, None)
-            if start is not None:
-                elapsed = f" ({self._format_elapsed(time.monotonic() - start)})"
-            self._finished_tools.append(f"{icon} {label}{elapsed}")
-            self._needs_edit = True
-        elif title and tc_id in self._active_tools:
-            self._active_tools[tc_id] = self._format_tool_title(title)
+            self._active_tools.pop(tc_id, None)
             self._needs_edit = True
 
     # --- Edit loop ---
@@ -212,117 +130,97 @@ class TelegramStreamer:
             except asyncio.CancelledError:
                 pass
 
-        for tc_id, title in self._active_tools.items():
-            self._finished_tools.append(f"{TOOL_DONE} {title}")
         self._active_tools.clear()
 
-        await self._flush(final=True)
+        # The live loop has ended, so a failed final send will not get another
+        # tick. Retry once, reusing the IDs of pages already acknowledged.
+        for attempt in range(2):
+            await self._flush(final=True)
+            if not self._needs_edit:
+                return
+            if attempt == 0:
+                await asyncio.sleep(EDIT_INTERVAL)
+        log.warning(
+            "Final Telegram reply was not fully delivered to chat %s", self._chat_id
+        )
 
     # --- Build & flush ---
 
-    def _build_text(self, final: bool) -> tuple[str, str | None]:
-        parts: list[str] = []
-        parse_mode = None
-
-        if self._prefix:
-            parts.append(self._prefix)
-
+    def _build_text(self, final: bool) -> str:
+        parts = [self._prefix] if self._prefix else []
         buf = self._buffer.strip()
         stopped = final and self._stop_reason == "cancelled"
-
-        # While streaming, before the answer starts, surface the live reasoning
-        # so the user can tell the agent is thinking (and about what) rather than
-        # stalled. Dropped from the final message — the answer stands on its own.
-        if not final and not buf:
-            reasoning = self._build_reasoning_block()
-            if reasoning:
-                parts.append(reasoning)
-
-        tool_block = self._build_tool_block()
-        if tool_block:
-            parts.append(tool_block)
-
         if buf:
-            if final:
-                parts.append(_to_telegram_markdown(buf))
-                parse_mode = "Markdown"
-            else:
-                parts.append(buf)
+            parts.append(buf)
         elif not final:
-            # Only fall back to the bare "Thinking…" pulse when nothing else is
-            # on screen yet (no reasoning, no active or finished tools).
-            base = 1 if self._prefix else 0
-            if len(parts) == base:
-                parts.append(
-                    QUEUED_LABEL
-                    if self._queued
+            parts.append(
+                QUEUED_LABEL
+                if self._queued
+                else (
+                    "Working..."
+                    if self._active_tools
                     else _THINKING_FRAMES[self._tick % len(_THINKING_FRAMES)]
                 )
+            )
         elif stopped:
-            parts.append("_(stopped before answering)_")
-            parse_mode = "Markdown"
-        elif self._finished_tools:
-            parts.append("_(done)_")
-            parse_mode = "Markdown"
+            parts.append("Stopped before answering.")
         else:
-            parts.append("_(no response)_")
-
-        # Say why the answer ends where it does, so a /stop that lands mid
-        # sentence does not read as the agent giving up on its own.
+            parts.append("Done." if self._had_tools else "No response.")
         if stopped and buf:
             parts.append(STOPPED_LABEL)
-            parse_mode = "Markdown"
-
-        return "\n\n".join(parts), parse_mode
-
-    def _build_reasoning_block(self) -> str:
-        """Live 💭 reasoning block: animated header + a tail of the thoughts.
-
-        Only the trailing slice is kept so the block reads as the agent's
-        *current* train of thought (and stays small) rather than a growing wall
-        of text. Rendered as a blockquote in plain text (no parse mode while
-        streaming), so raw ``> `` prefixes are fine.
-        """
-        text = self._thoughts.strip()
-        if not text:
-            return ""
-        if len(text) > MAX_REASONING_LEN:
-            text = "…" + text[-MAX_REASONING_LEN:]
-        quoted = "\n".join(f"> {ln}" for ln in text.splitlines() if ln.strip())
-        dots = _DOT_FRAMES[self._tick % len(_DOT_FRAMES)]
-        return f"{REASONING} Reasoning{dots}\n{quoted}"
-
-    def _build_tool_block(self) -> str:
-        now = time.monotonic()
-        lines = list(self._finished_tools)
-        for tc_id, title in self._active_tools.items():
-            start = self._tool_start_times.get(tc_id)
-            elapsed = f" ({self._format_elapsed(now - start)})" if start else ""
-            lines.append(f"{TOOL_RUNNING} {title}...{elapsed}")
-        return "\n".join(lines)
+        return "\n\n".join(parts)
 
     async def _flush(self, final: bool) -> None:
         self._needs_edit = False
-        text, parse_mode = self._build_text(final)
-        chunks = _split_text(text, MAX_MESSAGE_LEN)
-
-        # Only the placeholder carries the Stop button, and only while the turn
-        # is still open: a queued turn counts, since stopping the answer ahead
-        # is exactly what its notice tells the user /stop does. `final` passes
-        # None, which is how editMessageText drops an inline keyboard.
+        self._parse_failed = False
+        text = self._build_text(final)
+        parse_mode = "HTML" if final and not self._plain_only else None
+        if final:
+            pages = render_markdown(text)
+            if self._plain_only:
+                text = plain_text("".join(page.html for page in pages))
+                chunks = _split_text(text, MAX_MESSAGE_LEN)
+            else:
+                chunks = [page.html for page in pages]
+        else:
+            chunks = _split_text(text, MAX_MESSAGE_LEN)
+        if not chunks:
+            chunks = ["No response."]
         markup = None if final else self._stop_markup
-
-        # Edit the main placeholder message
         await self._edit(self._message_id, chunks[0], parse_mode, markup)
-
-        # Handle overflow chunks
         for i, chunk in enumerate(chunks[1:]):
             if i < len(self._continuation_ids):
                 await self._edit(self._continuation_ids[i], chunk, parse_mode)
             else:
                 msg_id = await self._send(chunk, parse_mode)
-                if msg_id:
-                    self._continuation_ids.append(msg_id)
+                if msg_id is None:
+                    self._needs_edit = True
+                    break  # Do not assign a later page to the missing page's slot.
+                self._continuation_ids.append(msg_id)
+        if self._parse_failed and not self._plain_only:
+            self._plain_only = True
+            await self._flush(final=final)
+            return
+        # Formatting removes Markdown syntax, so the final answer can need fewer
+        # messages. Remove old tails instead of leaving duplicated partial text.
+        if final and not self._needs_edit:
+            while len(self._continuation_ids) > len(chunks) - 1:
+                message_id = self._continuation_ids[-1]
+                try:
+                    await telegram_call(
+                        self._bot.delete_message,
+                        chat_id=self._chat_id,
+                        message_id=message_id,
+                    )
+                except Exception:
+                    log.warning(
+                        "Could not remove stale continuation %s",
+                        message_id,
+                        exc_info=True,
+                    )
+                    break
+                self._continuation_ids.pop()
+                self._last_sent.pop(message_id, None)
 
     # --- Telegram I/O ---
 
@@ -341,87 +239,53 @@ class TelegramStreamer:
         if self._last_sent.get(message_id) == (text, parse_mode, reply_markup):
             return
         try:
-            await self._bot.edit_message_text(
+            await telegram_call(
+                self._bot.edit_message_text,
                 chat_id=self._chat_id,
                 message_id=message_id,
                 text=text,
                 parse_mode=parse_mode,
                 reply_markup=reply_markup,
+                disable_web_page_preview=True,
             )
-        except BadRequest as e:
-            if "not modified" not in str(e).lower():
-                if parse_mode:
-                    # The retry carries the same text, so drop the entry rather
-                    # than let the cache mistake the fallback for a no-op.
-                    self._last_sent.pop(message_id, None)
-                    await self._edit(
-                        message_id, text, parse_mode=None, reply_markup=reply_markup
-                    )
-                else:
-                    log.warning("Failed to edit message: %s", e)
-                return
-            # Telegram itself says the text is already there: remember it.
-        except RetryAfter as e:
-            await asyncio.sleep(e.retry_after)
-            try:
-                await self._bot.edit_message_text(
-                    chat_id=self._chat_id,
-                    message_id=message_id,
-                    text=text,
-                    parse_mode=parse_mode,
-                    reply_markup=reply_markup,
+        except BadRequest as exc:
+            if "not modified" not in str(exc).lower():
+                self._parse_failed |= bool(
+                    parse_mode
+                    and ("parse" in str(exc).lower() or "entit" in str(exc).lower())
                 )
-            except Exception:
+                self._needs_edit = True
+                log.warning("Failed to edit message: %s", exc)
                 return
-        except TimedOut:
-            return
         except Exception:
-            log.exception("Unexpected error editing message")
+            self._needs_edit = True
+            log.warning("Failed to edit message", exc_info=True)
             return
         self._last_sent[message_id] = (text, parse_mode, reply_markup)
 
     async def _send(self, text: str, parse_mode: str | None = None) -> int | None:
         try:
-            msg = await self._bot.send_message(
+            msg = await telegram_call(
+                self._bot.send_message,
                 chat_id=self._chat_id,
                 text=text,
                 parse_mode=parse_mode,
+                disable_web_page_preview=True,
             )
-            self._last_sent[msg.message_id] = (text, parse_mode, None)
-            return msg.message_id
-        except BadRequest:
-            if parse_mode:
-                return await self._send(text, parse_mode=None)
-            return None
-        except RetryAfter as e:
-            await asyncio.sleep(e.retry_after)
-            try:
-                msg = await self._bot.send_message(
-                    chat_id=self._chat_id,
-                    text=text,
-                )
-                self._last_sent[msg.message_id] = (text, None, None)
-                return msg.message_id
-            except Exception:
-                return None
+            message_id = (
+                (msg.get("result") or {}).get("message_id")
+                if isinstance(msg, dict)
+                else getattr(msg, "message_id", None)
+            )
+            if message_id is not None:
+                self._last_sent[message_id] = (text, parse_mode, None)
+            return message_id
+        except BadRequest as exc:
+            self._parse_failed |= bool(
+                parse_mode
+                and ("parse" in str(exc).lower() or "entit" in str(exc).lower())
+            )
+            log.warning("Failed to send message: %s", exc)
         except Exception:
-            log.exception("Failed to send message")
-            return None
-
-    # --- Helpers ---
-
-    @staticmethod
-    def _format_tool_title(title: str) -> str:
-        if title.startswith("mcp__"):
-            parts = title.split("__", 2)
-            if len(parts) == 3:
-                return f"{parts[1]}: {parts[2].replace('_', ' ')}"
-        return title.replace("_", " ")
-
-    @staticmethod
-    def _format_elapsed(seconds: float) -> str:
-        s = int(seconds)
-        if s < 60:
-            return f"{s}s"
-        m, s = divmod(s, 60)
-        return f"{m}m{s:02d}s"
+            log.warning("Failed to send message", exc_info=True)
+        return None

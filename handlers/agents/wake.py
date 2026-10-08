@@ -20,7 +20,7 @@ from condor.runtime import TELEGRAM
 from condor.runtime.events import RuntimeEvent
 from condor.runtime.keys import SessionKey
 from condor.runtime.wake import register_note_sink, register_sink_factory
-from utils.telegram_formatters import escape_markdown_v2
+from condor.telegram_text import send_markdown
 
 from .stream import TelegramStreamer
 
@@ -103,9 +103,9 @@ def _telegram_wake_sink(
 
 
 def note_text(text: str, kind: str) -> str:
-    """The note as one MarkdownV2 message: a kind marker, then the note."""
+    """Keep the note's Markdown intact for the shared Telegram renderer."""
     marker = NOTE_MARKERS.get(kind, DEFAULT_NOTE_MARKER)
-    return f"{marker} {escape_markdown_v2(text)}"
+    return f"{marker} {text}"
 
 
 async def _deliver_note(
@@ -134,13 +134,7 @@ async def _deliver_note(
 
     bot = resolve_bot()
     body = note_text(text, kind)
-    try:
-        await bot.send_message(chat_id=chat_id, text=body, parse_mode="MarkdownV2")
-    except Exception:  # noqa: BLE001 - bad markup is retried as plain text
-        # Same rule as ``notifications._send``: the user must get the note,
-        # ugly, rather than not get it at all.
-        log.debug("Note rejected as MarkdownV2 for chat %s; retrying plain", chat_id)
-        await bot.send_message(chat_id=chat_id, text=text)
+    await send_markdown(bot, chat_id, body)
 
 
 # Both halves of the channel, registered here rather than imported by the

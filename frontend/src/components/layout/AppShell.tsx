@@ -71,7 +71,7 @@ function AppShellBody() {
   // loops and journals, none of which is an exchange — so blocking it would
   // teach nobody anything. Matched exactly rather than by prefix, because `/`
   // prefixes every route in the app.
-  const exemptRoutes = ["/routines", "/settings"];
+  const exemptRoutes = ["/routines", "/settings", "/research/"];
   const showKeysOverlay =
     server && !keysLoading && !hasKeys && pathname !== "/" &&
     !exemptRoutes.some((r) => pathname.startsWith(r));
@@ -103,24 +103,24 @@ function AppShellBody() {
   useViewFacts(() => routeFacts(pathname, search, queryClient));
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-dvh min-w-0 flex-col">
       {/* Top bar */}
-      <header className="flex h-12 shrink-0 items-center border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 xl:px-4">
         {/* Left: logo + nav */}
-        <div className="flex items-center gap-6">
-          <NavLink to="/" className="flex items-center gap-2 font-bold tracking-tight">
+        <div className="contents">
+          <NavLink to="/" className="order-1 flex shrink-0 items-center gap-2 font-bold tracking-tight xl:mr-6">
             <img src="/condor_old.jpeg" alt="Condor" className="h-6 w-6 rounded-full" />
-            <span className="text-sm">Condor</span>
+            <span className="hidden text-sm sm:inline">Condor</span>
           </NavLink>
 
-          <nav className="flex items-center">
+          <nav aria-label="Main navigation" className="order-3 flex w-full items-center overflow-x-auto pb-1 xl:order-2 xl:w-auto xl:pb-0">
             {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={to === "/"}
                 className={({ isActive }) =>
-                  `flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  `flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${
                     isActive
                       ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
                       : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
@@ -135,7 +135,7 @@ function AppShellBody() {
         </div>
 
         {/* Right: server selector + controls */}
-        <div className="ml-auto flex items-center gap-3">
+        <div className="order-2 ml-auto flex min-w-0 items-center gap-1 py-1 xl:order-3 xl:gap-3">
           <ServerSelector />
           <CurrencySelector />
 
@@ -187,8 +187,8 @@ function AppShellBody() {
 
       {/* Main content */}
       <main
-        className={`relative flex-1 ${
-          isFullBleed ? "overflow-hidden" : "overflow-auto p-6"
+        className={`relative min-h-0 min-w-0 flex-1 ${
+          isFullBleed ? "overflow-hidden" : "overflow-auto p-3 sm:p-6"
         }`}
       >
         <ErrorBoundary resetKey={pathname + server}>

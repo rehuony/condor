@@ -129,8 +129,8 @@ export function RoutineLibrarySidebar({
 
   return (
     <div
-      className={`flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
-        compact ? "w-12" : "w-64"
+      className={`flex min-h-0 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
+        compact ? "w-full max-h-32 md:w-12 md:max-h-none" : "w-full max-h-[35%] md:w-64 md:max-h-none"
       }`}
     >
       {/* Header */}

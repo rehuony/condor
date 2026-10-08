@@ -605,9 +605,9 @@ export function CreateExecutor() {
   }
 
   return (
-    <div className="-m-6 flex h-[calc(100%+3rem)] flex-col">
+    <div className="-m-3 flex min-h-full flex-col sm:-m-6 lg:h-[calc(100%+3rem)]">
       {/* Top Bar */}
-      <div className="flex items-center border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex shrink-0 flex-wrap items-center border-b border-[var(--color-border)] bg-[var(--color-surface)]">
         {/* Back button */}
         <button
           onClick={() => navigate(-1)}
@@ -692,7 +692,7 @@ export function CreateExecutor() {
         </div>
 
         {/* Interval + Range */}
-        <div className="flex items-center gap-3 border-l border-[var(--color-border)] px-4 py-2">
+        <div className="flex max-w-full flex-wrap items-center gap-3 border-l border-[var(--color-border)] px-3 py-2">
           <div className="flex overflow-hidden rounded-md border border-[var(--color-border)]">
             {INTERVALS.map((iv) => (
               <button
@@ -741,9 +741,9 @@ export function CreateExecutor() {
       )}
 
       {/* Main Area: Chart + Right Panel */}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Chart + Bottom Pane */}
-        <div className="relative min-w-0 flex-1 flex flex-col">
+        <div className="relative min-w-0 flex-1 flex flex-col min-h-[480px] lg:min-h-0">
           {browserOpen && caps.hasOrderBook && (
             <MarketBrowser
               server={server}
@@ -816,14 +816,14 @@ export function CreateExecutor() {
 
         {/* Vertical resize handle */}
         <div
-          className="group/vdrag relative w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20 transition-colors"
+          className="group/vdrag relative hidden lg:block w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20 transition-colors"
           onMouseDown={startHDrag}
         >
           <div className="absolute inset-y-0 left-1/2 my-auto h-12 w-px -translate-x-1/2 rounded bg-amber-400/60 group-hover/vdrag:bg-amber-400 transition-colors" />
         </div>
 
         {/* Right Panel */}
-        <div className="flex shrink-0 flex-col bg-[var(--color-surface)]" style={{ width: rightPanelWidth }}>
+        <div className="trade-config-panel flex shrink-0 flex-col bg-[var(--color-surface)]" style={{ width: rightPanelWidth }}>
           {/* Panel Mode Toggle */}
           <div className="flex border-b border-[var(--color-border)]">
             <button

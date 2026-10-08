@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from condor.fsutil import atomic_write_text
 
@@ -26,18 +26,30 @@ def is_experiment_mode(mode: str) -> bool:
 
 
 class RiskLimitsConfig(BaseModel):
-    max_position_size_quote: float = Field(
-        default=500.0, description="Max total position size in quote currency"
+    # A misspelled or unsupported safeguard must never look like active risk
+    # protection. The runtime dataclass uses this same validator.
+    model_config = ConfigDict(
+        extra="forbid", strict=True, allow_inf_nan=False, hide_input_in_errors=True
     )
-    max_open_executors: int = Field(default=5, description="Max simultaneous executors")
+
+    max_position_size_quote: float = Field(
+        default=500.0, ge=0, description="Max total position size in quote currency"
+    )
+    max_open_executors: int = Field(
+        default=5, ge=0, description="Max simultaneous executors"
+    )
     max_drawdown_pct: float = Field(
         default=-1.0,
-        description="Max drawdown %% that pauses (soft-blocks) ticks; -1 = disabled",
+        description="Session PnL decline from its recorded peak divided by current "
+        "quote exposure, in percent, that pauses ticks; not account-equity "
+        "drawdown or a daily-loss limit. -1 = disabled",
     )
     shutdown_drawdown_pct: float = Field(
         default=-1.0,
-        description="Max drawdown %% that triggers an emergency winddown "
-        "(closes positions per shutdown.md); -1 = disabled",
+        description="Session PnL decline from its recorded peak divided by current "
+        "quote exposure, in percent, that triggers emergency winddown "
+        "(closes positions per shutdown.md); not account-equity drawdown. "
+        "-1 = disabled",
     )
     max_drift_quote: float = Field(
         default=-1.0,
@@ -53,8 +65,19 @@ class RiskLimitsConfig(BaseModel):
         "an omitted one). -1 = disabled",
     )
 
+    @field_validator(
+        "max_drawdown_pct", "shutdown_drawdown_pct", "max_drift_quote", "max_leverage"
+    )
+    @classmethod
+    def disabled_or_nonnegative(cls, value: float) -> float:
+        if value != -1 and value < 0:
+            raise ValueError("must be -1 (disabled) or nonnegative")
+        return value
+
 
 class AgentConfig(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     server_name: str = Field(default="local", description="Hummingbot API server name")
     agent_key: str = Field(
         default="",
@@ -91,7 +114,10 @@ class AgentConfig(BaseModel):
         "(condor.runtime.loops) marks an interrupted run and, only with this "
         "set, starts a FRESH session from the config as it stands then. Off by "
         "default: a trading loop that resumes unattended after a crash nobody "
-        "noticed is a decision its owner has to make per strategy.",
+        "noticed is a decision its owner has to make per strategy. Automatic "
+        "restart is refused when drawdown limits are enabled: the new session "
+        "cannot restore risk history. Review the previous session and positions "
+        "before starting a new session manually.",
     )
     bot_name: str = Field(
         default="",
@@ -122,6 +148,18 @@ class AgentConfig(BaseModel):
     )
     risk_limits: RiskLimitsConfig = Field(default_factory=RiskLimitsConfig)
 
+    @model_validator(mode="after")
+    def require_drawdown_history(self) -> AgentConfig:
+        if self.execution_mode == "run_once" and (
+            self.risk_limits.max_drawdown_pct >= 0
+            or self.risk_limits.shutdown_drawdown_pct >= 0
+        ):
+            raise ValueError(
+                "run_once cannot enforce drawdown limits because it has no session "
+                "journal; use loop for live drawdown monitoring or dry_run to rehearse"
+            )
+        return self
+
     def to_engine_dict(self) -> dict[str, Any]:
         """Convert to the dict format expected by TickEngine."""
         d = self.model_dump()
@@ -130,6 +168,8 @@ class AgentConfig(BaseModel):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AgentConfig:
         """Create from a raw dict (e.g. strategy.default_config)."""
+        if not isinstance(d, dict):
+            raise ValueError("Loop config must be a mapping")
         cleaned = {k: v for k, v in d.items() if k in cls.model_fields}
         # Translate dry_run shorthand → execution_mode
         if d.get("dry_run") and "execution_mode" not in d:
@@ -138,22 +178,34 @@ class AgentConfig(BaseModel):
 
 
 def load_full_config(
-    agent_dir: Path, defaults: dict[str, Any] | None = None
+    agent_dir: Path,
+    defaults: dict[str, Any] | None = None,
+    *,
+    overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Load config preserving both AgentConfig fields and strategy-specific keys.
 
-    Starts from strategy defaults, overlays saved config.yml, then validates
-    core fields via AgentConfig and merges defaults for any missing core fields.
+    Starts from strategy defaults, overlays saved config.yml and request
+    overrides, then validates core fields and fills missing core defaults.
     """
     result = dict(defaults or {})
 
     config_path = agent_dir / "config.yml"
     if config_path.exists():
         try:
-            saved = yaml.safe_load(config_path.read_text()) or {}
-            result.update(saved)
-        except Exception:
-            pass
+            saved = yaml.safe_load(config_path.read_text())
+        except (OSError, yaml.YAMLError):
+            # Parser errors quote source lines, which may carry private
+            # strategy configuration. The API only needs the refusal.
+            raise ValueError(
+                "Cannot read saved loop config; repair config.yml before starting"
+            ) from None
+        if not isinstance(saved, dict):
+            raise ValueError("Saved loop config must be a YAML mapping")
+        result.update(saved)
+
+    if overrides is not None:
+        result.update(overrides)
 
     # Validate core fields and fill in any missing AgentConfig defaults
     core = AgentConfig.from_dict(result)
@@ -165,7 +217,8 @@ def load_full_config(
 
 
 def save_full_config(agent_dir: Path, config: dict[str, Any]) -> None:
-    """Save a raw config dict as YAML (no filtering through AgentConfig)."""
+    """Validate core safeguards, preserving strategy-specific fields in YAML."""
+    AgentConfig.from_dict(config)
     config_path = agent_dir / "config.yml"
     agent_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_text(

@@ -64,6 +64,10 @@ _WEB_FORMATTING = (
     "- No message length limits, but stay concise.\n"
     "- Use tables for structured data (portfolios, prices, comparisons).\n"
     "- Use code blocks for configs, JSON, or commands.\n"
+    "- Research files under .condor/research/ have dashboard previews and downloads.\n"
+    "  Link them as [Report title](/research/<path relative to .condor/research/>),\n"
+    "  e.g. [Research report](/research/topic/2026-10-10/093000-a1b2c3d4/report.md).\n"
+    "  Never put local absolute filesystem paths in link targets or labels.\n"
     "- CHARTS: when the answer is a numeric series or comparison (a price or\n"
     "  PnL curve, volume per venue, a distribution), draw it with a ```chart\n"
     "  fence holding one JSON object. The dashboard renders it as an\n"
@@ -82,9 +86,15 @@ _WEB_FORMATTING = (
 
 _TELEGRAM_FORMATTING = (
     "FORMATTING (Telegram mobile):\n"
+    "- Lead with the conclusion in 1-2 sentences, then the essential evidence or next steps.\n"
     "- NEVER use Markdown tables. Use bullet lists or key: value lines.\n"
     "- Keep paragraphs short (2-3 sentences max).\n"
     "- Cap lists at 5-7 items.\n"
+    "- Use short bold labels and descriptive source links; avoid decorative separators.\n"
+    "- Make the final answer self-contained. Omit repeated progress updates, tool logs, "
+    "internal task IDs and implementation details unless requested.\n"
+    "- Keep material figures, timestamps, risks and source links. Do not cut off an answer "
+    "to fit a message: delivery handles long responses.\n"
     "- Respond in the user's language."
 )
 

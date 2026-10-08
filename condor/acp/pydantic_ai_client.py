@@ -283,29 +283,46 @@ class PermissionGate:
         tool_name: str,
         allowed: bool,
         reason: str = "",
-    ) -> None:
+    ) -> tuple[bool, str]:
+        call_id = (tool_call_id or "").strip()
+        # A provider-controlled ID identifies exactly one call in this turn.
+        # Duplicate IDs also confuse pydantic-ai's own call dispatch, so no
+        # decision with that ID may be borrowed by either invocation. Keep used
+        # entries in the check: a later model response cannot replay an ID.
+        duplicates = [
+            entry
+            for entry in self._pending
+            if entry["id"] == call_id and (call_id or entry["name"] == tool_name)
+        ]
+        if duplicates:
+            allowed = False
+            reason = "ambiguous or reused tool call identity"
+            for entry in duplicates:
+                entry["allowed"] = False
+                entry["reason"] = reason
         self._pending.append(
             {
-                "id": (tool_call_id or "").strip(),
+                "id": call_id,
                 "name": tool_name,
                 "allowed": allowed,
                 "reason": reason,
                 "used": False,
             }
         )
+        return allowed, reason
 
     def consume(self, tool_call_id: str | None, tool_name: str) -> tuple[bool, str]:
         """Take the decision for this call. Unknown calls are refused."""
         call_id = (tool_call_id or "").strip()
-        if call_id:
-            for entry in self._pending:
-                if not entry["used"] and entry["id"] == call_id:
-                    entry["used"] = True
-                    return entry["allowed"], entry["reason"]
-        # Providers that omit tool_call_ids still need matching; fall back to
-        # the first undecided call of the same name, in emission order.
+        # Never fall back from an unknown nonempty ID to another call's name.
+        # Missing IDs only match missing-ID decisions; record() has already
+        # refused duplicates, so neither path can spend a stale authorization.
         for entry in self._pending:
-            if not entry["used"] and entry["name"] == tool_name:
+            if (
+                not entry["used"]
+                and entry["id"] == call_id
+                and entry["name"] == tool_name
+            ):
                 entry["used"] = True
                 return entry["allowed"], entry["reason"]
         return False, "no permission decision was recorded for this call"
@@ -398,6 +415,9 @@ class PydanticAIClient:
         The bare "custom:<model-id>" form (no endpoint name) is still accepted
         for configs written before endpoints were nameable.
     """
+
+    # PermissionedToolset checks the recorded decision before invoking the sink.
+    enforces_tool_permissions = True
 
     def __init__(
         self,
@@ -1020,7 +1040,11 @@ class PydanticAIClient:
         self._abort_requested = True
 
     async def prompt_stream(
-        self, text: str, *, images: list | None = None
+        self,
+        text: str,
+        *,
+        images: list | None = None,
+        timeout_s: float | None = None,
     ) -> AsyncIterator[ACPEvent]:
         """Send a prompt and yield ACPEvents as they arrive.
 
@@ -1059,6 +1083,7 @@ class PydanticAIClient:
                 blocked_ids: set[str] = set()
 
                 async with (
+                    asyncio.timeout(timeout_s),
                     self._agent.iter(
                         self._build_user_prompt(text, images),
                         message_history=self._message_history,
@@ -1318,8 +1343,9 @@ class PydanticAIClient:
             approved = False
             reason = f"permission check failed ({exc})"
 
-        self._permission_gate.record(part.tool_call_id, tool_name, approved, reason)
-        return approved, reason
+        return self._permission_gate.record(
+            part.tool_call_id, tool_name, approved, reason
+        )
 
     def _tool_events(self, part: Any, approved: bool) -> list[ACPEvent]:
         """Project one tool call into the events the UI shows.

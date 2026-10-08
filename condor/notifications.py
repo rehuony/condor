@@ -340,6 +340,7 @@ class Delivery(NamedTuple):
 
     sent: bool
     recorded: bool
+    error: str | None = None
 
 
 def _reached_telegram(result: Any) -> bool:
@@ -356,30 +357,6 @@ def _reached_telegram(result: Any) -> bool:
     if isinstance(result, dict):
         return bool(result.get("ok"))
     return True
-
-
-async def _send(target: Any, chat_id: Any, text: str, parse_mode: str) -> Any:
-    """Push ``text`` at ``chat_id``, retrying once without ``parse_mode``.
-
-    The overwhelmingly common failure is an unescaped ``_`` or ``*`` in text a
-    model wrote: the user must get the message, ugly, rather than not get it at
-    all. The retry is skipped when the first attempt reached the bell — that
-    rung cannot fail on markup, and calling it twice would file it twice.
-    """
-    if parse_mode:
-        try:
-            result = await target.send_message(
-                chat_id=chat_id, text=text, parse_mode=parse_mode
-            )
-            if isinstance(result, Notification) or _reached_telegram(result):
-                return result
-        except Exception:  # noqa: BLE001 - bad markup is retried as plain text
-            log.debug("Notification rejected with parse_mode=%s", parse_mode)
-    try:
-        return await target.send_message(chat_id=chat_id, text=text)
-    except Exception:  # noqa: BLE001 - an undeliverable push still rings the bell
-        log.warning("Could not deliver notification to chat %s", chat_id)
-        return None
 
 
 async def announce(
@@ -415,12 +392,17 @@ async def announce(
     a link the reader clicks, so a producer that ends its message with "use
     /something" would be telling a dashboard reader to type into a Telegram it
     may not even have. Left unset, both surfaces get ``text``.
+
+    All Telegram deliveries are split into complete, formatted pages. The bell
+    records one full notification. ``parse_mode`` selects standard Markdown,
+    Telegram HTML or literal text.
     """
     if not text:
         return Delivery(False, False)
 
     filed: Notification | None = None
     sent = False
+    error = None
     if chat_id:
         from condor.agents.delegate import resolve_bot
 
@@ -435,14 +417,29 @@ async def announce(
             # lose it on exactly the surface that renders it (CORR-262).
             target = NotifyBot(kind, title=title, link=link)
             body = bell_text or text
-        result = await _send(target, chat_id, body, parse_mode)
-        if isinstance(result, Notification):
-            filed = result
-        else:
-            sent = _reached_telegram(result)
+        try:
+            if isinstance(target, NotifyBot):
+                filed = await target.send_message(chat_id=chat_id, text=body)
+            else:
+                from condor.telegram_text import send_text
+
+                results = await send_text(
+                    target,
+                    chat_id,
+                    body,
+                    parse_mode=parse_mode,
+                )
+                sent = bool(results) and all(_reached_telegram(r) for r in results)
+        except Exception as exc:
+            error = str(exc)
+            log.warning(
+                "Could not deliver complete notification to chat %s",
+                chat_id,
+                exc_info=True,
+            )
 
     if filed is not None and (not user_id or filed.user_id == int(user_id)):
-        return Delivery(sent, True)
+        return Delivery(sent, True, error)
 
     entry = await record(user_id, bell_text or text, kind=kind, title=title, link=link)
-    return Delivery(sent, entry is not None)
+    return Delivery(sent, entry is not None, error)

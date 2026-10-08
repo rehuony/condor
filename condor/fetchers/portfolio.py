@@ -1,6 +1,7 @@
 """Fetch portfolio / balance data from Hummingbot API."""
 
 import logging
+import math
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -41,6 +42,35 @@ def balance_value(item: Dict[str, Any]) -> float:
         return float(item.get("value", item.get("usd_value", 0)) or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def equity_value(item: Dict[str, Any], connector: str) -> Optional[float]:
+    """Equity in USD, or unknown when a perpetual snapshot only has balances.
+
+    Never add executor PnL: realized profits are already in the wallet, and
+    executors do not cover manual exchange positions. Older stored snapshots
+    have no equity field and must not be backfilled with today's floating PnL.
+    """
+    value = item.get("equity_value")
+    if value is None:
+        return None if "perpetual" in connector else balance_value(item)
+    try:
+        result = float(value)
+        return result if math.isfinite(result) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def connector_equity(balances: List[Any], connector: str) -> Optional[float]:
+    total = 0.0
+    for item in balances:
+        if not isinstance(item, dict):
+            continue
+        value = equity_value(item, connector)
+        if value is None:
+            return None
+        total += value
+    return total
 
 
 def _stable_value(balances: List[Any]) -> float:
@@ -125,7 +155,9 @@ async def fetch_portfolio(client, **_kw) -> Any:
 async def fetch_portfolio_history(client, range_key: str = "1D", **_kw) -> Any:
     """Fetch the raw portfolio history snapshots for one range window."""
     range_seconds, interval = PORTFOLIO_HISTORY_RANGES[range_key]
-    start_time = int(time.time()) - range_seconds
+    # The API's TimeRangePaginationParams accepts milliseconds. The client
+    # forwards this verbatim despite documenting seconds in version 1.5.9.
+    start_time = (int(time.time()) - range_seconds) * 1000
     return await client.portfolio.get_history(
         start_time=start_time, interval=interval, limit=500
     )

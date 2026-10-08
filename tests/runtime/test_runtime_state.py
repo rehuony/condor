@@ -346,6 +346,27 @@ def test_timeout_defaults():
     assert policy.prompt_lock == 30
     assert policy.prompt_overall == 1800
     assert policy.confirmation == 120
+    assert policy.delegate_default == 3600
+    assert policy.delegate_max == 7200
+    assert policy.agent_cleanup == 30
+
+
+def test_background_timeouts_can_be_configured_independently(monkeypatch):
+    monkeypatch.setenv("CONDOR_TIMEOUT_DELEGATE_DEFAULT", "5400")
+    monkeypatch.setenv("CONDOR_TIMEOUT_DELEGATE_MAX", "10800")
+    policy = TimeoutPolicy.load()
+    assert policy.delegate_default == 5400
+    assert policy.delegate_max == 10800
+    assert policy.prompt_overall == 1800
+
+
+def test_invalid_background_timeout_overrides_are_bounded(monkeypatch):
+    monkeypatch.setenv("CONDOR_TIMEOUT_DELEGATE_DEFAULT", "-1")
+    monkeypatch.setenv("CONDOR_TIMEOUT_DELEGATE_MAX", "1")
+    monkeypatch.setenv("CONDOR_TIMEOUT_AGENT_CLEANUP", "0")
+    policy = TimeoutPolicy.load()
+    assert policy.delegate_default == policy.delegate_max == 3600
+    assert policy.agent_cleanup == 30
 
 
 def test_timeout_env_override(monkeypatch):

@@ -81,12 +81,14 @@ function KpiCell({
   pnl,
   details,
   currencySymbol,
+  pnlLabel,
 }: {
   label: string;
   mainValue: string | number;
   pnl?: number;
   details: string;
   currencySymbol?: string;
+  pnlLabel?: string;
 }) {
   return (
     <div className="flex-1 px-5 py-3 min-w-0">
@@ -94,14 +96,15 @@ function KpiCell({
       <div className="flex items-baseline gap-2.5 mt-1">
         <span className="text-2xl font-bold tabular-nums tracking-tight leading-none">{mainValue}</span>
         {pnl !== undefined && pnl !== null && (
-          <span className="inline-flex items-center gap-0.5 text-sm tabular-nums font-semibold"
+          <span title={pnlLabel} className="inline-flex items-center gap-0.5 text-sm tabular-nums font-semibold"
             style={{ color: pnl >= 0 ? "var(--color-green)" : "var(--color-red)" }}>
             {pnl >= 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
             {formatCurrencyPnl(pnl, currencySymbol || "$")}
           </span>
         )}
       </div>
-      <div className="text-xs text-[var(--color-text-muted)] mt-1 truncate">{details}</div>
+      {pnlLabel && <div className="text-[10px] text-[var(--color-text-muted)] mt-1">{pnlLabel}</div>}
+      <div title={details} className="text-xs text-[var(--color-text-muted)] mt-1 truncate">{details}</div>
     </div>
   );
 }
@@ -110,7 +113,10 @@ function DashboardStrip({
   totalUsd,
   totalTokens,
   connectorCount,
-  portfolioPnl,
+  portfolioChange,
+  changeValuation,
+  equityUsd,
+  unrealizedPnlUsd,
   botCount,
   controllerCount,
   botPnl,
@@ -127,7 +133,10 @@ function DashboardStrip({
   totalUsd: number;
   totalTokens: number;
   connectorCount: number;
-  portfolioPnl: number | null;
+  portfolioChange: number | null;
+  changeValuation: "wallet" | "equity";
+  equityUsd: number | null;
+  unrealizedPnlUsd: number | null;
   botCount: number;
   controllerCount: number;
   botPnl: number;
@@ -151,10 +160,11 @@ function DashboardStrip({
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
       <div className="flex items-stretch divide-x divide-[var(--color-border)]">
         <KpiCell
-          label="Portfolio"
-          mainValue={formatCurrency(convertFromUsd(totalUsd), currencySymbol)}
-          pnl={portfolioPnl != null ? convertFromUsd(portfolioPnl) : undefined}
-          details={`${totalTokens} assets · ${connectorCount} connector${connectorCount !== 1 ? "s" : ""}`}
+          label={equityUsd != null ? "Portfolio equity" : "Portfolio balance"}
+          mainValue={formatCurrency(convertFromUsd(equityUsd ?? totalUsd), currencySymbol)}
+          pnl={portfolioChange != null ? convertFromUsd(portfolioChange) : undefined}
+          pnlLabel={`${period} ${changeValuation === "equity" ? "equity" : "balance"} change · includes transfers`}
+          details={`Wallet ${formatCurrency(convertFromUsd(totalUsd), currencySymbol)} · Unrealized ${unrealizedPnlUsd != null ? formatCurrencyPnl(convertFromUsd(unrealizedPnlUsd), currencySymbol) : "unavailable"} · ${totalTokens} assets · ${connectorCount} connectors`}
           currencySymbol={currencySymbol}
         />
 
@@ -365,6 +375,11 @@ function ConnectorRow({
         <td className="px-4 py-3" />
         <td className="px-4 py-3 text-right font-semibold tabular-nums">
           {formatCurrency(convertFromUsd(connector.total_usd), currencySymbol)}
+          {connector.unrealized_pnl_usd != null && connector.unrealized_pnl_usd !== 0 && (
+            <div className="text-xs font-normal text-[var(--color-text-muted)]">
+              Unrealized {formatCurrencyPnl(convertFromUsd(connector.unrealized_pnl_usd), currencySymbol)}
+            </div>
+          )}
         </td>
         <td className="px-4 py-3">
           <span className="text-sm tabular-nums text-[var(--color-text-muted)]">
@@ -404,7 +419,7 @@ function formatTooltipDate(ts: number, range: string) {
 }
 
 function PortfolioEvolution({ server, range, convertFromUsd, currencySymbol }: { server: string; range: string; convertFromUsd: (val: number) => number; currencySymbol: string }) {
-  const [stacked, setStacked] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
   const [hover, setHover] = useState<{ x: number; point: PortfolioHistoryPoint } | null>(null);
   const queryClient = useQueryClient();
 
@@ -429,13 +444,17 @@ function PortfolioEvolution({ server, range, convertFromUsd, currencySymbol }: {
   const { data: breakdownData } = useQuery({
     queryKey: ["portfolio-history-breakdown", server, range],
     queryFn: () => api.getPortfolioHistory(server, range, true),
-    enabled: !!server && stacked,
+    enabled: !!server && showBreakdown,
     refetchInterval: 60000,
   });
 
-  const activeData: PortfolioHistoryResponse | undefined = stacked && breakdownData ? breakdownData : data;
+  const activeData: PortfolioHistoryResponse | undefined = showBreakdown && breakdownData ? breakdownData : data;
   const rawPoints = activeData?.points ?? [];
   const topTokens = activeData?.top_tokens ?? [];
+  // A positive-only area stack cannot represent liabilities. Keep them in
+  // the totals and use the line chart rather than hiding negative values.
+  const hasNegativeTokens = rawPoints.some((p) => Object.values(p.tokens ?? {}).some((v) => v < 0));
+  const stacked = showBreakdown && !hasNegativeTokens;
 
   // Convert all values from USDT to display currency
   const points = useMemo(() =>
@@ -462,8 +481,11 @@ function PortfolioEvolution({ server, range, convertFromUsd, currencySymbol }: {
     const minTs = points.length > 0 ? points[0].timestamp : 0;
     const maxTs = points.length > 0 ? points[points.length - 1].timestamp : 1;
     const values = points.map((p) => p.total_usd);
-    const minVal = stacked ? 0 : (values.length > 0 ? Math.min(...values) * 0.98 : 0);
-    const maxVal = values.length > 0 ? Math.max(...values) * 1.02 : 1;
+    const low = values.length > 0 ? Math.min(...values) : 0;
+    const high = values.length > 0 ? Math.max(...values) : 1;
+    const padding = Math.max(high - low, Math.abs(high), 1) * 0.02;
+    const minVal = stacked ? 0 : low - padding;
+    const maxVal = high + padding;
     const valRange = maxVal - minVal || 1;
     const tsRange = maxTs - minTs || 1;
 
@@ -561,19 +583,25 @@ function PortfolioEvolution({ server, range, convertFromUsd, currencySymbol }: {
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 h-full">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-[var(--color-text-muted)]">Portfolio Evolution</h3>
+        <div>
+          <h3 className="text-sm font-medium text-[var(--color-text-muted)]">Portfolio Evolution</h3>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            {activeData?.valuation === "equity" ? "Account equity" : "Wallet balance · excludes unrealized PnL"} · includes transfers
+          </p>
+        </div>
         <div className="flex gap-0.5 rounded border border-[var(--color-border)] p-0.5">
           <button
-            onClick={() => setStacked(false)}
+            onClick={() => setShowBreakdown(false)}
             className={`p-1 rounded transition-colors ${!stacked ? "bg-[var(--color-accent)] text-white" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
             title="Line chart"
           >
             <BarChart3 className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => setStacked(true)}
+            onClick={() => setShowBreakdown(true)}
+            disabled={hasNegativeTokens}
             className={`p-1 rounded transition-colors ${stacked ? "bg-[var(--color-accent)] text-white" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
-            title="Stacked area chart"
+            title={hasNegativeTokens ? "Negative balances are shown in the line chart" : "Stacked area chart"}
           >
             <Layers className="h-3.5 w-3.5" />
           </button>
@@ -755,6 +783,7 @@ export function Portfolio() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [period, setPeriod] = useState<string>("1W");
+  const [refreshFailedFor, setRefreshFailedFor] = useState<string | null>(null);
 
   // A tab is a real address here (Bots.tsx idiom): the default clears the param
   // rather than writing it, so `/portfolio` stays the canonical URL for Assets.
@@ -776,15 +805,20 @@ export function Portfolio() {
   // One-time background refresh on mount / server change
   useEffect(() => {
     if (!server) return;
+    let cancelled = false;
     const timer = setTimeout(() => {
       api
         .getPortfolio(server, true)
         .then((fresh) => {
+          if (cancelled) return;
           queryClient.setQueryData(["portfolio", server], fresh);
+          setRefreshFailedFor(null);
         })
-        .catch(() => {}); // silent fail, cached data still shown
+        .catch(() => {
+          if (!cancelled) setRefreshFailedFor(server);
+        });
     }, 500);
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [server, queryClient]);
 
   const { data: bots } = useQuery({
@@ -938,9 +972,10 @@ export function Portfolio() {
   const totalUsd = data?.total_usd ?? 0;
   const connectors = data?.connectors ?? [];
 
-  // Compute portfolio PnL from history (follows period selector)
+  // A change in account value includes deposits and withdrawals. Without a
+  // complete cash-flow ledger it must never be presented as trading PnL.
   const historyPoints = periodHistory?.points ?? [];
-  const portfolioPnl =
+  const portfolioChange =
     historyPoints.length >= 2
       ? historyPoints[historyPoints.length - 1].total_usd - historyPoints[0].total_usd
       : null;
@@ -969,12 +1004,20 @@ export function Portfolio() {
 
   return (
     <div className={`space-y-6 transition-opacity duration-300 ${isPlaceholderData ? "opacity-60" : "opacity-100"}`}>
+      {refreshFailedFor === server && (
+        <p role="status" className="text-sm text-[var(--color-text-muted)]">
+          Could not refresh balances. Showing the last available snapshot.
+        </p>
+      )}
       {/* Dashboard Strip */}
       <DashboardStrip
         totalUsd={totalUsd}
         totalTokens={totalTokens}
         connectorCount={connectors.length}
-        portfolioPnl={portfolioPnl}
+        portfolioChange={portfolioChange}
+        changeValuation={periodHistory?.valuation ?? "wallet"}
+        equityUsd={data?.equity_usd ?? null}
+        unrealizedPnlUsd={data?.unrealized_pnl_usd ?? null}
         botCount={botsList.length}
         controllerCount={controllerCount}
         botPnl={botPnl}
@@ -1058,7 +1101,7 @@ export function Portfolio() {
                     Price
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Value
+                    Wallet value
                   </th>
                   <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                     Allocation
@@ -1067,7 +1110,7 @@ export function Portfolio() {
               </thead>
               <tbody>
                 {connectors.map((c) => (
-                  <ConnectorRow key={c.connector} connector={c} totalPortfolio={totalUsd} convertFromUsd={convertFromUsd} currencySymbol={currencySymbol} />
+                  <ConnectorRow key={`${c.account_name}:${c.connector}`} connector={c} totalPortfolio={totalUsd} convertFromUsd={convertFromUsd} currencySymbol={currencySymbol} />
                 ))}
               </tbody>
             </table>
