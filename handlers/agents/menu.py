@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 from condor.runtime import SessionKey
 from condor.runtime import client as runtime
 
-from ._shared import AGENT_OPTIONS, DEFAULT_AGENT, resolve_chat_binding
+from ._shared import AGENT_OPTIONS, resolve_chat_binding
 from .custom_models import format_model_label
 
 log = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def _active_session_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def stop_generating_keyboard() -> InlineKeyboardMarkup:
+def stop_generating_keyboard(token: str) -> InlineKeyboardMarkup:
     """The button that rides on a streamed answer while it is being written.
 
     Same semantics as /stop — abort the turn at the agent, keep the session and
@@ -47,7 +47,13 @@ def stop_generating_keyboard() -> InlineKeyboardMarkup:
     `TelegramStreamer.finalize()`, so it never outlives the turn it can stop.
     """
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("⏹ Stop generating", callback_data="agent:cancel")]]
+        [
+            [
+                InlineKeyboardButton(
+                    "⏹ Stop generating", callback_data=f"agent:cancel:{token}"
+                )
+            ]
+        ]
     )
 
 
@@ -660,7 +666,9 @@ async def show_agent_menu(
         keyboard = _active_session_keyboard()
     else:
         # No session — show options to start or change settings
-        agent_key = context.user_data.get("agent_llm", DEFAULT_AGENT)
+        from . import _reclaim_default_agent
+
+        agent_key = _reclaim_default_agent(context)
         llm_label = AGENT_OPTIONS.get(agent_key, {}).get("label", agent_key)
         # The binding outlives the subprocess, so between respawns this is the
         # only place the chat's real interlocutor shows: reporting the LLM alone

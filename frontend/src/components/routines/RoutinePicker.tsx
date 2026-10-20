@@ -1,6 +1,7 @@
 import { Brain, ChevronDown, ChevronUp, Search, Zap } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
+import { SelectField } from "@/components/ui/select-field";
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import type { RoutineInfo, RoutineInstance } from "@/lib/api";
 import {
@@ -44,6 +45,7 @@ export function RoutinePicker({
   variant = "dock",
   parts = "both",
   arrows = false,
+  scopeInMenu = false,
 }: {
   routines: RoutineInfo[];
   /** Live runs, for the dot that says one of these is running right now. */
@@ -59,6 +61,8 @@ export function RoutinePicker({
   parts?: "both" | "scope" | "routine";
   /** Step buttons beside the trigger, for the reader who is not on a keyboard. */
   arrows?: boolean;
+  /** Offer the scope inside the menu, for layouts with room for one control. */
+  scopeInMenu?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // State, not a ref: the portalled panel only gets coordinates once a render
@@ -66,8 +70,15 @@ export function RoutinePicker({
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [query, setQuery] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
+  const focusPanel = useCallback((node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    node?.focus({ preventScroll: true });
+  }, []);
 
   const agents = useMemo(() => routineAgents(routines), [routines]);
+  // "condor" is the Condor scope, not an agent, even when an agent claims it.
+  const agentScopes = agents.filter((a) => a !== "condor");
+  const agentPicked = scope === "agent" || agentScopes.includes(scope);
   const listed = useMemo(() => inScope(routines, scope), [routines, scope]);
   const active = useMemo(
     () => resolveRoutine(routines, source),
@@ -81,6 +92,7 @@ export function RoutinePicker({
     return listed.filter(
       (r) =>
         r.name.toLowerCase().includes(q) ||
+        formatRoutineName(r.name).toLowerCase().includes(q) ||
         r.description.toLowerCase().includes(q),
     );
   }, [listed, query]);
@@ -151,56 +163,35 @@ export function RoutinePicker({
       title={
         active ? `${active.name} — ↑/↓ for the next routine` : "Pick a routine"
       }
-      className={`flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-left transition-colors hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]/40 ${
-        dock ? "w-full" : "min-w-0 max-w-[260px] flex-1"
+      className={`flex min-h-7 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-left text-xs transition-colors hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]/40 pointer-coarse:min-h-11 ${
+        dock ? "w-full" : "min-w-0 w-full flex-1"
       }`}
     >
       {owner ? (
-        <Brain className="h-3 w-3 shrink-0 text-purple-400" />
+        <Brain className="h-3.5 w-3.5 shrink-0 text-purple-400" />
       ) : (
-        <Zap className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
+        <Zap className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
       )}
-      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--color-text)]">
+      <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-text)]">
         {active ? formatRoutineName(active.name) : "Pick a routine"}
       </span>
       {active && active.report_count > 0 && (
-        <span className="shrink-0 text-[9px] text-[var(--color-text-muted)]/70">
+        <span className="shrink-0 text-[11px] text-[var(--color-text-muted)]/70">
           {active.report_count}
         </span>
       )}
-      <ChevronDown className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
+      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
     </button>
   );
 
   const scopeSelect = (
-    <div className={`relative ${dock ? "w-full" : "shrink-0"}`}>
-      <select
-        value={scope}
-        onChange={(e) => onScopeChange(e.target.value)}
-        aria-label="Routine scope"
-        title="Whose routines this list shows"
-        className={`w-full cursor-pointer appearance-none rounded-md border py-1 pl-2 pr-6 text-[10px] font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]/40 ${
-          scope === "all" || scope === "condor" || scope === "routine"
-            ? "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            : "border-purple-500/30 bg-purple-500/10 text-purple-400"
-        }`}
-      >
-        <option value="all">{formatScope("all")}</option>
-        <option value="condor">{formatScope("condor")}</option>
-        {/* The other half of the split: everything an agent owns, whoever it
-            is. Only the report browser used to ask for it, from a select of
-            its own. */}
-        {agents.length > 0 && (
-          <option value="agent">{formatScope("agent")}</option>
-        )}
-        {agents.map((slug) => (
-          <option key={slug} value={slug}>
-            {formatScope(slug)}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-current opacity-70" />
-    </div>
+    <SelectField label="Routine scope" size="compact" value={scope} onChange={onScopeChange}
+      options={[
+        { value: "all", label: formatScope("all") },
+        { value: "condor", label: formatScope("condor") },
+        ...(agents.length ? [{ value: "agent", label: formatScope("agent") }] : []),
+        ...agents.map((slug) => ({ value: slug, label: formatScope(slug) })),
+      ]} />
   );
 
   /** One step button of the ↑/↓ pair, dead at the end of the list. */
@@ -218,7 +209,7 @@ export function RoutinePicker({
             ? `${up ? "Previous" : "Next"}: ${formatRoutineName(target.name)}`
             : `No ${up ? "previous" : "next"} routine`
         }
-        className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent pointer-coarse:h-11 pointer-coarse:w-11"
       >
         {up ? (
           <ChevronUp className="h-3.5 w-3.5" />
@@ -231,10 +222,11 @@ export function RoutinePicker({
 
   return (
     <div
+      data-routine-picker
       className={
         dock
           ? "flex flex-col gap-1 px-3 pb-2 pt-1"
-          : "flex min-w-0 items-center gap-1.5"
+          : "flex w-full min-w-0 items-center gap-1.5 [&>div:first-child]:min-w-0 [&>div:first-child]:flex-1 @max-[639px]/workspace-sheet:grid @max-[639px]/workspace-sheet:grid-cols-[minmax(0,1fr)_auto] @max-[639px]/workspace-sheet:gap-2 @max-[639px]/workspace-sheet:[&>div:first-child]:col-span-full"
       }
     >
       {parts !== "routine" && scopeSelect}
@@ -249,24 +241,73 @@ export function RoutinePicker({
         anchor={anchor}
         open={open && parts !== "scope"}
         onClose={() => setOpen(false)}
-        matchAnchorWidth="min"
+        matchAnchorWidth="exact"
+        minWidth={400}
+        horizontalBoundary={anchor?.closest<HTMLElement>("[data-workspace-sheet]")}
         maxHeight={360}
         role="listbox"
-        className="w-[280px]"
       >
-        <div ref={panelRef} onKeyDown={onPanelKey}>
-          <div className="sticky top-0 flex items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5">
-            <Search className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${formatScope(scope).toLowerCase()}…`}
-              className="min-w-0 flex-1 bg-transparent text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]/60 focus:outline-none"
-            />
+        <div ref={focusPanel} tabIndex={-1} onKeyDown={onPanelKey} className="focus:outline-none">
+          {/* Search and scope stay pinned while the list scrolls under them. */}
+          <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="flex min-h-8 items-center gap-1.5 px-2 py-1.5 pointer-coarse:min-h-11">
+              <Search className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search ${formatScope(scope).toLowerCase()}…`}
+                className="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]/60 focus:outline-none"
+              />
+            </div>
+            {scopeInMenu && (
+              // Three kinds of owner as one segmented control; the agents
+              // themselves only appear once "Agents" is picked.
+              <div role="group" aria-label="Routine scope" className="space-y-1.5 px-2 pb-2">
+                <div className="grid auto-cols-fr grid-flow-col gap-0.5 rounded-md bg-[var(--color-surface-hover)] p-0.5">
+                  {(["all", "condor", ...(agentScopes.length ? ["agent"] : [])] as RoutineScope[]).map((value) => {
+                    const pressed = value === "agent" ? agentPicked : scope === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={pressed}
+                        onClick={() => onScopeChange(value)}
+                        className={`h-6 rounded px-2 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-primary)] ${
+                          pressed
+                            ? "bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm"
+                            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        }`}
+                      >
+                        {value === "agent" ? "Agents" : formatScope(value)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {agentPicked && (
+                  <div className="flex flex-wrap gap-1">
+                    {(["agent", ...agentScopes] as RoutineScope[]).map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={scope === value}
+                        onClick={() => onScopeChange(value)}
+                        className={`flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-primary)] ${
+                          scope === value
+                            ? "border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+                        }`}
+                      >
+                        {value !== "agent" && <Brain className="h-3 w-3 shrink-0 text-purple-400" />}
+                        {formatScope(value)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           {matches.length === 0 ? (
-            <p className="px-3 py-3 text-[11px] text-[var(--color-text-muted)]">
+            <p className="px-3 py-3 text-xs text-[var(--color-text-muted)]">
               No routine matches.
             </p>
           ) : (
@@ -281,7 +322,7 @@ export function RoutinePicker({
                   role="option"
                   aria-selected={isActive}
                   onClick={() => pick(r.name)}
-                  className={`block w-full border-l-2 px-2.5 py-1.5 text-left transition-colors focus:outline-none ${
+                  className={`block min-h-8 w-full border-l-2 px-2.5 py-1.5 text-left transition-colors focus:outline-none pointer-coarse:min-h-11 ${
                     isActive
                       ? "border-l-[var(--color-primary)] bg-[var(--color-primary)]/5"
                       : "border-l-transparent hover:bg-[var(--color-surface-hover)] focus:bg-[var(--color-surface-hover)]"
@@ -289,12 +330,12 @@ export function RoutinePicker({
                 >
                   <span className="flex items-center gap-1.5">
                     {rowOwner ? (
-                      <Brain className="h-2.5 w-2.5 shrink-0 text-purple-400" />
+                      <Brain className="h-3.5 w-3.5 shrink-0 text-purple-400" />
                     ) : (
-                      <Zap className="h-2.5 w-2.5 shrink-0 text-[var(--color-text-muted)]/60" />
+                      <Zap className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]/60" />
                     )}
                     <span
-                      className={`min-w-0 flex-1 truncate text-[11px] ${
+                      className={`min-w-0 flex-1 truncate text-xs ${
                         isActive
                           ? "font-semibold text-[var(--color-text)]"
                           : "text-[var(--color-text)]"
@@ -306,12 +347,12 @@ export function RoutinePicker({
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_4px_theme(colors.emerald.400)]" />
                     )}
                     {r.report_count > 0 && (
-                      <span className="shrink-0 text-[9px] text-[var(--color-text-muted)]/60">
+                      <span className="shrink-0 text-[11px] text-[var(--color-text-muted)]/60">
                         {r.report_count}
                       </span>
                     )}
                   </span>
-                  <span className="block truncate pl-4 text-[10px] text-[var(--color-text-muted)]/70">
+                  <span className="block truncate pl-5 text-[11px] text-[var(--color-text-muted)]/70">
                     {/* Only a mixed list has to say whose routine this is. */}
                     {rowOwner && scope === "all" ? `${rowOwner} · ` : ""}
                     {r.description}

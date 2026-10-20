@@ -20,10 +20,8 @@ export interface AuthedImage {
  * token, turned into an object URL, and revoked when the component that asked
  * for them goes away. This is the only place in the app that does that dance.
  *
- * Loading and failed are reported apart, because they want different pictures:
- * a caller reserves the image's box for the first (so the content below does
- * not jump when the bytes land) and collapses to nothing for the second, rather
- * than leaving a broken-image glyph on screen.
+ * Loading and failed are reported separately so callers can reserve space while
+ * fetching and show an explicit failure state when the image cannot be loaded.
  *
  * A `url` of `null` is how a caller says "this one is already a local object URL
  * for bytes in this tab, leave it alone" — the composer's optimistic bubble. It
@@ -51,8 +49,7 @@ export function useAuthedImage(url: string | null): AuthedImage {
         created = URL.createObjectURL(blob);
         setState({ url, objectUrl: created });
       } catch {
-        // A picture that cannot be loaded is not worth breaking a transcript
-        // over. The caller renders nothing.
+        // Let the caller show a failure state without breaking the transcript.
         if (revoked) return;
         setState({ url, objectUrl: null });
       }

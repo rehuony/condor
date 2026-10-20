@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Bot, CheckCheck, Terminal, Workflow, Zap } from "lucide-react";
+import { Bell, Bot, CheckCheck, Terminal, Trash2, Workflow, Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { NOTIFICATIONS_KEY } from "@/hooks/useChatSocket";
 import { api, type AppNotification, type NotificationsResponse } from "@/lib/api";
 import { setAppBadge } from "@/lib/appBadge";
@@ -94,6 +95,16 @@ export function NotificationBell() {
     },
   });
 
+  // Clearing deletes the history for good, so it asks first, outside the menu.
+  const [confirmClear, setConfirmClear] = useState(false);
+  const clearAll = useMutation({
+    mutationFn: () => api.clearNotifications(),
+    onSuccess: () => {
+      queryClient.setQueryData<NotificationsResponse>(NOTIFICATIONS_KEY, { items: [], unread: 0 });
+      setConfirmClear(false);
+    },
+  });
+
   const toggle = () => {
     const next = !open;
     setOpen(next);
@@ -134,19 +145,34 @@ export function NotificationBell() {
         role="menu"
         className="w-[360px] py-1"
       >
-        <div className="flex items-center justify-between px-3 py-1.5">
+        {/* A narrow menu keeps the commands as icons; the words stay for screen readers. */}
+        <div className="@container/notif-header flex items-center justify-between gap-2 px-3 py-1.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Notifications
           </span>
           {items.length > 0 && (
-            <button
-              onClick={() => markRead.mutate(undefined)}
-              className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
-              title="Mark all as read"
-            >
-              <CheckCheck className="h-3 w-3" />
-              Mark all read
-            </button>
+            <span className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  clearAll.reset();
+                  setConfirmClear(true);
+                }}
+                className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-red)]"
+                title="Remove all notifications"
+              >
+                <Trash2 className="h-3 w-3" />
+                <span className="@max-[280px]/notif-header:sr-only">Clear all</span>
+              </button>
+              <button
+                onClick={() => markRead.mutate(undefined)}
+                className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+                title="Mark all as read"
+              >
+                <CheckCheck className="h-3 w-3" />
+                <span className="@max-[280px]/notif-header:sr-only">Mark all read</span>
+              </button>
+            </span>
           )}
         </div>
 
@@ -185,6 +211,20 @@ export function NotificationBell() {
           );
         })}
       </AnchoredMenu>
+
+      {confirmClear && (
+        <ConfirmDialog
+          title="Clear all notifications?"
+          confirmLabel="Clear all"
+          pendingLabel="Clearing…"
+          pending={clearAll.isPending}
+          error={clearAll.error instanceof Error ? clearAll.error.message : null}
+          onConfirm={() => clearAll.mutate()}
+          onCancel={() => setConfirmClear(false)}
+        >
+          <p>This can't be undone.</p>
+        </ConfirmDialog>
+      )}
     </>
   );
 }

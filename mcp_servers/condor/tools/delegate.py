@@ -32,13 +32,6 @@ ON_COMPLETE_CHOICES = ("notify", "resume")
 # turn open indefinitely. An ask is blocking, so this bound is the caller's too.
 ASK_TIMEOUT_SEC = 180.0
 
-# The default wall-clock budget for a background task, stated here only so the
-# tool can tell the caller what it is getting when it asks for nothing. The
-# route owns the real default and the upper bound (ARCH-310); this subprocess
-# never imports the main process, so a mismatch is caught by a test rather than
-# by an import.
-DEFAULT_TIMEOUT_SEC = 900
-
 # How the user tracks a delegation, per surface. The two surfaces have genuinely
 # different UIs for this, and the hint is quoted back to the user verbatim, so a
 # dashboard-only install was being told to run a command it does not have

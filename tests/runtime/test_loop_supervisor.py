@@ -364,6 +364,27 @@ def test_restart_rebuilds_the_engine_with_the_recorded_owner(tmp_path, monkeypat
     assert read_status(engine.session_dir)["state"] == LoopState.RUNNING
 
 
+@pytest.mark.parametrize("limit", ["max_drawdown_pct", "shutdown_drawdown_pct"])
+def test_restart_does_not_reset_a_configured_drawdown_limit(
+    tmp_path, monkeypatch, limit
+):
+    from condor.agents.config import save_full_config
+
+    old_dir = _seed_session(tmp_path, restart_on_boot=True, user_id=4242)
+    _seed_agent_and_strategy(tmp_path, monkeypatch, created_by=999)
+    strategy_dir = old_dir.parent.parent
+    save_full_config(strategy_dir, {"risk_limits": {limit: 5.0}})
+    supervisor = LoopSupervisor()
+
+    report = _run_real_restart(tmp_path, monkeypatch, supervisor)
+
+    assert supervisor.all() == {}
+    assert report.restarted == []
+    assert any("risk history is not restored" in error for error in report.errors)
+    assert read_status(old_dir)["state"] == LoopState.INTERRUPTED
+    assert not (old_dir.parent / "session_2").exists()
+
+
 def test_restart_of_a_legacy_status_falls_back_to_the_creator(tmp_path, monkeypatch):
     """A status file written before user_id existed still restarts, not crashes."""
     _seed_session(tmp_path, restart_on_boot=True, user_id=None)

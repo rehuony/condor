@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { invalidateStrategyCatalog } from "@/components/agent/agentQueries";
 import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
 import { EntityCard } from "@/components/agent/EntityCard";
+import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import { workspaceHref } from "@/components/agent/workspace/workspaceUrl";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { api, type StrategySummary } from "@/lib/api";
@@ -254,9 +255,9 @@ function CreateStrategyDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-6 shadow-2xl"
+        className={`${DIALOG_PANEL} max-h-[85dvh] max-w-md bg-[var(--color-bg)] p-5 sm:p-6`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-lg font-semibold text-[var(--color-text)]">New Loop</h2>

@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+/* Phones, and short landscape tablets where a side rail leaves no room. */
+@custom-variant narrow-pane (@media (max-width: 767px), (min-width: 768px) and (max-width: 1023px) and (max-height: 500px));
+
+/* Dialog entrances: the backdrop fades, the panel rises a little. */
+@theme {
+  --animate-dialog-backdrop: dialog-backdrop 150ms ease-out;
+  --animate-dialog-panel: dialog-panel 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  @keyframes dialog-backdrop {
+    from { opacity: 0; }
+  }
+  @keyframes dialog-panel {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  }
+}
+
 /* ── Dark Mode: Deep Space + Gold ── */
 :root,
 [data-theme="dark"] {
@@ -235,6 +251,26 @@ body {
   background: var(--color-text-muted);
 }
 
+/* A strip that scrolls sideways without drawing a bar (e.g. starred markets). */
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Phones scroll by touch, so panes keep scrolling without a visible bar. */
+@media (max-width: 767px) {
+  * {
+    scrollbar-width: none;
+  }
+
+  ::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* ── Chat markdown styles ── */
 /* An answer is a document, so its outline has to be legible at a glance: the
    scale used to be 1.1 / 1.0 / 0.95em against a 1em body, which left an h2 the
@@ -351,3 +387,24 @@ body {
   padding-left: 0.75em;
   color: var(--color-text-muted);
 }
+
+@media (max-width: 639px) {
+  /* iOS zooms focused fields below 16px, displacing the workspace. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .chat-markdown {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}
+
+/* Fade the scrolled-off edges of the main navigation. */
+.main-navigation[data-overflow-left="true"] { mask-image: linear-gradient(to right, transparent, black 16px); }
+.main-navigation[data-overflow-right="true"] { mask-image: linear-gradient(to left, transparent, black 16px); }
+
+/* Fade the scrolled-off edges of the main navigation. */
+.main-navigation[data-overflow-left="true"][data-overflow-right="true"] { mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent); }

@@ -101,15 +101,24 @@ function changeHeader(): HTMLElement {
   return headers[0] as HTMLElement;
 }
 
-/** The quote-asset filter, and a change event React will actually see. */
-function selectQuote(value: string) {
-  const select = container.querySelector("select") as HTMLSelectElement;
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLSelectElement.prototype,
-    "value",
-  )!.set!;
-  setter.call(select, value);
-  select.dispatchEvent(new Event("change", { bubbles: true }));
+const QUOTE_FILTER = 'button[aria-label="Filter by quote asset"]';
+
+/** The quote-asset menu's options, read while it is open. */
+async function quoteOptions(): Promise<string[]> {
+  await act(async () => (container.querySelector(QUOTE_FILTER) as HTMLElement).click());
+  const labels = [...document.querySelectorAll('[role="listbox"][aria-label="Filter by quote asset"] [role="option"]')]
+    .map((o) => o.textContent ?? "");
+  await act(async () => (container.querySelector(QUOTE_FILTER) as HTMLElement).click());
+  return labels;
+}
+
+/** Pick a quote from the quote-asset menu by its label. */
+async function selectQuote(label: string) {
+  await act(async () => (container.querySelector(QUOTE_FILTER) as HTMLElement).click());
+  const option = [...document.querySelectorAll('[role="listbox"][aria-label="Filter by quote asset"] [role="option"]')]
+    .find((o) => o.textContent === label) as HTMLElement | undefined;
+  if (!option) throw new Error(`no quote option ${label}`);
+  await act(async () => option.click());
 }
 
 /** A venue in the rail, by its display name. */
@@ -196,6 +205,26 @@ describe("the Δ column never claims a window it did not measure", () => {
 });
 
 describe("picking a row", () => {
+  it.each([
+    'button[aria-label="Exchange"]',
+    QUOTE_FILTER,
+    '[data-market-row] button',
+  ])("keeps keyboard actions on %s out of the row cursor", async (selector) => {
+    TICKERS = [ticker({ trading_pair: "BTC-USDT" }), ticker({ trading_pair: "ETH-USDC" })];
+    await render();
+    const control = container.querySelector(selector)!;
+    const cursorRow = () =>
+      [...document.querySelectorAll("[data-market-row]")].findIndex((r) =>
+        r.className.includes("bg-[var(--color-primary)]/10"),
+      );
+    for (const key of ["ArrowDown", "ArrowUp", "Enter"]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => control.dispatchEvent(event));
+      expect(cursorRow()).toBe(0);
+    }
+    expect(picked).toEqual([]);
+  });
+
   it("carries the pair and the venue it was scoped to back to the trade surface", async () => {
     TICKERS = [ticker({ trading_pair: "SOL-USDC", change_pct: 1, change_window_s: HOUR })];
     await render();
@@ -300,7 +329,7 @@ describe("the quote filter", () => {
     await render();
     expect(container.textContent).toContain("Showing 3 of 3");
 
-    await act(async () => selectQuote("USDC"));
+    await selectQuote("USDC");
     expect(container.textContent).toContain("Showing 1 of 1");
     expect(rowCells("SOL-USDC")).toBeTruthy();
   });
@@ -312,15 +341,13 @@ describe("the quote filter", () => {
       ticker({ trading_pair: "ETH-BTC" }),
     ];
     await render();
-    const options = () =>
-      [...container.querySelectorAll("option")].map((o) => o.textContent);
     // Priority order, not alphabetical: the quotes a trader looks for first.
-    expect(options()).toEqual(["All quotes", "USDT", "USDC", "BTC"]);
+    expect(await quoteOptions()).toEqual(["All quotes", "USDT", "USDC", "BTC"]);
 
     // The list is derived from the venue, not from the filtered rows, so
     // filtering never removes the other quotes from the control that filtered.
-    await act(async () => selectQuote("BTC"));
-    expect(options()).toEqual(["All quotes", "USDT", "USDC", "BTC"]);
+    await selectQuote("BTC");
+    expect(await quoteOptions()).toEqual(["All quotes", "USDT", "USDC", "BTC"]);
   });
 
   it("resets on a venue switch, so no filter outlives the list it was for", async () => {
@@ -330,14 +357,14 @@ describe("the quote filter", () => {
     ];
     await render();
 
-    await act(async () => selectQuote("USDC"));
+    await selectQuote("USDC");
     expect(container.textContent).toContain("Showing 1 of 1");
 
     // A quote that exists here may not exist on the venue you moved to; a
     // filter that survived the move would show an empty table and no reason why.
     await act(async () => venueOption("Kraken").click());
     await flush();
-    expect((container.querySelector("select") as HTMLSelectElement).value).toBe("");
+    expect(container.querySelector(QUOTE_FILTER)!.textContent).toBe("All quotes");
     expect(container.textContent).toContain("Showing 2 of 2");
   });
 });

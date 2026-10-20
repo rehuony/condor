@@ -2,8 +2,8 @@
 
 The only place an attachment path is built, in the spirit of :mod:`condor.paths`
 — one module owns the layout, the limits and the type allowlist, so a second
-surface (Telegram's ``filters.PHOTO``, when someone builds it) reaches the same
-rules by calling :func:`save` rather than by remembering them.
+surface (such as Telegram) reaches the same rules by calling :func:`save`
+rather than by remembering them.
 
 Files land **inside the conversation they belong to**::
 

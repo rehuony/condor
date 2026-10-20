@@ -117,11 +117,11 @@ async function render(props: Partial<Parameters<typeof LoopsPanel>[0]> = {}) {
 }
 
 const panel = () =>
-  container.querySelector<HTMLElement>('[data-testid="loops-panel"]')!;
+  document.querySelector<HTMLElement>('[data-testid="loops-panel"]')!;
 const cards = () =>
-  [...container.querySelectorAll<HTMLButtonElement>("[data-loop-row]")];
+  [...panel().querySelectorAll<HTMLButtonElement>("[data-loop-row]")];
 const groupHeadings = () =>
-  [...container.querySelectorAll<HTMLElement>("[data-loop-group]")];
+  [...panel().querySelectorAll<HTMLElement>("[data-loop-group]")];
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;

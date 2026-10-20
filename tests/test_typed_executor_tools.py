@@ -125,6 +125,9 @@ def test_omitted_parameters_are_not_sent(monkeypatch):
     load-bearing — would overwrite the user's saved default too, since defaults
     merge underneath the call.
     """
+    monkeypatch.setattr(
+        executor_create.executor_preferences, "get_defaults", lambda _: {}
+    )
     client = _RecordingClient()
 
     asyncio.run(

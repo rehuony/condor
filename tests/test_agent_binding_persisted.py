@@ -54,6 +54,10 @@ class _FakeSession:
 
 
 class _Message:
+    chat_id = 4242
+    photo = sticker = voice = audio = document = None
+    reply_to_message = external_reply = None
+
     def __init__(self, rendered, text="hello"):
         self._rendered = rendered
         self.text = text
@@ -106,6 +110,9 @@ class _Streamer:
         pass
 
     async def finalize(self):
+        pass
+
+    async def stop_edit_loop(self):
         pass
 
 

@@ -1,11 +1,12 @@
 """Unit tests for the positions core-data provider ([[ARCH-682]]).
 
 The provider reads through :func:`condor.fetchers.tracked_positions.fetch_tracked_positions`
-like its sibling ``DriftProvider``, so the response-shape normalisation (and the
-dropping of malformed rows) lives in one place.
+like its sibling ``DriftProvider``, so response-shape validation lives in one place.
 """
 
 import asyncio
+
+import pytest
 
 from condor.agents.providers import positions as positions_module
 from condor.agents.providers.positions import PositionsProvider
@@ -38,7 +39,6 @@ def test_positions_provider_reads_through_the_tracked_fetcher(monkeypatch):
     monkeypatch.setattr(positions_module, "fetch_tracked_positions", spy)
     provider = PositionsProvider()
 
-    # A non-dict row in the page is dropped instead of crashing the block.
     row = {
         "connector_name": "binance",
         "trading_pair": "SOL-USDC",
@@ -46,7 +46,7 @@ def test_positions_provider_reads_through_the_tracked_fetcher(monkeypatch):
         "net_amount_base": 1.5,
         "buy_breakeven_price": 140.0,
     }
-    client = _Client(page={"positions": [row, "garbage", None]})
+    client = _Client(page={"positions": [row]})
     result = asyncio.run(provider.execute(client, {}, agent_id="acme.scalper_1"))
 
     assert calls == [{"controller_id": "acme.scalper_1", "strict": True}]
@@ -67,3 +67,11 @@ def test_positions_provider_empty_book_reports_no_open_positions():
     )
     assert result.data == {"positions": []}
     assert result.summary == "Positions Summary: no open positions"
+
+
+@pytest.mark.parametrize("page", [None, {"positions": None}, {"positions": [None]}])
+def test_positions_provider_reports_malformed_book_as_unknown(page):
+    result = asyncio.run(PositionsProvider().execute(_Client(page=page), {}))
+
+    assert result.data == {"error": "ValueError"}
+    assert "failed to fetch" in result.summary

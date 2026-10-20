@@ -39,6 +39,7 @@ def _context(**user_data):
 
     async def send_message(chat_id, text, **kwargs):
         sent.append(SimpleNamespace(text=text, markup=kwargs.get("reply_markup")))
+        return SimpleNamespace(message_id=100 + len(sent))
 
     return SimpleNamespace(
         bot=SimpleNamespace(send_message=send_message),
@@ -168,10 +169,8 @@ def test_the_settings_toggle_flips_the_preference(start_on):
 
 # ── A spoken phrase (SEC-281) ────────────────────────────────────────────
 #
-# The voice path renders the transcription twice in the bot's *own* message:
-# once as the "🎙 ..." status edit, then as the prefix the streamer keeps at the
-# head of every edit through the final answer. Deleting the user's audio and
-# announcing it while the phrase is still legible there is the bug these pin.
+# The unified handler renders sanitized transcription in the streamer's prefix.
+# The raw transcript must still reach detection and the runtime's ingress funnel.
 
 
 def _voice_update():
@@ -180,29 +179,34 @@ def _voice_update():
         effective_chat=SimpleNamespace(id=4242, type="private"),
         effective_user=SimpleNamespace(id=7),
         deleted=[],
-        edits=[],
+        replies=[],
     )
 
-    async def download_as_bytearray():
-        return bytearray(b"ogg")
-
-    async def get_file():
-        return SimpleNamespace(download_as_bytearray=download_as_bytearray)
-
     async def edit_text(text, **kwargs):
-        update.edits.append(text)
+        update.replies.append(text)
 
     status_msg = SimpleNamespace(message_id=99, edit_text=edit_text)
 
     async def reply_text(text, **kwargs):
+        update.replies.append(text)
         return status_msg
 
     async def delete():
         update.deleted.append(True)
 
     update.message = SimpleNamespace(
+        message_id=10,
+        chat_id=4242,
         text=None,
-        voice=SimpleNamespace(get_file=get_file),
+        caption=None,
+        photo=(),
+        sticker=None,
+        audio=None,
+        document=None,
+        media_group_id=None,
+        reply_to_message=None,
+        external_reply=None,
+        voice=SimpleNamespace(file_id="voice", file_unique_id="voice", file_size=3),
         reply_text=reply_text,
         delete=delete,
     )
@@ -210,7 +214,6 @@ def _voice_update():
 
 
 def _approved(monkeypatch):
-    """Make the auth check pass for both handlers."""
     import config_manager
     from config_manager import UserRole
 
@@ -221,40 +224,9 @@ def _approved(monkeypatch):
     )
 
 
-def _transcribing(monkeypatch, text):
-    """Stub the whisper call so the handler runs offline."""
-    import utils.transcribe
-
-    async def transcribe_voice(data, language=None, model_size="base"):
-        return text
-
-    monkeypatch.setattr(utils.transcribe, "transcribe_voice", transcribe_voice)
-
-
-def _run_voice(monkeypatch, spoken):
-    """Drive agent_voice_handler up to the hand-off, stubbed at the edges."""
-    import handlers.agents as agents
-
-    _approved(monkeypatch)
-    _transcribing(monkeypatch, spoken)
-
-    async def get_session(chat_id):
-        return SimpleNamespace(alive=True)
-
-    async def handed_off(update, context):
-        return None
-
-    monkeypatch.setattr(agents, "get_session", get_session)
-    monkeypatch.setattr(agents, "agent_message_handler", handed_off)
-
-    update = _voice_update()
-    context = _context()
-    asyncio.run(agents.agent_voice_handler(update, context))
-    return SimpleNamespace(edits=update.edits, context=context)
-
-
 def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
-    """Drive agent_message_handler on a voice hand-off with a real streamer."""
+    """Drive actual intake and streaming, replacing attachment I/O and the model."""
+    import condor.telegram_input as telegram_input
     import handlers.agents as agents
     from condor.runtime.events import EventType, RuntimeEvent
 
@@ -265,62 +237,93 @@ def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
 
     monkeypatch.setattr(agents, "get_session", get_session)
 
-    async def prompt(key, request, on_busy="queue"):
+    async def resolve(incoming, **kwargs):
+        assert len(incoming.media) == 1
+        assert incoming.media[0].kind == "audio"
+        return telegram_input.ResolvedInput(spoken, (), (spoken,))
+
+    monkeypatch.setattr(
+        telegram_input, "get_resolver", lambda bot: SimpleNamespace(resolve=resolve)
+    )
+    requests = []
+    progress_seen = asyncio.Event()
+
+    async def prompt(key, request, **kwargs):
+        requests.append(request)
+        yield RuntimeEvent(type=EventType.ACCEPTED)
         yield RuntimeEvent(type=EventType.TEXT, data={"text": answer})
-        yield RuntimeEvent(type=EventType.DONE, data={"stop_reason": "end_turn"})
+        # Pin both silent progress and the permanent final-message surfaces.
+        await asyncio.wait_for(progress_seen.wait(), timeout=1)
+        yield RuntimeEvent.done("end_turn")
 
     monkeypatch.setattr(agents.runtime, "prompt", prompt)
 
     update = _voice_update()
     context = _context()
-    edited: list = []
+    edited = []
+    drafts = []
+    deleted_statuses = []
 
     async def edit_message_text(chat_id, message_id, text, **kwargs):
         edited.append(text)
+        progress_seen.set()
+        return True
+
+    async def send_message_draft(chat_id, draft_id, text, **kwargs):
+        drafts.append(text)
+        progress_seen.set()
+        return True
+
+    async def delete_message(chat_id, message_id):
+        deleted_statuses.append(message_id)
+        return True
 
     context.bot.edit_message_text = edit_message_text
-    context.chat_data["_voice_transcription"] = spoken
-    context.chat_data["_voice_placeholder"] = SimpleNamespace(message_id=99)
-
+    context.bot.send_message_draft = send_message_draft
+    context.bot.delete_message = delete_message
     asyncio.run(agents.agent_message_handler(update, context))
-    return SimpleNamespace(edited=edited, context=context)
+    return SimpleNamespace(
+        edited=edited,
+        drafts=drafts,
+        deleted_statuses=deleted_statuses,
+        context=context,
+        requests=requests,
+        update=update,
+    )
 
 
 def test_a_spoken_phrase_is_redacted_before_it_is_shown(monkeypatch):
-    from utils.telegram_formatters import escape_markdown_v2
-
-    out = _run_voice(monkeypatch, SEED)
-    assert out.edits, "the handler must show the transcription"
-    # The status edit is MarkdownV2, so the marker arrives escaped.
-    assert escape_markdown_v2("[redacted: mnemonic]") in out.edits[-1]
-    assert "sausage" not in out.edits[-1]
-
-
-def test_the_raw_transcript_still_reaches_the_funnel(monkeypatch):
-    """Redaction is a rendering rule, not a detection one: _handle_pasted_secrets
-    still has to see the phrase to delete the voice message, and runtime.prompt
-    redacts itself on the way to the model."""
-    out = _run_voice(monkeypatch, SEED)
-    assert out.context.chat_data["_voice_transcription"] == SEED
-
-
-def test_an_ordinary_transcription_is_shown_as_spoken(monkeypatch):
-    out = _run_voice(monkeypatch, "how is SOL-USDC doing?")
-    assert "how is SOL\\-USDC doing?" in out.edits[-1]
-    assert "redacted" not in out.edits[-1]
-
-
-def test_the_streamed_answer_never_carries_the_phrase(monkeypatch):
     out = _run_streamed_answer(monkeypatch, SEED)
-    assert out.edited, "the streamer must have written the placeholder"
-    final = out.edited[-1]
-    assert "[redacted: mnemonic]" in final
-    assert "sausage" not in final
-    assert not any("sausage" in text for text in out.edited)
-    # The audio really was deleted, which is what the notice claims.
+    assert not out.drafts, "quiet mode must not use native token drafts"
+    assert out.edited, "progress must remain visible while the model runs"
+    assert "[redacted: mnemonic]" in out.context.sent[-1].text
+    displayed = (
+        out.drafts
+        + out.edited
+        + out.update.replies
+        + [message.text for message in out.context.sent]
+    )
+    assert not any("sausage" in text for text in displayed)
+    assert out.deleted_statuses == [99]
+    assert "_voice_transcription" not in out.context.chat_data
+    assert "_voice_placeholder" not in out.context.chat_data
+
+
+def test_the_raw_transcript_still_reaches_detection_and_the_funnel(monkeypatch):
+    out = _run_streamed_answer(monkeypatch, SEED)
+    assert [request.text for request in out.requests] == [SEED]
+    # Detection sees the original phrase and deletes the message carrying it.
+    # The runtime funnel owns redaction before forwarding text to the model.
+    assert out.update.deleted == [True]
     assert out.context.sent and "/gateway" in out.context.sent[0].text
 
 
 def test_an_ordinary_transcription_stays_at_the_head_of_the_answer(monkeypatch):
     out = _run_streamed_answer(monkeypatch, "how is SOL-USDC doing?")
-    assert "🎙 how is SOL-USDC doing?" in out.edited[-1]
+    for text in (out.context.sent[-1].text,):
+        assert text.startswith("🎙 how is SOL-USDC doing?")
+        assert "All set." in text
+        assert "redacted" not in text
+    assert out.edited == ["Processing…"]
+    assert out.deleted_statuses == [99]
+    assert not out.update.deleted

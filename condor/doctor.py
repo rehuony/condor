@@ -375,11 +375,14 @@ def _listening_binds(port: int) -> list[str]:
                 text=True,
                 timeout=5,
             )
-            return [
-                cols[3]
-                for line in proc.stdout.splitlines()
-                if len(cols := line.split()) >= 4
-            ]
+            # iproute2mac provides ss but rejects the Linux filter syntax.
+            # A failed probe must fall through to lsof, not hide a listener.
+            if proc.returncode == 0:
+                return [
+                    cols[3]
+                    for line in proc.stdout.splitlines()
+                    if len(cols := line.split()) >= 4
+                ]
         except Exception:
             pass
     if shutil.which("lsof"):

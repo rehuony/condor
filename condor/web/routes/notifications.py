@@ -40,6 +40,12 @@ async def list_notifications(
     }
 
 
+@router.delete("")
+async def clear_notifications(user: WebUser = Depends(get_current_user)):
+    """Delete all of this user's notifications."""
+    return {"removed": notifications.clear(user.id), "unread": 0}
+
+
 @router.post("/read")
 async def mark_notifications_read(
     body: MarkReadRequest, user: WebUser = Depends(get_current_user)

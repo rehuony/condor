@@ -191,6 +191,15 @@ class CacheEntry:
     consecutive_errors: int = 0
     last_error_at: float = 0.0
 
+    def refresh_interval(self, configured_interval: float) -> float:
+        """Retry an empty history soon enough to discover the first snapshot."""
+        if self.key.data_type is ServerDataType.PORTFOLIO_HISTORY:
+            from condor.fetchers.portfolio import portfolio_history_is_empty
+
+            if portfolio_history_is_empty(self.value):
+                return min(configured_interval, 60)
+        return configured_interval
+
 
 # ============================================
 # SUBSCRIPTION
@@ -319,6 +328,7 @@ class ServerDataService:
 
     def __init__(self):
         self._cache: Dict[CacheKey, CacheEntry] = {}
+        self._cache_revisions: Dict[tuple[str, ServerDataType], int] = {}
         self._subscriptions: Dict[CacheKey, Dict[str, Subscription]] = {}
         self._health: Dict[str, ServerHealth] = {}
         self._rate_limiters: Dict[str, RateLimiter] = {}
@@ -453,7 +463,8 @@ class ServerDataService:
         age = time.time() - entry.fetched_at
 
         # Cached data is usable until the TTL expires
-        return entry.value if age <= defaults.ttl_for(key.params_dict) else None
+        ttl = entry.refresh_interval(defaults.ttl_for(key.params_dict))
+        return entry.value if age <= ttl else None
 
     async def get_or_fetch(
         self, server: str, data_type: ServerDataType, **params
@@ -520,8 +531,15 @@ class ServerDataService:
 
     # ------ Invalidation ------
 
+    def get_revision(self, server: str, data_type: ServerDataType) -> int:
+        """Return the invalidation revision for an externally fetched snapshot."""
+        return self._cache_revisions.get((server, data_type), 0)
+
     def invalidate(self, server: str, *data_types: ServerDataType) -> None:
-        """Invalidate cache entries for specific data types on a server."""
+        """Retire cached values and in-flight reads for these server data types."""
+        for data_type in data_types:
+            scope = (server, data_type)
+            self._cache_revisions[scope] = self._cache_revisions.get(scope, 0) + 1
         keys_to_remove = [
             k for k in self._cache if k.server == server and k.data_type in data_types
         ]
@@ -537,14 +555,8 @@ class ServerDataService:
 
     def invalidate_server(self, server: str) -> None:
         """Clear all cached data for a server."""
-        keys_to_remove = [k for k in self._cache if k.server == server]
-        for k in keys_to_remove:
-            del self._cache[k]
-        logger.info(
-            "SDS invalidated all cache for server %s (%d entries)",
-            server,
-            len(keys_to_remove),
-        )
+        self.invalidate(server, *ServerDataType)
+        logger.info("SDS invalidated all cache for server %s", server)
 
     # ------ Cache-write listeners (for WebSocketManager) ------
 
@@ -777,6 +789,7 @@ class ServerDataService:
 
             entry = self._cache.get(key)
             if entry:
+                effective_interval = entry.refresh_interval(effective_interval)
                 age = now - entry.fetched_at
                 if age < effective_interval:
                     continue
@@ -827,9 +840,19 @@ class ServerDataService:
         starting a duplicate backend request. The in-flight entry is cleared
         when the fetch settles, so a failure never poisons subsequent fetches.
         """
-        return await self._inflight.run(key, lambda: self._do_fetch_and_cache(key))
+        scope = (key.server, key.data_type)
+        while True:
+            revision = self._cache_revisions.get(scope, 0)
+            result = await self._inflight.run(
+                (key, revision), lambda: self._do_fetch_and_cache(key, revision)
+            )
+            if revision == self._cache_revisions.get(scope, 0):
+                return result
+            cached = self.get(key.server, key.data_type, **key.params_dict)
+            if cached is not None:
+                return cached
 
-    async def _do_fetch_and_cache(self, key: CacheKey) -> Optional[Any]:
+    async def _do_fetch_and_cache(self, key: CacheKey, revision: int) -> Optional[Any]:
         """Fetch data and update cache. Returns the fetched value."""
         spec = self._fetch_registry.get(key.data_type)
         if not spec:
@@ -838,11 +861,14 @@ class ServerDataService:
 
         health = self.get_server_health(key.server)
         t0 = time.monotonic()
+        scope = (key.server, key.data_type)
 
         try:
             client = await self._get_client(key.server)
             result = await spec.fetch_func(client, **key.params_dict)
         except Exception as e:
+            if revision != self._cache_revisions.get(scope, 0):
+                return None
             logger.debug(
                 "SDS fetch failed %s:%s: %s", key.server, key.data_type.value, e
             )
@@ -865,6 +891,9 @@ class ServerDataService:
                 )
             return None
 
+        # An invalidated read must neither publish nor serve its old snapshot.
+        if revision != self._cache_revisions.get(scope, 0):
+            return None
         latency_ms = (time.monotonic() - t0) * 1000
         health.record_success(latency_ms)
 

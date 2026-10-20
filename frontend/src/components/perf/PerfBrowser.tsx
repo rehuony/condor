@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ChevronUp,
   Database,
   Layers,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Rocket,
   ScrollText,
   Server,
@@ -26,9 +27,9 @@ import { LogsSection } from "@/components/bots/LogsSection";
 import { PnlEvolutionChart } from "@/components/bots/PnlEvolutionChart";
 import { ExecutorChart } from "@/components/charts/ExecutorChart";
 import { DetailPanel } from "@/components/perf/ExecutorTable";
-import { ExecutorRows, StopConfirmDialog } from "@/components/perf/ExecutorRows";
+import { DeleteConfirmDialog, ExecutorRows, StopConfirmDialog } from "@/components/perf/ExecutorRows";
 import { ControllerToggle } from "@/components/perf/ControllerToggle";
-import { useExecutorStop } from "@/components/perf/executorActions";
+import { terminatedExecutorIds, useExecutorDelete, useExecutorStop } from "@/components/perf/executorActions";
 import {
   agentBucketLabel,
   agentOptions,
@@ -485,9 +486,9 @@ function Kpi({
   title?: string;
 }) {
   return (
-    <div data-kpi={label} title={title}>
-      <div className="text-[var(--color-text-muted)] text-[10px] uppercase tracking-wider mb-0.5">{label}</div>
-      <div className="text-lg font-semibold tabular-nums leading-tight" style={color ? { color } : undefined}>
+    <div data-kpi={label} title={title} className="min-w-0">
+      <div className="mb-0.5 truncate text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">{label}</div>
+      <div className="truncate text-sm font-semibold leading-tight tabular-nums md:text-lg" style={color ? { color } : undefined}>
         {value}
       </div>
       <div className="mt-0.5 h-3.5 text-[10px] tabular-nums text-[var(--color-text-muted)] truncate" title={sub}>
@@ -554,6 +555,37 @@ export function PerfBrowser({
   const cv = useMemo(() => quoteConverter(convert), [convert]);
   const queryClient = useQueryClient();
   const [isCompact, setIsCompact] = useState(false);
+  const [mobileScopeOpen, setMobileScopeOpen] = useState(false);
+  const scopePanelRef = useRef<HTMLDivElement>(null);
+  const scopeToggleRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!mobileScopeOpen) return;
+    const media = window.matchMedia("(max-width: 767px), (min-width: 768px) and (max-width: 1023px) and (max-height: 500px)");
+    if (!media.matches) return;
+    const panel = scopePanelRef.current;
+    const toggle = scopeToggleRef.current;
+    panel?.querySelector<HTMLButtonElement>("[data-perf-scope-close]")?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      // A confirmation above this panel owns Tab and Escape until it closes.
+      const anotherModal = Array.from(document.querySelectorAll('[aria-modal="true"]'))
+        .some((modal) => modal !== panel && !modal.contains(panel));
+      if (document.querySelector('[role="listbox"]') || anotherModal) return;
+      if (event.key === "Escape") { event.preventDefault(); setMobileScopeOpen(false); }
+      if (event.key !== "Tab" || !panel) return;
+      const elements = Array.from(panel.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')).filter((element) => element.getClientRects().length > 0);
+      const first = elements[0], last = elements.at(-1);
+      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
+    };
+    const onResize = () => { if (!media.matches) setMobileScopeOpen(false); };
+    document.addEventListener("keydown", onKey);
+    media.addEventListener("change", onResize);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      media.removeEventListener("change", onResize);
+      toggle?.focus({ preventScroll: true });
+    };
+  }, [mobileScopeOpen]);
   // One right-hand slot, three occupants. Config and logs used to be able to
   // fight for the same 380px column; as one value only one can win, and a
   // drawer the scope stops supporting simply stops being drawn (see
@@ -675,6 +707,7 @@ export function PerfBrowser({
   // which is now any scope rather than one page (FEAT-086).
   const stop = useExecutorStop(server);
   const [detail, setDetail] = useState<ExecutorInfo | null>(null);
+
   // The run whose archived database is open, if any. The drill-in is its own
   // view rather than a pane, because the archive is a different database with
   // its own controllers and its own history.
@@ -1250,6 +1283,23 @@ export function PerfBrowser({
     () => nodes.get(effectiveScopeId) ?? rootNode,
     [nodes, effectiveScopeId, rootNode],
   );
+
+  const scopeDelete = useMemo(() => ({
+    ids: terminatedExecutorIds(scope),
+    label: scope.kind === "agent" ? agentBucketLabel(scope.label, owners) : scope.label,
+  }), [scope, owners]);
+  const deletion = useExecutorDelete(server, (ids) => {
+    setDetail((current) => current && ids.includes(current.id) ? null : current);
+    // Executor ids carry no ancestry. Capture the surviving parent before the
+    // cache update rebuilds the tree and loses that relationship.
+    const remaining = (node: PerfNode) => collectLeaves(node, "controller").length > 0
+      || collectLeaves(node, "executor").some((leaf) => !ids.includes(leaf.id));
+    if (!remaining(scope)) {
+      const parent = ancestorChain(rootNode, effectiveScopeId).slice(1)
+        .find((id) => { const node = nodes.get(id); return node && remaining(node); });
+      setScope(parent ?? rootScope);
+    }
+  });
 
   /**
    * How big the tree is, for the button that selects all of it.
@@ -1845,7 +1895,8 @@ export function PerfBrowser({
   useEffect(() => {
     if (modalOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      if (e.target instanceof HTMLElement && e.target.closest('[role="listbox"]')) return;
       // Skip if focus is inside CodeMirror editor (contenteditable div)
       const inEditor = e.target instanceof HTMLElement && e.target.closest(".cm-editor");
       if (inEditor && !e.metaKey && !e.ctrlKey) return;
@@ -2291,13 +2342,42 @@ export function PerfBrowser({
   });
 
   return (
-    <div className="flex h-full min-h-0 bg-[var(--color-bg)]">
+    <div className="flex h-full min-h-0 flex-row bg-[var(--color-bg)] narrow-pane:flex-col">
+      <button ref={scopeToggleRef} type="button" aria-expanded={mobileScopeOpen} onClick={() => {
+        // Opening filters must also expand a rail collapsed on a wider screen.
+        if (!mobileScopeOpen) setIsCompact(false);
+        setMobileScopeOpen((open) => !open);
+      }}
+        data-perf-scope-toggle
+        className="hidden min-h-10 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-3 py-2 text-left text-xs narrow-pane:flex">
+        <span className="min-w-0 break-words">{scope.label} · {population === "running" ? "Running" : "Terminated"}</span>
+        <span className="shrink-0 text-[var(--color-primary)]">{mobileScopeOpen ? "Hide filters" : "Scope & filters"}</span>
+      </button>
+      {mobileScopeOpen && (
+        <div data-perf-scope-backdrop aria-hidden="true" onClick={() => setMobileScopeOpen(false)}
+          className="hidden touch-none narrow-pane:fixed narrow-pane:inset-0 narrow-pane:z-[44] narrow-pane:block narrow-pane:bg-black/50" />
+      )}
       {/* Left sidebar: the scope picker */}
       <div
-        className={`flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
+        ref={scopePanelRef}
+        role={mobileScopeOpen ? "dialog" : undefined}
+        aria-modal={mobileScopeOpen ? true : undefined}
+        aria-label={mobileScopeOpen ? "Scope and filters" : undefined}
+        className={`flex min-h-0 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
           isCompact ? "w-12" : "w-72"
+        } ${
+          // Narrow panes show the scope as a bottom sheet, only while asked for.
+          mobileScopeOpen
+            ? "narrow-pane:fixed narrow-pane:inset-x-0 narrow-pane:bottom-0 narrow-pane:z-[45] narrow-pane:max-h-[85dvh] narrow-pane:w-full narrow-pane:rounded-t-xl narrow-pane:border narrow-pane:border-b-0 narrow-pane:pb-[env(safe-area-inset-bottom)] narrow-pane:shadow-2xl narrow-pane:transition-none"
+            : "narrow-pane:hidden"
         }`}
       >
+        <div className="hidden shrink-0 items-center justify-between border-b border-[var(--color-border)] py-1 pl-4 pr-1 narrow-pane:flex">
+          <strong className="text-sm">Scope &amp; filters</strong>
+          <button type="button" data-perf-scope-close aria-label="Close filters" onClick={() => setMobileScopeOpen(false)}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="contents narrow-pane:block narrow-pane:min-h-0 narrow-pane:flex-1 narrow-pane:overflow-y-auto narrow-pane:overscroll-contain narrow-pane:[&_.truncate]:whitespace-normal">
         {/* Header: what is in scope, and what has been narrowed out of it.
 
             Everything here describes the *tree* rather than the report — the
@@ -2306,7 +2386,7 @@ export function PerfBrowser({
             By type` toggle used to be, and they do the job it did without
             spending a level of the tree on it. */}
         <div className="shrink-0 border-b border-[var(--color-border)]">
-          <div className="flex items-center justify-between px-3 py-2.5">
+          <div className="flex items-center justify-between px-3 py-2.5 narrow-pane:hidden">
             {!isCompact && (
               <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
                 Scope
@@ -2314,17 +2394,17 @@ export function PerfBrowser({
             )}
             <button
               onClick={() => setIsCompact(!isCompact)}
-              className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
               title={isCompact ? "Expand sidebar" : "Collapse sidebar"}
             >
-              {isCompact ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+              {isCompact ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
             </button>
           </div>
           {/* Capped and scrollable: three expanded bubble groups over a
               hundred-run history would otherwise push the tree off a short
               window, and the tree is the thing the sidebar is for. */}
           {!isCompact && (
-            <div className="flex max-h-[45vh] flex-col gap-1.5 overflow-y-auto scrollbar-thin px-2 pb-2">
+            <div className="flex max-h-[45vh] flex-col gap-1.5 overflow-y-auto scrollbar-thin px-2 pb-2 narrow-pane:max-h-none narrow-pane:overflow-visible narrow-pane:pt-2">
               <PopulationToggle population={population} onChange={setPopulation} />
 
               {/* Which question the tree is answering: owner, bot, pair or
@@ -2457,7 +2537,7 @@ export function PerfBrowser({
             opened the sidebar to compare. As a button it costs a line instead
             of a card, says how much it is about to select, and lights up when
             it is what the panes are reporting. */}
-        <div ref={sidebarRef} className="flex-1 overflow-y-auto scrollbar-thin">
+        <div ref={sidebarRef} data-perf-scope-tree className="flex-1 overflow-y-auto scrollbar-thin narrow-pane:overflow-visible">
           <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
             {isCompact ? (
               <button
@@ -2543,7 +2623,7 @@ export function PerfBrowser({
 
         {/* Nav hints */}
         {!isCompact && (
-          <div className="border-t border-[var(--color-border)] px-3 py-2 text-[10px] text-[var(--color-text-muted)]/60">
+          <div className="narrow-pane:hidden border-t border-[var(--color-border)] px-3 py-2 text-[10px] text-[var(--color-text-muted)]/60">
             <span className="flex items-center gap-1.5">
               <span className="flex items-center gap-0.5">
                 <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-[var(--color-border)] bg-[var(--color-surface-hover)] px-0.5 text-[8px] font-medium">
@@ -2557,6 +2637,11 @@ export function PerfBrowser({
             </span>
           </div>
         )}
+        </div>
+        <div className="hidden shrink-0 border-t border-[var(--color-border)] p-3 narrow-pane:block">
+          <button type="button" onClick={() => setMobileScopeOpen(false)}
+            className="h-9 w-full rounded-md bg-[var(--color-primary)] px-4 text-sm font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80">View results</button>
+        </div>
       </div>
 
       {/* Main content — or an archived run's own database, opened over it.
@@ -2573,10 +2658,10 @@ export function PerfBrowser({
           />
         </div>
       ) : (
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className="flex flex-1 flex-col min-h-0 min-w-0">
         {/* Top bar */}
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-2.5">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-5 py-2.5 narrow-pane:flex-wrap narrow-pane:px-3">
+          <div className="flex items-center gap-3 min-w-0 narrow-pane:max-w-full narrow-pane:basis-full narrow-pane:flex-wrap narrow-pane:gap-y-1">
             {activeCtrl ? (
               <>
                 <div className="truncate">
@@ -2972,16 +3057,32 @@ export function PerfBrowser({
               <TerminalSquare className="h-3.5 w-3.5" />
               Editor
             </button>
+
+            {/* The selected scope's finished history, from one executor up to a
+                whole agent. The fleet root never offers it. */}
+            {!atRoot && scopeDelete.ids.length > 0 && (
+              <button
+                type="button"
+                onClick={() => deletion.request(scopeDelete.ids, scopeDelete.label)}
+                disabled={deletion.pending}
+                aria-label={`Delete history under ${scopeDelete.label}`}
+                title={`Delete ${scopeDelete.ids.length} terminated ${scopeDelete.ids.length === 1 ? "record" : "records"} under ${scopeDelete.label}`}
+                className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10 disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {scopeDelete.ids.some((id) => deletion.deletingIds.has(id)) ? "Deleting…" : "Delete History"}
+              </button>
+            )}
           </div>
         </div>
 
         {/* Body: report pane (+ config drawer) */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
           {/* The centre column. It scrolls only as a safety valve: the strip,
               the chart's floor and an open band all fit a normal window, and on
               a short one the reader can reach the rows that no longer do rather
               than have them hang off the bottom of the screen. */}
-          <div className="flex flex-1 flex-col min-w-0 min-h-0 gap-3 overflow-y-auto scrollbar-thin p-4">
+          <div className="flex flex-1 flex-col min-w-0 min-h-0 gap-3 overflow-y-auto scrollbar-thin p-4 narrow-pane:p-3 narrow-pane:pb-[calc(5rem+env(safe-area-inset-bottom))]">
             {/* What an empty live population *means*, said before any number is
                 drawn (CORR-356). Without it a server that has never run a bot
                 reads as a measurement of zero: a strip of `$0.00` tiles and "No
@@ -3026,16 +3127,18 @@ export function PerfBrowser({
                 </p>
               </div>
             ) : emptyPopulation ? (
-              <div className="shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-                <p className="text-sm font-medium">No bots running</p>
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  Nothing is deployed on this server and no executor is open, so the figures below
-                  are an absence rather than a result. What has already run is under Terminated.
+              <div
+                className="flex shrink-0 items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
+                title="Nothing is deployed on this server and no executor is open, so the figures below are an absence rather than a result. What has already run is under Terminated."
+              >
+                <p className="min-w-0 flex-1 truncate text-xs">
+                  <span className="font-medium">No bots running</span>
+                  <span className="text-[var(--color-text-muted)]"> · nothing deployed on this server</span>
                 </p>
                 {scope.kind === "fleet" && (
                   <button
                     onClick={() => setShowDeploy(true)}
-                    className="mt-3 flex items-center gap-1.5 rounded border border-[var(--color-primary)]/40 px-3 py-1.5 text-xs font-medium text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
+                    className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-primary)]/40 px-2 text-xs font-medium text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
                     title="Deploy a new bot"
                   >
                     <Rocket className="h-3.5 w-3.5" />
@@ -3045,7 +3148,7 @@ export function PerfBrowser({
               </div>
             ) : null}
             {/* Headline numbers first: the chart below is the shape of these. */}
-            <div className="shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+            <div className="shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 md:px-4 md:py-3">
               {/* A fixed set of tiles, not a set that depends on what the scope
                   happens to have. Two reasons. The strip's height decides the
                   chart's, so tiles coming and going would resize the chart as
@@ -3060,7 +3163,8 @@ export function PerfBrowser({
                   columns of a hundred-odd pixels each printed
                   "REALIZEDUNREALIZED" over one another. `auto-fit` asks the
                   column the tiles are actually in. */}
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-4">
+              {/* Phones fix four columns: two short rows instead of a tall stack. */}
+              <div className="grid grid-cols-4 gap-x-2 gap-y-2.5 md:grid-cols-[repeat(auto-fit,minmax(88px,1fr))] md:gap-3">
                 <Kpi
                   label="Net PnL"
                   value={runWithheld ? "—" : formatCurrencyPnl(totals.net, currencySymbol)}
@@ -3229,7 +3333,7 @@ export function PerfBrowser({
                 it clips itself instead of covering its neighbour. */}
             <div
               ref={chartRef}
-              className="relative flex-1 overflow-hidden"
+              className="relative flex-1 overflow-hidden narrow-pane:shrink-0"
               style={{ minHeight: MIN_CHART_PX + CHART_CHROME_PX }}
             >
               <div className="absolute inset-0">
@@ -3384,6 +3488,7 @@ export function PerfBrowser({
                     <ExecutorRows
                       executors={scopedExecutors}
                       stop={stop}
+                      deletion={deletion}
                       selectedId={detail?.id ?? null}
                       onSelect={setDetail}
                       rateFormatPnl={rateFormatPnl}
@@ -3418,7 +3523,7 @@ export function PerfBrowser({
               supports. A controller's config, or a bot's logs — never both,
               and never one belonging to a scope the user has left. */}
           {openDrawer && (
-            <div className="w-[380px] xl:w-[440px] shrink-0 border-l border-[var(--color-border)] flex flex-col bg-[var(--color-surface)]">
+            <div className="w-full max-h-[50%] lg:max-h-none lg:w-[380px] xl:w-[440px] shrink-0 border-l border-[var(--color-border)] flex flex-col bg-[var(--color-surface)]">
               {openDrawer === "config" && activeCtrl ? (
                 <YamlConfigEditor
                   // Same: an editor keyed on the config id alone kept its unsaved
@@ -3465,10 +3570,17 @@ export function PerfBrowser({
           onClose={() => setDetail(null)}
           onStop={(id) => stop.request([id])}
           stopping={stop.stoppingIds.has(detail.id)}
+          onDelete={(id) => deletion.request([id])}
+          deleting={deletion.deletingIds.has(detail.id)}
           rateFormatPnl={rateFormatPnl}
           rateFormatValue={rateFormatValue}
           rateFormatDetailed={rateFormatDetailed}
         />
+      )}
+
+      {deletion.pendingIds && (
+        <DeleteConfirmDialog ids={deletion.pendingIds} label={deletion.label} pending={deletion.pending}
+          error={deletion.error} onConfirm={deletion.confirm} onCancel={deletion.cancel} />
       )}
 
       {stop.pendingIds && (

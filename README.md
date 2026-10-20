@@ -1,8 +1,16 @@
 # Condor
 
-A Telegram bot for monitoring and trading with Hummingbot via the **Hummingbot API**.
+A personal Telegram bot and web dashboard for monitoring and trading with Hummingbot via the **Hummingbot API**.
 
-**Help shape Condor** — [take the 2-minute survey](https://forms.gle/7NpG3RtgfLrmpUNY8). Tell us what's working, what's confusing, and what you need next. Your answers go to the Hummingbot Foundation team and directly shape the roadmap.
+## Repository and provenance
+
+This project is maintained for the owner's personal use at [rehuony/condor](https://github.com/rehuony/condor). Development focuses on daily workflows, reliability, privacy, and personal experience. External issues, feature requests, pull requests, and community support are not accepted.
+
+The `main` branch is the development and deployment branch. Changes are published as ordinary commits; updates follow this repository's `origin/main`. Each subsequent change adds its own commit to the maintained history. See [Maintenance and deployment](docs/maintenance.md) for development, validation, updates, and recovery.
+
+The original project is [hummingbot/condor](https://github.com/hummingbot/condor). This repository's development is based on upstream commit [`564f35dd25f1e0028bf43d048bdfb45dfeecde7a`](https://github.com/hummingbot/condor/commit/564f35dd25f1e0028bf43d048bdfb45dfeecde7a) (2026-10-16, “Merge pull request #243 from hummingbot/fix/update-flow-hardening”). Independent development continues on `main`. Later upstream commits are not part of that baseline. Original copyright and license notices remain in [LICENSE](LICENSE).
+
+Usage telemetry and conversation publishing have been removed. See [Privacy and data handling](PRIVACY.md) for local storage and the external services used by normal features.
 
 > **Why we recommend Tailscale for production**
 >
@@ -10,17 +18,7 @@ A Telegram bot for monitoring and trading with Hummingbot via the **Hummingbot A
 >
 > **Tailscale is one safeguard you can add**: it puts the API on a private encrypted network so only your devices can reach it, without publishing port 8000 to the internet. It does **not** replace proper security—use strong API and config passwords, and avoid exposing sensitive services publicly. Tailscale also works when Condor and the API run on the **same machine**.
 >
-> Full walkthrough: [Securing Condor and Hummingbot API with Tailscale](https://hummingbot.org/blog/posts/securing-condor-and-hummingbot-api-with-tailscale/) · [Hummingbot API Tailscale guide](https://hummingbot.org/hummingbot-api/tailscale/)
-
-> **Privacy:** Condor sends anonymous usage stats — a random id, the version,
-> which features get used and what breaks; nothing about you or your trading.
-> Usage summaries start only after the admin has been shown a notice saying so,
-> they can be turned off from that notice or Settings → Privacy, and
-> `CONDOR_TELEMETRY=off` silences telemetry entirely. Your conversations are
-> never part of that: the only way one leaves is if you press Share on it and
-> confirm the redacted transcript, which `CONDOR_SHARING=off` disables outright.
-> What each level does and does not collect, where it goes, and how to verify
-> it, is spelled out in [PRIVACY.md](PRIVACY.md).
+> Setup: [Secure Connection via Tailscale](#secure-connection-via-tailscale) · [Hummingbot API Tailscale guide](https://hummingbot.org/hummingbot-api/tailscale/)
 
 ## Features
 
@@ -31,13 +29,15 @@ A Telegram bot for monitoring and trading with Hummingbot via the **Hummingbot A
 - **Web Dashboard** - Browser UI (via **`/web`**) with a live trade panel that covers both CEX and DEX venues: order book trading, DEX swaps, and CLMM liquidity positions created and drawn directly on the chart
 - **Configuration** - Manage API servers, exchange credentials, and Gateway through Telegram (`/servers`, `/keys`, `/gateway`)
 - **AI Assistant** - Natural language trading help via **`/agent`** (optional OpenAI or OpenRouter keys, or any custom OpenAI-compatible endpoint like Venice AI; MCP tools when configured)
+- **Telegram Attachments** - Send images, albums, audio, and text documents to the assistant. See [Telegram conversations](docs/telegram-conversations.md) for formats, limits, and controls.
+- **Chart Delivery** - Authorized agents can send chart images to Telegram and attach them to dashboard conversations. See [image export and delivery](agents/_shared/skills/charting/SKILL.md#image-export-and-delivery).
 - **AI Agents** - Domain agents that can be asked, delegated to, or run on a loop — each can author its own tick strategy (analysis order, decision rules, risk limits) and run it autonomously with dry-run support
-- **Issue Reporting** - A **Report an issue** button in the web dashboard prefills a GitHub issue draft (with opt-in, review-before-send diagnostics) that you submit from your own GitHub account
 
 ## What you need
 
 - A **Mac** or **Linux** computer (Windows users: install **WSL2** with Ubuntu, then use Terminal inside Ubuntu).
 - The **Terminal** app open.
+- **Git**, **Make**, and **curl** installed. The setup wizard installs missing runtime tools, including uv, Node.js, and tmux, using your system's package manager where needed.
 - A **stable internet** connection.
 - For **Hummingbot API** (the API-only install below, or if you choose to add the API during Condor setup): **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** (Mac/Windows) or Docker on Linux, **installed and running** on that machine before you run the command.
 - **[Tailscale](https://tailscale.com) account** (free tier is enough) — **recommended for production**, especially when Condor and the API run on different machines. Create a [reusable auth key](https://login.tailscale.com/admin/settings/keys) and enable [MagicDNS](https://login.tailscale.com/admin/dns) before you install.
@@ -52,35 +52,26 @@ A Telegram bot for monitoring and trading with Hummingbot via the **Hummingbot A
 2. Generate a **reusable** auth key at [Settings → Keys](https://login.tailscale.com/admin/settings/keys) (starts with `tskey-auth-`)
 3. Enable **[MagicDNS](https://login.tailscale.com/admin/dns)** in the Tailscale admin console
 
-Open Terminal, go to an **empty folder** where you are happy to create files (for example your home folder, or `cd Desktop` first), then paste:
+Open Terminal in the parent folder where you want to keep the checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hummingbot/deploy/main/setup.sh | bash
+git clone --branch main https://github.com/rehuony/condor.git
+cd condor
+make install
+make run
 ```
 
-The installer first asks **how you will use Condor**: **Telegram** (a bot you control from your phone — recommended) or **Local** (no Telegram at all, see [Local mode](#local-mode-no-telegram) below). If you choose Telegram it asks for your bot token and your Telegram user id. Either way it can also install **Hummingbot API** on the **same machine** if you choose that when it asks.
+`make install` runs this checkout's setup wizard and installs the Python and frontend dependencies. The wizard asks **how you will use Condor**: **Telegram** (a bot you control from your phone) or **Local** (no Telegram, see [Local mode](#local-mode-no-telegram) below). Telegram mode needs your bot token and Telegram user id. The wizard can connect to an existing **Hummingbot API**, or deploy it on the **same machine** when Docker is available.
 
-When installing Hummingbot API, answer **`y`** when asked to enable Tailscale and paste your auth key. When it finishes, continue to **After installation** below.
+Configure Tailscale when prompted if you need private remote access. `make run` builds the dashboard and starts Condor in tmux. Run `make doctor` to check the result, then continue to **After installation** below. You can rerun `make setup` to change the configuration without cloning the repository again.
 
 ---
 
 ## Install only Hummingbot API
 
-Use this when you are deploying **Hummingbot API** on its own machine (for example a **VPS** or another **remote server**), or any time you **only** need the API and database stack and **not** Condor. **Docker** must be installed and running on that server before you run the command:
+**Hummingbot API** remains a separate runtime dependency. To deploy it on another machine, follow the installation instructions in the [Hummingbot API repository](https://github.com/hummingbot/hummingbot-api), with Docker installed and running on that host. Configure private access using its [Tailscale guide](https://hummingbot.org/hummingbot-api/tailscale/) when needed.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/hummingbot/deploy/main/setup.sh | bash -s -- --hummingbot-api
-```
-
-**Enable Tailscale when prompted** (answer **`y`**) so Condor and other clients can reach the API at `http://hummingbot-api:8000` on your private tailnet—without opening port 8000 on a public IP.
-
-If the script finishes but services did not start:
-
-```bash
-cd hummingbot-api
-make setup
-make deploy
-```
+Then run `make setup` in your Condor checkout and choose the existing API connection, or add its URL and credentials through `/servers`. Use the actual hostname shown by the API deployment; `hummingbot-api` is only an example. Updating Condor does not require updating Hummingbot API or Gateway at the same time.
 
 ---
 
@@ -91,16 +82,22 @@ The following applies after **Install Condor**. If you used **Install only Hummi
 | Where you connect from | API URL |
 |------------------------|---------|
 | Same machine as the API | `http://localhost:8000` |
-| Another device on your tailnet (Condor, browser) | `http://hummingbot-api:8000` |
+| Another device on your tailnet (Condor, browser) | `http://<api-tailnet-hostname>:8000` |
 
 - Open the **Telegram** chat with your Condor bot. When startup succeeds, admins receive a message such as **"Condor is online and ready."**
 - **Logs:** Condor runs in a **tmux** session named `condor`. Attach with `make logs` (or `tmux attach -t condor`). Detach without stopping the bot: **Ctrl+B**, then **D**.
 - **Control:** `make run` starts Condor in that session, `make stop` stops it, `make restart` does both, `make status` shows whether it is up. Use `make run-fg` to run in the foreground when a startup error needs debugging.
 - In Telegram, use **`/servers`** for Hummingbot API URLs and auth, **`/keys`** for exchange credentials, and **`/gateway`** for DEX setup (or **`/start`** for the setup shortcuts) so commands like `/portfolio` and `/trade` can reach your stack.
-- If Condor and the API are on **different machines**, install [Tailscale](https://tailscale.com/download) on the Condor host and add the API in **`/servers`** with host **`hummingbot-api`** (not a public IP). See [Secure Connection via Tailscale](#secure-connection-via-tailscale) below.
+- If Condor and the API are on **different machines**, install [Tailscale](https://tailscale.com/download) on the Condor host and add the API in **`/servers`** with its actual tailnet hostname. See [Secure Connection via Tailscale](#secure-connection-via-tailscale) below.
 - **Check the install:** `make doctor` re-verifies dependencies, `.env`/`config.yml`, the AI model, the dashboard's network binding, Tailscale, and whether every configured Hummingbot API server is actually reachable and authenticating. Run it any time something stops working — it is read-only.
 - **Refresh Codex:** If a newer model fails because the Codex ACP bridge is outdated, run `make refresh-codex` to update the bridge and its bundled Codex CLI, then start a new Codex session in Condor. Existing sessions keep the bridge they already started.
 - If something fails, see **Troubleshooting** below.
+
+## Updates
+
+Deployments use `main` from [rehuony/condor](https://github.com/rehuony/condor), with that repository configured as `origin`. The dashboard update flow and Telegram `/update` fetch the current branch from `origin` and apply fast-forward updates. Keep deployment checkouts on `main` and publish code changes through this repository before updating them.
+
+Back up `.env`, `config.yml`, `.condor/`, `data/`, `reports/`, and any configured external runtime directories before deployment changes. Review and preserve any local edits before updating. Follow [Maintenance and deployment](docs/maintenance.md) for manual updates, validation, migration of existing checkouts, and recovery.
 
 ## Local mode (no Telegram)
 
@@ -285,6 +282,19 @@ WEB_HOST=0.0.0.0                         # Optional. Overrides the dashboard bin
                                          # read the Local mode warning first.
 ```
 
+Configure the listener separately from the public dashboard URL, for example behind a reverse proxy:
+
+```bash
+WEB_HOST=127.0.0.1
+WEB_PORT=8080
+WEB_URL=https://dashboard.example.com
+```
+
+`WEB_HOST` and `WEB_PORT` control the listener; `WEB_URL` sets public links.
+Without `WEB_PORT`, the listener uses the URL's port (443 for HTTPS, 80 for HTTP),
+or 8088 if no URL is set. Restart after changing these values. Reverse proxies
+must forward WebSocket upgrades. Telegram authentication requires `CONDOR_MODE=telegram`.
+
 > **OpenRouter:** Add `OPENROUTER_API_KEY` to `.env`, then in `/agent → Change LLM`
 > select **OpenRouter — Pick Model**. The picker fetches the live catalog and shows
 > only models that support tool-calling. Get a key at
@@ -349,21 +359,13 @@ Tailscale also works when Condor and the API run on the **same machine**—you s
 
 ### On the API server
 
-1. Run the **Install only Hummingbot API** command (or Quick Start with API enabled)
-2. When asked **Use Tailscale for secure private networking?**, answer **`y`**
-3. Paste your auth key and deploy:
-
-```bash
-cd hummingbot-api
-make deploy
-make tailscale-status   # confirm hummingbot-api appears on your tailnet
-```
+Follow [Install only Hummingbot API](#install-only-hummingbot-api) and its Tailscale setup instructions. Confirm the API host is reachable on your tailnet, and note its actual hostname. A separate API Tailscale node is optional when Condor and the API share a machine.
 
 ### On the Condor machine
 
 1. Install [Tailscale](https://tailscale.com/download) and sign in to the **same account**
 2. In Telegram, open **`/servers`** and add the API with:
-   - **Host**: `hummingbot-api` (MagicDNS name, not a public IP)
+   - **Host**: the API's MagicDNS hostname (for example, `hummingbot-api`)
    - **Port**: `8000`
    - **Username / Password**: same as the API `.env`
 
@@ -373,22 +375,23 @@ Test from the Condor host:
 curl -u YOUR_USERNAME:YOUR_PASSWORD http://hummingbot-api:8000/
 ```
 
-### Manual install (`make install`)
+### Configure through `make setup`
 
 Run `make setup` — the wizard supports two Tailscale scenarios:
 
 **Scenario A — Deploy Hummingbot API locally with Tailscale**
 
 Choose `Y` to deploy Hummingbot API locally, then `y` when asked about Tailscale. The wizard will:
-- Clone and start `hummingbot-api` with a Tailscale sidecar container
-- Install Tailscale on this machine and connect with hostname `condor`
-- Update `config.yml` to reach the API at `http://hummingbot-api:8000`
+- Configure the local `hummingbot-api` deployment
+- Connect this machine to Tailscale, reusing an existing connection when available
+- Keep Condor's API connection on `localhost`
+- Offer a separate API Tailscale node if other devices need to reach the API directly
 
 **Scenario B — Connect to a remote Hummingbot API via Tailscale**
 
 Choose `N` to skip local deployment, enter the remote API URL, then `y` when asked about Tailscale. The wizard will:
-- Install Tailscale on this machine and connect with hostname `condor`
-- Update `config.yml` to use the Tailscale MagicDNS hostname of the remote API
+- Connect this machine to Tailscale
+- Update `config.yml` to use the actual Tailscale MagicDNS hostname of the remote API
 
 The remote machine must be running [hummingbot-api](https://github.com/hummingbot/hummingbot-api) with Tailscale enabled on the same tailnet.
 
@@ -407,7 +410,7 @@ Both machines must be on the same Tailscale account.
 tailscale status
 ```
 
-Both `condor` and `hummingbot-api` should appear as connected peers.
+For separate machines, confirm the Condor host and the API host appear as connected peers. Run `make doctor` in the Condor checkout to verify API authentication and connectivity as well.
 
 **Do not open port 8000 on your public firewall** when Tailscale is enabled. Allow SSH (port 22) for server administration only.
 
@@ -436,22 +439,15 @@ whatever it finds. The table below covers the rest.
 
 ### Run from source
 
-For local development or manual setup without the [deploy installer](https://github.com/hummingbot/deploy):
+Use the [installation steps](#install-condor-start-here) to prepare a checkout. Start a feature branch from this repository's `main`, add ordinary commits, and validate the change before merging and publishing. The full workflow and required checks are in [Maintenance and deployment](docs/maintenance.md).
 
 ```bash
-git clone https://github.com/hummingbot/condor.git
-cd condor
-make install     # Interactive setup + uv deps + AI CLI tools
-make run         # Start the bot
+git switch main
+git pull --ff-only origin main
+git switch -c feature/your-change
 ```
 
-To run **Hummingbot API** locally with Docker (for example from a sibling clone of [hummingbot-api](https://github.com/hummingbot/hummingbot-api)):
-
-```bash
-cd ../hummingbot-api
-make setup    # answer y for Tailscale on production/VPS setups
-make deploy
-```
+Use `make run-fg` for foreground debugging, `make test` for backend tests, and the frontend checks documented in the maintenance guide. Hummingbot API and Gateway are managed as separate dependencies.
 
 ### Flow Documentation
 See `flows/` directory for detailed command flow documentation:
@@ -464,13 +460,12 @@ See `flows/` directory for detailed command flow documentation:
 3. Follow patterns in `flows/common_patterns.txt`
 4. Document flow in `flows/`
 
-## Support
+## Personal maintenance references
 
-- **Feedback**: [2-minute survey](https://forms.gle/7NpG3RtgfLrmpUNY8) — what's working, what's missing, what to build next
-- **Docs**: https://condor.hummingbot.org
-- **Installation guide**: https://condor.hummingbot.org/getting-started/installing
-- **Tailscale guide**: https://hummingbot.org/hummingbot-api/tailscale/
-- **Issues**: https://github.com/hummingbot/condor/issues — or use the **Report an issue** button in the web dashboard to prefill a bug report or feature request with diagnostics
+- **Installation**: [Install Condor](#install-condor-start-here)
+- **Operations and development**: [Maintenance and deployment](docs/maintenance.md)
+- **Project documentation**: [docs/](docs/)
+- **API networking**: [Hummingbot API Tailscale guide](https://hummingbot.org/hummingbot-api/tailscale/)
 
 ---
 

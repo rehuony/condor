@@ -32,7 +32,7 @@ In short: executors give us the cleanest possible boundary between "what this ag
 ```
                    ┌──────────────────────────── Trading Agent ───────────────────────────┐
                    │                                                                       │
-                   │   Strategy (agent.md)        Journal (per session)     Learnings.md   │
+                   │   Strategy (loop.md)         Journal (per session)     Learnings.md   │
                    │   ───────────────────        ────────────────────       ────────────  │
                    │   - system prompt            - summary                  cross-session │
                    │   - default config           - decisions                lessons       │
@@ -44,7 +44,7 @@ In short: executors give us the cleanest possible boundary between "what this ag
                    │   Routines  ───────────►   │  1. run providers  │  ────► MCP Tools    │
                    │  (deterministic            │  2. read journal   │       - candles     │
                    │   data prep)               │  3. build prompt   │       - orderbook   │
-                   │                            │  4. ACP session    │       - geckoterm.  │
+                   │                            │  4. LLM session    │       - geckoterm.  │
                    │                            │  5. capture tools  │       - executors   │
                    │                            │  6. write snapshot │       - notify      │
                    │                            └────────────────────┘                     │
@@ -60,8 +60,8 @@ In short: executors give us the cleanest possible boundary between "what this ag
 
 | File | Role |
 |---|---|
-| `engine.py` | `TickEngine` — one instance per running agent. Runs the tick loop, builds prompts, drives ACP sessions, captures tool calls, persists snapshots. |
-| `strategy.py` | `Strategy` + `StrategyStore`. Strategies live as `agent.md` files (YAML frontmatter + markdown body) under `agents/{slug}/`. |
+| `engine.py` | `TickEngine` — one instance per running agent. Runs the tick loop, builds prompts, drives LLM sessions, captures tool calls, persists snapshots. |
+| `strategy.py` | `Strategy` + `StrategyStore`. Strategies live as `loop.md` files (YAML frontmatter + markdown body) under `agents/{agent_slug}/loops/{strategy_slug}/`. |
 | `journal.py` | `JournalManager` — compact, human-readable per-session memory: summary, decisions, ticks, snapshots, executors. Also `learnings.md` cross-session. |
 | `prompts.py` | Builds the per-tick prompt: system prompt + strategy + provider summaries + journal context + risk state. |
 | `risk.py` | `RiskEngine` + `RiskLimits`. Hard guardrails (max exposure, max drawdown, max open executors) and the permission callback that auto-approves tool calls only if they pass the risk check. |
@@ -71,21 +71,24 @@ In short: executors give us the cleanest possible boundary between "what this ag
 ### File layout per agent
 
 ```
-agents/
+agents/                       # writable local agent root
   river_scalper/
-    agent.md                  # strategy definition (frontmatter + LLM instructions)
-    learnings.md              # cross-session lessons the agent writes itself
+    AGENT.md                  # shared agent identity and tool allowlist
     routines/                 # deterministic Python helpers (e.g. process_candles.py)
-    sessions/
-      session_1/
-        config.yml            # frozen runtime config for this session
-        journal.md            # summary, decisions, ticks, snapshots index
-        snapshots/
-          snapshot_1.md       # full prompt + response + tool calls for tick 1
-          snapshot_2.md
-          ...
-    dry_runs/
-      experiment_1.md         # one-shot dry-run / run-once snapshots
+    loops/
+      vwap_pullback/
+        loop.md               # strategy definition (frontmatter + LLM instructions)
+        learnings.md          # cross-session lessons for this strategy
+        sessions/
+          session_1/
+            config.yml        # frozen runtime config for this session
+            journal.md        # summary, decisions, ticks, snapshots index
+            snapshots/
+              snapshot_1.md   # full prompt + response + tool calls for tick 1
+              snapshot_2.md
+              ...
+        dry_runs/
+          experiment_1.md     # one-shot dry-run / run-once snapshots
 ```
 
 ### Tick loop (`TickEngine._tick`)
@@ -95,7 +98,7 @@ agents/
 3. **Read journal context** — `learnings.md`, `summary`, and the last 3 decisions.
 4. **Get risk state** from `RiskEngine` (exposure, drawdown, open count). If the agent is blocked, log it and return without invoking the LLM.
 5. **Build the prompt** via `build_tick_prompt(...)`.
-6. **Spawn an ACP session** for the strategy's `agent_key` (claude-code, gemini, copilot…) with MCP servers wired in (Hummingbot tools, market data, notifications, journal writes). Stream events, capture text and tool calls.
+6. **Start an LLM session** for the strategy's `agent_key` with MCP servers wired in (Hummingbot tools, market data, notifications, journal writes). Live modes require PydanticAI's enforced tool permissions; ACP bridges are limited to dry runs. Stream events, capture text and tool calls.
 7. **Persist** — for sessions, write `snapshot_N.md`, append a tick to the journal, and update the running summary. For dry-runs / run-once, write a flat `experiment_N.md`.
 
 ### Run modes
@@ -103,12 +106,16 @@ agents/
 | Mode | Behavior |
 |---|---|
 | `dry_run` | One tick, no trading capability granted to MCP. Pure reasoning test. Saves a single experiment snapshot. |
-| `run_once` | One tick *with* trading. Useful for manual single-shot execution. |
+| `run_once` | One tick *with* trading, without a session journal. Requires both drawdown limits to be disabled (`-1`). |
 | `loop` | Standard mode. Ticks every `frequency_sec` until stopped or `max_ticks` reached. Creates a session folder with full journal. |
 
 ### Risk + permissions
 
-`auto_approve_with_risk_check(...)` is wired in as the ACP permission callback. Every tool call the LLM tries to make is intercepted: trading-side tools are checked against `RiskLimits` (max exposure, max drawdown, max open executors); read-only tools are auto-approved. The agent literally cannot exceed its limits — the framework refuses on its behalf.
+`auto_approve_with_risk_check(...)` applies `RiskLimits` to named trading tools while allowing owned stops when risk is blocked. Live ticks and model-driven shutdown require enforced permission callbacks, supported by PydanticAI but not ACP bridges. Deterministic shutdown remains available.
+
+Use `max_position_size_quote` for the position-size limit. Drawdown limits measure the session PnL decline from its recorded peak divided by current quote exposure; they are not account-equity or daily-loss limits. `max_drawdown_pct` pauses ticks, while `shutdown_drawdown_pct` triggers winddown. Both default to `-1` (disabled). Live drawdown monitoring requires `loop`; `run_once` rejects either enabled limit because it has no session journal. A loop with either limit enabled requires manual review and restart after a process restart, rather than automatic resume.
+
+Dry runs also block trading, code execution, routine execution and delegated work at MCP dispatch. This does not sandbox the host's native tools or authorize live trading. Live routines and snippets receive an unrestricted API client; their internal operations bypass named-tool risk checks.
 
 ---
 
@@ -172,20 +179,19 @@ default_config:
 
 ### 4.1 Create a strategy
 
-A strategy is just `agents/{slug}/agent.md`:
+Under an existing `river_scalper` agent, create `agents/river_scalper/loops/vwap_pullback/loop.md` in the writable local agent root:
 
 ```markdown
 ---
-id: a1b2c3d4e5f6
-name: River Scalper
+name: VWAP Pullback
 description: VWAP-pullback scalper on majors with grid hold-on-loss
-agent_key: claude-code
+agent_key: anthropic:claude-sonnet-4-6
 skills: []
 default_config:
   frequency_sec: 60
   total_amount_quote: 500
   risk_limits:
-    max_total_exposure_quote: 1500
+    max_position_size_quote: 1500
     max_drawdown_pct: 5
     max_open_executors: 4
 default_trading_context: |
@@ -208,35 +214,41 @@ You are a disciplined scalper. Each tick:
 
 You can also create / edit strategies through the Telegram UI under `/agent`, which uses `StrategyStore` under the hood.
 
+This model key uses PydanticAI and requires `ANTHROPIC_API_KEY` with access to the model. The parent agent's `AGENT.md` must allow the tools used by the strategy. The example enables drawdown monitoring, so use `dry_run` to rehearse and `loop` for live execution.
+
 ### 4.2 Build a strategy step-by-step
 
-The `trading-agent-builder` skill walks you through the canonical 5-phase flow:
+The `trading-agent-builder` skill guides strategy development:
 
 1. **Strategy design** — describe edge, timeframe, instruments.
 2. **Market data selection & processing** — pick the routines / MCP tools.
-3. **Strategy logic definition** — write `agent.md`.
+3. **Strategy logic definition** — write `loop.md` under the owning agent.
 4. **Test in dry-run** — one tick, no trading. Inspect reasoning in the experiment snapshot.
-5. **Test in run-once** — one tick, real trading, controlled.
+5. **Optional run-once** — one tick with real trading, only when neither drawdown limit is required. Keep the example's drawdown limit and proceed to `loop` when live drawdown monitoring is needed.
 6. **Deploy live** — `loop` mode with a frequency and risk limits.
 
 ### 4.3 Run an agent (programmatic)
 
 ```python
+from condor.agents.agent import AgentStore
 from condor.agents.engine import TickEngine
 from condor.agents.strategy import StrategyStore
 
-store = StrategyStore()
-strategy = store.get_by_slug("river_scalper")
+agent = AgentStore().get("river_scalper")
+strategy = StrategyStore().get("river_scalper", "vwap_pullback")
+if agent is None or strategy is None:
+    raise ValueError("Create the river_scalper agent and vwap_pullback strategy first")
 
 engine = TickEngine(
+    agent=agent,
     strategy=strategy,
     config={
-        "execution_mode": "loop",         # or "dry_run" / "run_once"
+        "execution_mode": "loop",         # use "dry_run" to rehearse
         "frequency_sec": 60,
         "server_name": "binance_main",
         "total_amount_quote": 500,
         "risk_limits": {
-            "max_total_exposure_quote": 1500,
+            "max_position_size_quote": 1500,
             "max_drawdown_pct": 5,
             "max_open_executors": 4,
         },
@@ -253,10 +265,12 @@ In production, agents are normally started/stopped from the Telegram `/agent` fl
 
 ### 4.4 Inspecting what the agent did
 
-- `agents/{slug}/sessions/session_N/journal.md` — chronological summary, last decisions, tick log, executors, snapshot index.
-- `agents/{slug}/sessions/session_N/snapshots/snapshot_K.md` — the *full* tick: system prompt, response text, every tool call with arguments and status, executor snapshot, risk state, duration.
-- `agents/{slug}/learnings.md` — lessons the agent has chosen to keep across sessions.
-- `agents/{slug}/dry_runs/experiment_N.md` — dry-run / run-once results.
+Under `agents/{agent_slug}/loops/{strategy_slug}/` in the writable local agent root:
+
+- `sessions/session_N/journal.md` — chronological summary, last decisions, tick log, executors, snapshot index.
+- `sessions/session_N/snapshots/snapshot_K.md` — the *full* tick: system prompt, response text, every tool call with arguments and status, executor snapshot, risk state, duration.
+- `learnings.md` — lessons the agent has chosen to keep across sessions.
+- `dry_runs/experiment_N.md` — dry-run / run-once results.
 
 ---
 

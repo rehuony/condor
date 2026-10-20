@@ -162,8 +162,8 @@ def test_a_message_sent_mid_answer_steers_instead_of_being_rejected(ws_env):
     # not a gap where an abandoned turn used to be.
     assert [t.text for t in read_transcript(USER, slot_id)] == [
         "how is my portfolio",
-        "answering how is my portfolio",
         "no, check the bots instead",
+        "answering how is my portfolio",
         "answering no, check the bots instead",
     ]
 

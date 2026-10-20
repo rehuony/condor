@@ -235,6 +235,7 @@ def _condor_mcp_args(
     profile: str = "full",
     session_key: str = "",
     muted_tools: Sequence[str] = (),
+    execution_mode: str = "",
 ) -> list[str]:
     """Build CLI args for the condor MCP subprocess.
 
@@ -281,6 +282,8 @@ def _condor_mcp_args(
     if session_key:
         args.extend(["--session-key", str(session_key)])
     args.extend(["--profile", profile])
+    if execution_mode:
+        args.extend(["--execution-mode", execution_mode])
     args.extend(_muted_tool_args(muted_tools))
     return args
 
@@ -290,6 +293,7 @@ def _hummingbot_mcp_args(
     server_name: str,
     profile: str = "full",
     muted_tools: Sequence[str] = (),
+    execution_mode: str = "",
 ) -> list[str]:
     """Build CLI args for the hummingbot MCP subprocess.
 
@@ -314,6 +318,7 @@ def _hummingbot_mcp_args(
             profile,
         ]
         + _muted_tool_args(muted_tools)
+        + (["--execution-mode", execution_mode] if execution_mode else [])
         + _bot_id_args()
     )
 
@@ -328,6 +333,7 @@ def build_mcp_servers_for_session(
     ask_target: bool = False,
     tick: bool = False,
     session_key: str = "",
+    execution_mode: str = "",
 ) -> list[dict[str, Any]]:
     """Build dynamic MCP server configs for an agent session.
 
@@ -372,6 +378,10 @@ def build_mcp_servers_for_session(
     )
 
     cm = get_config_manager()
+    from mcp_servers._profiles import EXECUTION_MODES
+
+    if execution_mode not in EXECUTION_MODES:
+        raise ValueError(f"Unknown execution mode {execution_mode!r}")
     profile = seat_profile(agent_slug, tick)
     # Read once, for both subprocesses: what an agent must not mount is one fact
     # about one agent — its operator mutes plus whatever its allowlist leaves out
@@ -436,6 +446,7 @@ def build_mcp_servers_for_session(
             profile=profile,
             session_key=session_key,
             muted_tools=muted_tools,
+            execution_mode=execution_mode,
         ),
         # Both agent roots travel *resolved* rather than as whatever the parent
         # happened to have in its environment. A stdio MCP child gets the ``env``
@@ -477,7 +488,9 @@ def build_mcp_servers_for_session(
     mcp_hummingbot = {
         "name": "mcp-hummingbot",
         "command": "uv",
-        "args": _hummingbot_mcp_args(server, server_name, profile, muted_tools),
+        "args": _hummingbot_mcp_args(
+            server, server_name, profile, muted_tools, execution_mode
+        ),
         "env": _env_entries(
             HUMMINGBOT_API_USERNAME=server["username"],
             HUMMINGBOT_API_PASSWORD=server["password"],

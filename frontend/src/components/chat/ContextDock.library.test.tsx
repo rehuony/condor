@@ -193,8 +193,8 @@ const trigger = () =>
   container.querySelector<HTMLButtonElement>('button[aria-label="Routine"]')!;
 /** Whose routines it lists — asked in the library's bar, beside which one. */
 const scopeSelect = () =>
-  container.querySelector<HTMLSelectElement>(
-    'select[aria-label="Routine scope"]',
+  container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Routine scope"]',
   )!;
 /** The picker's list is portalled out of the dock, so it is read off the body. */
 const options = () => [
@@ -210,10 +210,9 @@ async function press(key: string, on: EventTarget) {
 }
 
 async function setScope(value: string) {
-  await act(async () => {
-    scopeSelect().value = value;
-    scopeSelect().dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  await click(scopeSelect());
+  const label = value === "all" ? "All routines" : value.charAt(0).toUpperCase() + value.slice(1);
+  await click([...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((option) => option.textContent === label)!);
 }
 
 async function click(el: HTMLElement) {
@@ -384,7 +383,7 @@ describe("the dock's routine picker", () => {
 
     // A shared routine this conversation ran is not one of the agent's own:
     // the picker widens rather than hiding what was just clicked.
-    expect(scopeSelect().value).toBe("all");
+    expect(scopeSelect().textContent).toBe("All routines");
     expect(browserProps.initialSource).toBe("mcap_comparison");
   });
 });
@@ -403,14 +402,14 @@ describe("the scope's default", () => {
     await render();
     await click(runRow());
 
-    expect(scopeSelect().value).toBe("scout");
+    expect(scopeSelect().textContent).toBe("Scout");
   });
 
   it("is every routine in the unbound Condor conversation", async () => {
     await render("");
     await click(runRow());
 
-    expect(scopeSelect().value).toBe("all");
+    expect(scopeSelect().textContent).toBe("All routines");
   });
 
   it("respects a pick of the reader's own", async () => {
@@ -421,7 +420,7 @@ describe("the scope's default", () => {
     // Re-rendering the same conversation must not take the choice back.
     await render();
 
-    expect(scopeSelect().value).toBe("all");
+    expect(scopeSelect().textContent).toBe("All routines");
   });
 
   it("re-asks it for whoever is answering next", async () => {
@@ -431,6 +430,6 @@ describe("the scope's default", () => {
 
     await render("sage");
 
-    expect(scopeSelect().value).toBe("sage");
+    expect(scopeSelect().textContent).toBe("Sage");
   });
 });

@@ -27,10 +27,9 @@ interface Props {
   validation: ExecutorValidation;
   currentPrice: number | null;
   isSpot?: boolean;
-  pair?: string;
 }
 
-export function DCAConfigPanel({ state, dispatch, validation, currentPrice, isSpot = false, pair: _pair }: Props) {
+export function DCAConfigPanel({ state, dispatch, validation, currentPrice, isSpot = false }: Props) {
   const totalQuote = state.amounts_quote.reduce((s, a) => s + a, 0);
 
   const bep = useMemo(
@@ -56,7 +55,7 @@ export function DCAConfigPanel({ state, dispatch, validation, currentPrice, isSp
         <div className="flex items-center justify-between">
           <SectionHeader>DCA Levels</SectionHeader>
           <div className="flex items-center gap-1">
-            {currentPrice && currentPrice > 0 && (
+            {currentPrice != null && currentPrice > 0 && (
               <button
                 onClick={() => dispatch({ type: "AUTO_FILL", currentPrice })}
                 className="flex items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)]"

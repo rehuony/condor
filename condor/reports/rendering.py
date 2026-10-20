@@ -49,6 +49,41 @@ window.addEventListener('load', function () {
 });
 </script>"""
 
+# Applied to generated documents and old generated reports when viewed.
+REPORT_RESPONSIVE_STYLE = """<style id="condor-report-responsive">
+.report-header { min-width: 0; gap: 12px; flex-wrap: wrap; }
+.report-header h1 { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.report-header .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; min-width: 0; overflow-wrap: anywhere; }
+.report-header .meta span { margin: 0; }
+.report-section-heading, .report-component, .section-md, .metric-card, .kpi-card { min-width: 0; max-width: 100%; }
+.report-section-heading h2, .section-md :is(p, li, h1, h2, h3), .metric-card .label, .kpi-card .label { overflow-wrap: anywhere; }
+.section-md img, .section-md svg { max-width: 100%; height: auto; }
+.section-md pre, .section-table, .table-wrap { max-width: 100%; overflow-x: auto; }
+.plotly-chart { min-width: 0; max-width: 100%; }
+@media (max-width: 640px) {
+  .report-header { margin-bottom: 16px; padding-bottom: 12px; }
+  .report-header h1 { font-size: 22px; }
+  .report-header .meta { margin-top: 8px; }
+  .section-md { padding: 14px; }
+}
+</style>"""
+
+
+def responsive_report(document: str) -> str:
+    """Repair generated report layout without rewriting stored documents."""
+    if 'id="condor-report-responsive"' in document:
+        return document
+    if not re.search(r"class=[\"\'][^\"\']*\breport-header\b", document):
+        return document
+    return re.sub(
+        r"</head\s*>",
+        lambda _: REPORT_RESPONSIVE_STYLE + "\n</head>",
+        document,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+
 HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html lang="en">
@@ -307,6 +342,13 @@ window.addEventListener('resize', function() {{
 </body>
 </html>
 """
+
+
+# Escape CSS braces because consumers format the HTML template afterwards.
+HTML_TEMPLATE = HTML_TEMPLATE.replace(
+    "</head>",
+    REPORT_RESPONSIVE_STYLE.replace("{", "{{").replace("}", "}}") + "\n</head>",
+)
 
 
 @lru_cache(maxsize=1)

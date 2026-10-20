@@ -159,6 +159,7 @@ async def test_the_events_still_reach_the_caller_untouched():
     events = await _drain(session)
 
     assert [type(e).__name__ for e in events] == [
+        "Heartbeat",
         "TextChunk",
         "ToolCallEvent",
         "ToolCallUpdate",

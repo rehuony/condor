@@ -1,7 +1,5 @@
 import {
-  ArrowUpRight,
   Bot,
-  ChevronDown,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -9,14 +7,11 @@ import {
   Zap,
 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 
 import { deriveAgentStatus } from "@/components/agent/agentStatus";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { WORKSPACE_BAR } from "@/components/chat/workspaceBar";
-import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { useWorkspacePane } from "@/hooks/useWorkspacePane";
-import { EXECUTION_PATH } from "@/components/chat/accountPanels";
 import { CHAT_SLUG, type AgentSummary, type ConversationMeta } from "@/lib/api";
 import { CHAT_RAIL_OPEN_KEY } from "@/lib/sessionState";
 
@@ -119,229 +114,132 @@ export const ChatRail = memo(function ChatRail({
   // Collapsed is a desktop state only: below `md` the rail is already an
   // overlay you dismiss, and a strip of icons there would be a third mode
   // nobody asked for.
-  if (!expanded) {
-    return (
-      <aside className="hidden w-10 shrink-0 flex-col items-center gap-3 border-r border-[var(--color-border)] bg-[var(--color-bg)] py-2 md:flex">
+  const collapsedRail = (
+    <aside className="hidden w-10 shrink-0 flex-col items-center gap-3 border-r border-[var(--color-border)] bg-[var(--color-bg)] py-2 md:flex">
+      <button
+        onClick={() => toggle(true)}
+        className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+        title="Show agents and conversations"
+      >
+        <PanelLeftOpen className="h-4 w-4" />
+      </button>
+      <button
+        onClick={onNew}
+        className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+        title="New chat"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+      {liveAgents.length > 0 && (
         <button
           onClick={() => toggle(true)}
-          className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          title="Show agents and conversations"
+          className="flex flex-col items-center gap-0.5 rounded p-1 text-emerald-400 transition-colors hover:bg-[var(--color-surface-hover)]"
+          title={`${liveAgents.length} agent${
+            liveAgents.length !== 1 ? "s" : ""
+          } looping`}
         >
-          <PanelLeftOpen className="h-4 w-4" />
+          <Zap className="h-4 w-4" />
+          <span className="text-[9px] font-bold">{liveAgents.length}</span>
         </button>
-        <button
-          onClick={onNew}
-          className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          title="New chat"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        {liveAgents.length > 0 && (
-          <button
-            onClick={() => toggle(true)}
-            className="flex flex-col items-center gap-0.5 rounded p-1 text-emerald-400 transition-colors hover:bg-[var(--color-surface-hover)]"
-            title={`${liveAgents.length} agent${
-              liveAgents.length !== 1 ? "s" : ""
-            } looping`}
-          >
-            <Zap className="h-4 w-4" />
-            <span className="text-[9px] font-bold">{liveAgents.length}</span>
-          </button>
-        )}
-      </aside>
-    );
-  }
+      )}
+    </aside>
+  );
+  if (!expanded && !open) return collapsedRail;
 
   return (
-    <aside
-      className={`${
-        open ? "flex" : "hidden"
-      } absolute inset-y-0 left-0 z-30 w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)] md:relative md:flex`}
-    >
-      {/* What is looping right now, the way into it, and the way out of the
-          column — the mirror of the dock's own collapse. */}
-      <div className={`${WORKSPACE_BAR} gap-1 pr-1`}>
-        <LiveStrip agents={liveAgents} runningTasks={runningTasks} />
-        <button
-          onClick={() => toggle(false)}
-          className="hidden rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] md:block"
-          title="Collapse"
-        >
-          <PanelLeftClose className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      {/* Who you can talk to */}
-      <div className="border-b border-[var(--color-border)] py-1">
-        <div className="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          Agents
+    <>
+      {!expanded && collapsedRail}
+      <aside
+        className={`${
+          open ? "flex" : "hidden"
+        } absolute inset-y-0 left-0 z-30 w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)] md:relative ${expanded ? "md:flex" : "md:hidden"}`}
+      >
+        {/* What is looping right now, the way into it, and the way out of the
+            column — the mirror of the dock's own collapse. */}
+        <div className={`${WORKSPACE_BAR} gap-1 pr-1`}>
+          <LiveStrip agents={liveAgents} runningTasks={runningTasks} />
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] md:hidden"
+            aria-label="Hide conversations"
+            title="Hide conversations"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => toggle(false)}
+            className="hidden rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] md:block"
+            title="Collapse"
+          >
+            <PanelLeftClose className="h-3.5 w-3.5" />
+          </button>
         </div>
-        <RailRow
-          label={condor?.name || "Condor"}
-          icon={<MessageSquare className="h-3 w-3 shrink-0" />}
-          active={hasSession && !activeSlug}
-          title={condor?.description || "General trading assistant"}
-          onClick={() => onTalk("", null)}
-          newTitle={`New chat with ${condor?.name || "Condor"}`}
-          onNew={() => onTalk("", null, true)}
-        />
-        {specialists.map((agent) => (
-          <RailRow
-            key={agent.slug}
-            label={agent.name}
-            icon={
-              <Bot className="h-3 w-3 shrink-0 text-[var(--color-accent)]" />
-            }
-            live={deriveAgentStatus(agent) === "running"}
-            active={activeSlug === agent.slug}
-            title={agent.description || agent.name}
-            onClick={() => onTalk(agent.slug, agent)}
-            newTitle={`New chat with ${agent.name}`}
-            onNew={() => onTalk(agent.slug, agent, true)}
-          />
-        ))}
-      </div>
 
-      {/* What you already said — the rail's own list, in flow */}
-      <ConversationList
-        liveIds={liveIds}
-        activeId={activeId}
-        // "New chat" means a fresh one with whoever is selected — Condor only
-        // when Condor is who you are pointing at.
-        onNew={onNew}
-        onOpen={(meta) => {
-          onClose();
-          onOpenConversation(meta);
-        }}
-      />
-    </aside>
+        {/* Who you can talk to */}
+        <div className="border-b border-[var(--color-border)] py-1">
+          <div className="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            Agents
+          </div>
+          <RailRow
+            label={condor?.name || "Condor"}
+            icon={<MessageSquare className="h-3 w-3 shrink-0" />}
+            active={hasSession && !activeSlug}
+            title={condor?.description || "General trading assistant"}
+            onClick={() => onTalk("", null)}
+            newTitle={`New chat with ${condor?.name || "Condor"}`}
+            onNew={() => onTalk("", null, true)}
+          />
+          {specialists.map((agent) => (
+            <RailRow
+              key={agent.slug}
+              label={agent.name}
+              icon={
+                <Bot className="h-3 w-3 shrink-0 text-[var(--color-accent)]" />
+              }
+              live={deriveAgentStatus(agent) === "running"}
+              active={activeSlug === agent.slug}
+              title={agent.description || agent.name}
+              onClick={() => onTalk(agent.slug, agent)}
+              newTitle={`New chat with ${agent.name}`}
+              onNew={() => onTalk(agent.slug, agent, true)}
+            />
+          ))}
+        </div>
+
+        {/* What you already said — the rail's own list, in flow */}
+        <ConversationList
+          liveIds={liveIds}
+          activeId={activeId}
+          // "New chat" means a fresh one with whoever is selected — Condor only
+          // when Condor is who you are pointing at.
+          onNew={onNew}
+          onOpen={(meta) => {
+            onClose();
+            onOpenConversation(meta);
+          }}
+        />
+      </aside>
+    </>
   );
 });
 
 // ── Live strip ──
 
-/**
- * What is looping, and the door into it.
- *
- * Strategies live on an agent's own page, so that is where this points — one
- * live agent is a direct link, several open a short list.
- *
- * This line used to be the whole answer to "what is running": it replaced a
- * fleet grid whose only unique job it already did. `/fleet` (FEAT-104) took
- * that job back, and carries the money, the last decision and the next tick
- * this line never could. That page is gone again (FEAT-114) and its rows are
- * the Execution panel one column to the right, so what is left here is a glance
- * for somebody mid-conversation who does not want to leave it — and a way into
- * the panel that says the rest, without leaving the conversation at all: the
- * fleet is the last row of the list, and the whole strip when nothing is
- * looping.
- */
-function LiveStrip({
-  agents,
-  runningTasks,
-}: {
+/** Read-only activity summary; navigation belongs to the workspace panels. */
+function LiveStrip({ agents, runningTasks }: {
   agents: AgentSummary[];
   runningTasks: number;
 }) {
-  const [open, setOpen] = useState(false);
-  // State, not a ref: the portalled panel only gets coordinates once a render
-  // has handed it the resolved trigger element.
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const tasks =
-    runningTasks > 0
-      ? ` · ${runningTasks} task${runningTasks !== 1 ? "s" : ""}`
-      : "";
-
-  const icon = (
-    <Zap
-      className={`h-3 w-3 shrink-0 ${agents.length > 0 ? "text-emerald-400" : ""}`}
-    />
-  );
-  // No vertical padding of its own: the bar around it owns the height now, so
-  // what is looping cannot quietly make the rail's bar taller than the dock's.
-  const rowClass =
-    "flex min-w-0 flex-1 items-center gap-2 self-stretch pl-3 text-left text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]";
-
+  const tasks = runningTasks > 0
+    ? ` · ${runningTasks} task${runningTasks !== 1 ? "s" : ""}` : "";
+  const summary = agents.length === 0 ? "Nothing looping"
+    : agents.length === 1 ? `${agents[0].name} live` : `${agents.length} live`;
   return (
-    <>
-      {agents.length === 0 ? (
-        <Link
-          to={EXECUTION_PATH}
-          className={rowClass}
-          title="See every agent and what it last did"
-        >
-          {icon}
-          <span className="min-w-0 flex-1 truncate">
-            Nothing looping{tasks}
-          </span>
-          <ArrowUpRight className="h-3 w-3 shrink-0" />
-        </Link>
-      ) : agents.length === 1 ? (
-        <Link
-          to={`/agents/${agents[0].slug}`}
-          className={rowClass}
-          title={`Open ${agents[0].name}'s loops`}
-        >
-          {icon}
-          <span className="min-w-0 flex-1 truncate">
-            {agents[0].name} live{tasks}
-          </span>
-          <ArrowUpRight className="h-3 w-3 shrink-0" />
-        </Link>
-      ) : (
-        <button
-          ref={setAnchor}
-          onClick={() => setOpen((v) => !v)}
-          className={rowClass}
-          aria-expanded={open}
-          aria-haspopup="listbox"
-          title="Open a running agent's loops"
-        >
-          {icon}
-          <span className="min-w-0 flex-1 truncate">
-            {agents.length} live{tasks}
-          </span>
-          <ChevronDown className="h-3 w-3 shrink-0" />
-        </button>
-      )}
-
-      {/* Portalled, not `absolute`: the rail sits in the chat workspace, whose
-          `main` is `overflow-hidden`, so an absolute panel was clipped at the
-          strip's own border with no scroll to recover it. The old `fixed
-          inset-0` backdrop also swallowed the click that followed. */}
-      <AnchoredMenu
-        anchor={anchor}
-        open={open}
-        onClose={() => setOpen(false)}
-        align="left"
-        maxHeight={288}
-        role="listbox"
-        className="flex w-[236px] flex-col py-0.5"
-      >
-        {agents.map((agent) => (
-          <Link
-            key={agent.slug}
-            to={`/agents/${agent.slug}`}
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
-          >
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-            <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-            <ArrowUpRight className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
-          </Link>
-        ))}
-        {/* The list is the running agents; this is everything else about them,
-            including the ones that are not running. */}
-        <Link
-          to={EXECUTION_PATH}
-          onClick={() => setOpen(false)}
-          className="mt-0.5 flex items-center gap-2 border-t border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-        >
-          <span className="min-w-0 flex-1 truncate">The whole fleet</span>
-          <ArrowUpRight className="h-3 w-3 shrink-0" />
-        </Link>
-      </AnchoredMenu>
-    </>
+    <div className="flex min-w-0 flex-1 items-center gap-2 self-stretch pl-3 text-[11px] text-[var(--color-text-muted)]">
+      <Zap className={`h-3 w-3 shrink-0 ${agents.length > 0 ? "text-emerald-400" : ""}`} />
+      <span className="min-w-0 flex-1 truncate">{summary}{tasks}</span>
+    </div>
   );
 }
 

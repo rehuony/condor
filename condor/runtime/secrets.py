@@ -52,20 +52,12 @@ knowing when reading the promise above: **the bot warns about what you type; it
 sees nothing of what you paste as an image.**
 
 **A Finding never carries the value.** It carries offsets, so a finding can be
-logged, counted and put in telemetry without becoming the leak it exists to
-prevent. A caller that needs the bytes slices ``text[start:end]`` itself, and
+logged or displayed without becoming the leak it exists to prevent. A caller that needs the bytes slices ``text[start:end]`` itself, and
 owns what it does with them from there.
 
-**Two callers, one set of shapes.** This module runs at *ingress*
-(:func:`condor.runtime.client.prompt`, before the model call and before the
-first disk write) and :mod:`condor.sharing.scrub` runs at *egress*, on data
-already written. The scrubber substitutes stable pseudonyms and counts
-categories, which is its own business; what the two share is the question "is
-this run of words a recovery phrase", and that question is answered exactly
-once — here, against the vendored wordlist. The scrubber imports
-:func:`phrase_spans` and the shapes rather than restating them, because a
-second copy of a detector is a copy that drifts, and the half that drifts is
-never the half anyone is looking at.
+This module runs at ingress (:func:`condor.runtime.client.prompt`), before the
+model call and before the first disk write. Recovery phrases are recognized
+against the vendored wordlist.
 
 Pure: no I/O beyond reading the vendored wordlist once, no logging of anything
 derived from the text, no state.
@@ -82,9 +74,8 @@ log = logging.getLogger(__name__)
 
 # ── The shapes ───────────────────────────────────────────────────────────
 #
-# The delimiter guard is a lookaround on ``[A-Za-z0-9_-]`` rather than ``\b``,
-# for the reason ``condor.sharing.scrub`` gives at length: ``\b`` fires between
-# a hyphen and a letter, so a hyphenated order id would present its tail as a
+# The delimiter guard is a lookaround on ``[A-Za-z0-9_-]`` rather than ``\b``:
+# ``\b`` fires between a hyphen and a letter, so a hyphenated order id would present its tail as a
 # standalone token. The lookaround refuses to start or end a match inside an
 # identifier, which puts bot names and trading pairs structurally out of reach.
 
@@ -131,13 +122,11 @@ KEYPAIR_ARRAY_RE = re.compile(
 # deliberately permissive because this is a prefilter: a phrase pasted out of a
 # wallet UI arrives one word per line, out of a backup sheet as "1. legal
 # 2. winner", and out of a chat with whatever spacing the paste carried (this
-# is SEC-230's finding, and the shapes above are the ones that were reaching a
-# collector verbatim). Case is permissive for the same reason and not for a
-# hypothetical one: BIP-39 writes its wordlist in lowercase, but a phrase
+# was observed in wallet exports). Case is permissive for the same reason:
+# BIP-39 writes its wordlist in lowercase, but a phrase
 # arrives however the thing that produced it wrote it, and a phone keyboard
 # capitalises the first word of a message on its own. Matching only [a-z] let
-# "Legal winner thank…" past both this filter and the sharing scrubber that
-# imports it. Shape alone decides nothing in either direction — an English
+# "Legal winner thank…" past this filter. Shape alone decides nothing — an English
 # sentence can reach twelve long words, and a real phrase can repeat one — so
 # :func:`phrase_spans` decides it against the vendored wordlist, case-folded
 # to it, where membership is otherwise exact.
@@ -311,55 +300,13 @@ def keypair_array_spans(text: str) -> list[tuple[int, int]]:
     :data:`KEYPAIR_ARRAY_RE` only finds a bracketed run of exactly 64 ints of
     one to three digits; the 0–255 check is what decides that run is a key
     rather than a list of numbers that happens to be 64 long. Neither half
-    means anything alone, so they are one function — and one function is what
-    :mod:`condor.sharing.scrub` imports to ask the same question at *egress*
-    that this module asks at *ingress*. A second copy there would be a second
-    calibration of "what is a keypair", which is exactly what :func:`phrase_spans`
-    already exists to prevent for the recovery-phrase shape.
+    means anything alone, so both checks live in one function.
     """
     return [
         match.span()
         for match in KEYPAIR_ARRAY_RE.finditer(text)
         if _bytes_ok(match.group(0))
     ]
-
-
-def is_keypair_array(value: object) -> bool:
-    """Is ``value`` a keypair that arrived as a real *list*, not as text?
-
-    The structural spelling of the same secret :func:`keypair_array_spans`
-    finds in a string: ``json.load`` of an ``id.json``, a ``run_code`` that
-    returned the bytes instead of printing them, a tool result that carries the
-    array as an array. No element of such a list is a secret on its own, so a
-    scanner that only ever sees leaves sees 64 harmless numbers (SEC-336).
-
-    It answers by asking the *text* question. The list is written out in the one
-    spelling :data:`KEYPAIR_ARRAY_RE` is calibrated for and handed straight to
-    :func:`keypair_array_spans`; a match that covers the whole rendering is the
-    same 64×(0–255) judgement the text path makes, not a second one that can
-    drift from it — which is the entire reason that function is public.
-
-    Only real ``int`` elements count. A keypair reaches a payload through
-    ``json``, which spells a byte as an ``int`` and nothing else, so a list of
-    floats, decimals or booleans that happens to render as small integers is a
-    series rather than a key.
-    """
-    if not isinstance(value, (list, tuple)) or len(value) != KEYPAIR_LEN:
-        return False
-    if not all(type(item) is int for item in value):
-        return False
-    rendered = keypair_array_text(value)
-    return keypair_array_spans(rendered) == [(0, len(rendered))]
-
-
-def keypair_array_text(value) -> str:
-    """``value`` rendered the way :func:`is_keypair_array` judged it.
-
-    One spelling for one key: the pseudonym a share gives a keypair-as-list is
-    keyed off this, so the same 64 bytes are the same pseudonym however the
-    tool that produced them spaced its JSON.
-    """
-    return "[" + ", ".join(str(item) for item in value) + "]"
 
 
 def scan(text: str) -> list[Finding]:
@@ -389,8 +336,8 @@ def redact(text: str) -> tuple[str, list[Finding]]:
     Ambiguous findings survive untouched — see the table in the module
     docstring for why, before assuming that is an oversight. The returned
     findings are all of them, ambiguous ones included, with offsets into the
-    **original** ``text``: they are what a surface warns on and what telemetry
-    counts, and neither wants to be told only about what was eaten.
+    **original** ``text``: a surface can warn about ambiguous values even when
+    they remain in the text.
     """
     findings = scan(text)
     certain = [finding for finding in findings if finding.certain]
@@ -407,15 +354,3 @@ def redact(text: str) -> tuple[str, list[Finding]]:
         cursor = finding.end
     out.append(text[cursor:])
     return "".join(out), findings
-
-
-def counts(findings: list[Finding]) -> dict[str, int]:
-    """``{kind: n}`` for the kinds that occurred — the telemetry shape.
-
-    Counts and categories only, which is the contract every tap in
-    :mod:`condor.telemetry.taps` already holds itself to.
-    """
-    tally: dict[str, int] = {}
-    for finding in findings:
-        tally[finding.kind] = tally.get(finding.kind, 0) + 1
-    return tally

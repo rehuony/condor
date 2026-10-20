@@ -56,16 +56,9 @@ LIVE_STATES = frozenset({LoopState.RUNNING, LoopState.PAUSED})
 
 
 # One lock per status file, guarding the read-decide-write in ``write_status``.
-# The atomic rename only promises that a *reader* never sees half a file; it
-# says nothing about two writers, and there are genuinely two here in one
-# process: the sharing verbs run off the loop (``asyncio.to_thread`` in
-# ``condor/web/routes/sharing.py`` and in the sweep) and stamp the share
-# receipt onto a conversation's ``meta.json`` while the event loop keeps
-# writing ``turn_count`` to the same file. ``read_text`` releases the GIL, so
-# without this a whole merge fits inside the other writer's read→replace
-# window and is then erased by it — losing ``share_delete_token`` (the only
-# local copy of the capability that revokes a share) or ``share_excluded``
-# (the flag the sweep honours forever).
+# Atomic rename prevents partial reads, but a worker thread and the event loop
+# can still overwrite each other's merged fields. Hold the lock across the
+# complete read-modify-write operation so both writers' updates survive.
 #
 # Keyed per file so unrelated status files stay concurrent, and reentrant so a
 # caller that already holds one cannot wedge itself. Held only across the

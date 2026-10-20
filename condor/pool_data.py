@@ -194,6 +194,9 @@ _TIMEFRAME_SECONDS = {
 }
 # GeckoTerminal caps a single OHLCV response at this many candles.
 GECKO_OHLCV_MAX = 1000
+# Each OHLCV request covers at most six months. Use a conservative fixed span
+# when recording coverage, never infer that a short page reaches back forever.
+GECKO_OHLCV_MAX_SPAN = 180 * 86400
 
 
 def get_gecko_network(network: str) -> str:
@@ -519,8 +522,11 @@ def _is_rate_limited(exc: BaseException) -> bool:
     if isinstance(exc, GeckoRateLimited):
         return True
     resp = getattr(exc, "response", None)
-    if resp is not None and getattr(resp, "status_code", None) == 429:
-        return True
+    status = getattr(resp, "status_code", None)
+    if status is not None:
+        # HTTP error text includes the URL, whose token/pool address may itself
+        # contain "429". Only the response status identifies an HTTP rate limit.
+        return status == 429
     return "429" in str(exc) or "rate limit" in str(exc).lower()
 
 
@@ -660,10 +666,18 @@ async def gecko_call(method: str, *args: Any, **kwargs: Any) -> Any:
     # paid one, page 10 on the public one — so the check has to know which it was.
     keyed = gecko_plan() == "analyst"
     for attempt in range(_GECKO_RETRIES + 1):
-        await _acquire_rate_slot()
         try:
             async with _gecko_gate():
-                return await getattr(_gecko_client(), method)(*args, **kwargs)
+                # Check at dispatch, not before the concurrency queue: a caller
+                # ahead of us may have opened the breaker while we were waiting.
+                await _acquire_rate_slot()
+                try:
+                    return await getattr(_gecko_client(), method)(*args, **kwargs)
+                except Exception as e:
+                    # Open the breaker before releasing the slot to a waiter.
+                    if _is_rate_limited(e) and not isinstance(e, GeckoRateLimited):
+                        _trip_breaker()
+                    raise
         except Exception as e:  # noqa: BLE001 - re-raised below when not retryable
             if keyed and _is_key_rejected(e):
                 # Does not spend the retry budget: the fallback changes the host,
@@ -672,8 +686,6 @@ async def gecko_call(method: str, *args: Any, **kwargs: Any) -> Any:
                 _note_key_rejected()
                 return await gecko_call(method, *args, **kwargs)
             if _is_rate_limited(e):
-                if not isinstance(e, GeckoRateLimited):
-                    _trip_breaker()
                 raise
             retryable = isinstance(e, (httpx.TimeoutException, httpx.TransportError))
             if not retryable or attempt == _GECKO_RETRIES:
@@ -800,7 +812,7 @@ def _pool_quote_symbols(name: Any) -> List[str]:
 
 
 async def fetch_token_top_pool_info(
-    mint: str, network: str, quote: str
+    mint: str, network: str, quote: str, *, strict: bool = False
 ) -> Optional[Dict[str, Any]]:
     """The token's highest-volume pool **quoted in ``quote``**, normalized.
 
@@ -824,6 +836,8 @@ async def fetch_token_top_pool_info(
     try:
         pools = await gecko_call("get_top_pools_by_network_token", gnet, mint)
     except Exception as e:
+        if strict:
+            raise
         # Includes the KeyError geckoterminal_py raises post-processing an empty
         # result set. Not cached — a transient failure must not pin "" for an hour.
         logger.info("top-pool lookup failed mint=%s net=%s: %s", mint, gnet, e)
@@ -841,6 +855,8 @@ async def fetch_token_top_pool_info(
             _fill_pool_pair_fields(info, network, row)
             break
     except Exception as e:
+        if strict:
+            raise
         logger.info("top-pool parse failed mint=%s net=%s: %s", mint, gnet, e)
         return None
 
@@ -848,7 +864,9 @@ async def fetch_token_top_pool_info(
     return info or None
 
 
-async def fetch_token_top_pool(mint: str, network: str, quote: str) -> str:
+async def fetch_token_top_pool(
+    mint: str, network: str, quote: str, *, strict: bool = False
+) -> str:
     """Address of the token's highest-volume pool **quoted in ``quote``**.
 
     Used as a fallback when an executor's own ``pool_address`` yields no candles
@@ -856,12 +874,12 @@ async def fetch_token_top_pool(mint: str, network: str, quote: str) -> str:
     :func:`fetch_token_top_pool_info`, which is all the candle path needs; the LP
     panel wants the venue and price too and shares this function's cache entry.
     """
-    info = await fetch_token_top_pool_info(mint, network, quote)
+    info = await fetch_token_top_pool_info(mint, network, quote, strict=strict)
     return str((info or {}).get("address") or "")
 
 
 async def fetch_pair_top_pool_info(
-    base: str, quote: str, network: str
+    base: str, quote: str, network: str, *, strict: bool = False
 ) -> Tuple[Optional[Dict[str, Any]], bool]:
     """Deepest pool trading ``base``/``quote`` on ``network``, found by *symbol*.
 
@@ -897,6 +915,8 @@ async def fetch_pair_top_pool_info(
             "GET", "search/pools", params={"query": f"{b} {q}", "network": gnet}
         )
     except Exception as e:
+        if strict:
+            raise
         # Not cached — a blip must not pin "no pool" for the full hour.
         logger.info("pair-pool search failed %s-%s net=%s: %s", b, q, gnet, e)
         return None, False
@@ -927,6 +947,8 @@ async def fetch_pair_top_pool_info(
                 )
                 best, best_volume = (info, inverted), volume
     except Exception as e:
+        if strict:
+            raise
         logger.info("pair-pool parse failed %s-%s net=%s: %s", b, q, gnet, e)
         return None, False
 
@@ -934,13 +956,15 @@ async def fetch_pair_top_pool_info(
     return (best[0] or None), best[1]
 
 
-async def fetch_pair_top_pool(base: str, quote: str, network: str) -> Tuple[str, bool]:
+async def fetch_pair_top_pool(
+    base: str, quote: str, network: str, *, strict: bool = False
+) -> Tuple[str, bool]:
     """``(pool_address, inverted)`` for a symbol-quoted pair.
 
     The address form of :func:`fetch_pair_top_pool_info`, which is all the candle
     path needs; both share the same cache entry.
     """
-    info, inverted = await fetch_pair_top_pool_info(base, quote, network)
+    info, inverted = await fetch_pair_top_pool_info(base, quote, network, strict=strict)
     return str((info or {}).get("address") or ""), inverted
 
 
@@ -1129,6 +1153,9 @@ async def fetch_ohlcv(
     before_timestamp: Optional[int] = None,
     token: str = "base",
     use_cache: bool = True,
+    *,
+    strict: bool = False,
+    requested_start: Optional[float] = None,
 ) -> Tuple[Optional[List], Optional[str]]:
     """Fetch OHLCV data for any pool via GeckoTerminal
 
@@ -1157,6 +1184,10 @@ async def fetch_ohlcv(
             old. It never discards history: the fresh candles are merged into the
             same series every cached reader shares. A window that has already
             closed is immutable and is served from memory either way.
+        strict: Raise upstream/parse errors instead of returning an error string.
+            A successful empty page remains an empty list in this mode.
+        requested_start: Exact lower boundary of a bounded history page. Cache
+            coverage must include it; fewer returned rows can mean empty buckets.
 
     Returns:
         Tuple of (ohlcv_list, error_message)
@@ -1174,26 +1205,41 @@ async def fetch_ohlcv(
         series_key = (gecko_network, pool_address, timeframe, currency, token)
         series = _get_series(series_key)
 
-        end = float(before_timestamp) if before_timestamp else time.time()
-        oldest_wanted = end - limit * timeframe_seconds(timeframe)
+        end = (
+            float(before_timestamp - 1) if before_timestamp is not None else time.time()
+        )
+        oldest_wanted = (
+            requested_start
+            if requested_start is not None
+            else end - limit * timeframe_seconds(timeframe)
+        )
 
-        if series.serves(oldest_wanted, end, use_cache):
-            return series.slice(end, limit), None
+        # Live readers may accept a fresh cached tail. A historical page records
+        # exact coverage, so it must fetch any newly requested end even within
+        # the live TTL rather than mark unseen candles as already downloaded.
+        if series.serves(oldest_wanted, end, use_cache) and (
+            requested_start is None or end <= series.covered_to
+        ):
+            return series.slice(end, limit, requested_start), None
 
         # One upstream request per call, spent where it unblocks this window.
         # Reaching further back than one page is left to the next call: a chart
         # scrolling into history walks back a thousand candles at a time rather
         # than opening several requests at once.
-        needs_history = (
-            series.rows and not series.exhausted and series.oldest > oldest_wanted
-        )
+        needs_history = series.rows and series.oldest > oldest_wanted
         req_before: Optional[int]
-        if needs_history:
+        if requested_start is not None:
+            # A bounded page may be missing both its head and its tail. Reading
+            # only before the cache's oldest row would leave the tail unfetched
+            # while reporting the entire requested page as successful.
+            req_before = before_timestamp
+            req_limit = GECKO_OHLCV_MAX
+        elif needs_history:
             # Walk back from whichever ceiling is lower — our oldest row, which
             # pages back contiguously behind what we hold, or the caller's own
             # ``before_timestamp``, which lands on a distant closed window in one
             # request instead of paging all the way down to it.
-            req_before = int(min(series.oldest, end))
+            req_before = int(min(series.oldest, end + 1))
             req_limit = GECKO_OHLCV_MAX
         else:
             req_before = int(before_timestamp) if before_timestamp else None
@@ -1220,19 +1266,38 @@ async def fetch_ohlcv(
             ),
         )
 
+        if rows is None:
+            raise ValueError("Invalid OHLCV response")
+        # Form this response before the bounded shared cache evicts old rows.
+        # On the third historical page, oldest-first eviction can otherwise
+        # discard 900 of the 1000 candles this very request just downloaded.
+        series = _get_series(series_key)
+        response_rows = dict(series.rows)
+        for row in rows:
+            if isinstance(row, (list, tuple)) and len(row) >= 6:
+                response_rows[float(row[0])] = row
+        served = [
+            response_rows[ts]
+            for ts in sorted(response_rows)
+            if ts <= end and (requested_start is None or ts >= requested_start)
+        ][-limit:]
         if rows:
-            # Re-read the series: an eviction may have dropped it while the
-            # request was open, and merging into a detached object would throw
-            # the answer away.
-            series = _get_series(series_key)
-            series.merge(rows, req_limit, req_before, timeframe_seconds(timeframe))
-
-        served = series.slice(end, limit)
+            series.merge(
+                rows,
+                req_limit,
+                req_before,
+                timeframe_seconds(timeframe),
+                requested_start=requested_start,
+            )
         if not served:
+            if strict:
+                return [], None
             return None, "No OHLCV data available"
         return served, None
 
     except Exception as e:
+        if strict:
+            raise
         logger.error(f"Error fetching OHLCV: {e}", exc_info=True)
         return None, f"Failed to fetch OHLCV: {str(e)}"
 
@@ -1268,9 +1333,8 @@ async def _fetch_ohlcv_upstream(
         import pandas as pd
 
         if isinstance(result, pd.DataFrame):
-            if not result.empty:
-                # Convert DataFrame to list format
-                rows = result.values.tolist()
+            # An empty DataFrame is a successful empty response.
+            rows = result.values.tolist()
     except ImportError:
         pass
 
@@ -1360,22 +1424,17 @@ class _CandleSeries:
       no matter how stale the series is. A fetch that lands clear of the interval
       *replaces* it rather than widening it — one honest block beats two blocks
       pretending to be one.
-    * ``exhausted`` — upstream returned fewer rows than the maximum asked for, so
-      there is no more history behind ``oldest``: the covered interval reaches
-      down forever. Without this a chart of a pool younger than its window would
-      re-ask for the same missing history on every single render.
     * ``tail_fetched_at`` — when the *live* edge (``before_timestamp=None``) was
       last refreshed. Only a historical fetch leaves this untouched, so a series
       built from a closed window never poses as a fresh live one.
     """
 
-    __slots__ = ("rows", "covered_from", "covered_to", "exhausted", "tail_fetched_at")
+    __slots__ = ("rows", "covered_from", "covered_to", "tail_fetched_at")
 
     def __init__(self) -> None:
         self.rows: Dict[float, List] = {}
         self.covered_from: float = math.inf
         self.covered_to: float = 0.0
-        self.exhausted: bool = False
         self.tail_fetched_at: float = 0.0
 
     @property
@@ -1387,7 +1446,13 @@ class _CandleSeries:
         return max(self.rows) if self.rows else None
 
     def merge(
-        self, fetched: List, requested: int, before: Optional[int], tf_seconds: float
+        self,
+        fetched: List,
+        requested: int,
+        before: Optional[int],
+        tf_seconds: float,
+        *,
+        requested_start: Optional[float] = None,
     ) -> None:
         """Fold an upstream answer in, and record what it proves about the edges."""
         block: Dict[float, List] = {}
@@ -1402,15 +1467,19 @@ class _CandleSeries:
             block[ts] = list(row)
             kept += 1
 
-        # Upstream answers with the newest `requested` candles before `before`,
-        # so a short answer means it has nothing older left to give: this block
-        # reaches all the way down.
+        # A short page proves coverage only within this bounded request, never
+        # that the pool has no data before the provider's six-month window.
         short = kept < requested
         # Everything between the block's floor and the request's ceiling is now
         # known — including the buckets that came back empty, which is what lets
         # a gappy pool be served from memory instead of re-asked forever.
-        ceiling = float(before) if before else time.time()
-        floor = -math.inf if short else (min(block) if block else ceiling)
+        ceiling = float(before - 1) if before is not None else time.time()
+        floor = min(block) if block else ceiling
+        if short:
+            floor = max(
+                requested_start if requested_start is not None else -math.inf,
+                ceiling - GECKO_OHLCV_MAX_SPAN,
+            )
 
         # A block clear of what we already hold leaves an unfetched gap between
         # the two, and a series that claimed the gap would answer a window inside
@@ -1429,7 +1498,6 @@ class _CandleSeries:
             self.rows = block
             self.covered_from = floor
             self.covered_to = ceiling
-            self.exhausted = short
             # The rows just dropped included whatever live edge we held, so the
             # series is no longer a fresh one until a live fetch says so below.
             self.tail_fetched_at = 0.0
@@ -1437,8 +1505,6 @@ class _CandleSeries:
             self.rows.update(block)
             self.covered_from = min(self.covered_from, floor)
             self.covered_to = max(self.covered_to, ceiling)
-            if short:
-                self.exhausted = True
         if not before:
             self.tail_fetched_at = time.time()
 
@@ -1448,13 +1514,12 @@ class _CandleSeries:
             for ts in sorted(self.rows)[: len(self.rows) - _SERIES_MAX_ROWS]:
                 del self.rows[ts]
             self.covered_from = min(self.rows)
-            self.exhausted = False
 
     def serves(self, oldest_wanted: float, end: float, use_cache: bool) -> bool:
         """Whether this series can answer ``[oldest_wanted, end]`` on its own."""
         if not self.rows:
             return False
-        deep_enough = self.exhausted or self.covered_from <= oldest_wanted
+        deep_enough = self.covered_from <= oldest_wanted
         if not deep_enough:
             return False
         # A window that has already closed is immutable — age is irrelevant.
@@ -1463,9 +1528,13 @@ class _CandleSeries:
         # The live edge, on the other hand, is only as good as its last refresh.
         return use_cache and (time.time() - self.tail_fetched_at) < OHLCV_CACHE_TTL
 
-    def slice(self, end: float, limit: int) -> List:
+    def slice(self, end: float, limit: int, start: Optional[float] = None) -> List:
         """The newest ``limit`` rows at or before ``end``, ascending."""
-        stamps = [ts for ts in sorted(self.rows) if ts <= end]
+        stamps = [
+            ts
+            for ts in sorted(self.rows)
+            if ts <= end and (start is None or ts >= start)
+        ]
         return [self.rows[ts] for ts in stamps[-limit:]]
 
 

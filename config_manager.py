@@ -194,8 +194,6 @@ class ConfigManager:
         self._data.setdefault("server_access", {})
         self._data.setdefault("chat_defaults", {})
         self._data.setdefault("user_preferences", {})
-        self._data.setdefault("telemetry", {})
-        self._data.setdefault("sharing", {})
 
         # Drop the `"No username"` sentinel (FEAT-088). It is not a migration of
         # meaning — the string only ever stood for "Telegram told us nothing" —
@@ -237,7 +235,6 @@ class ConfigManager:
             "server_access": {},
             "chat_defaults": {},
             "user_preferences": {},
-            "telemetry": {},
             "version": self.VERSION,
         }
 
@@ -284,12 +281,6 @@ class ConfigManager:
                 # and routes/code.py gates on (ARCH-177).
                 "user_preferences": self._data.get("user_preferences", {}),
                 "web_jwt_secret": self._data.get("web_jwt_secret"),
-                "telemetry": self._data.get("telemetry", {}),
-                # Same omission as ARCH-177 above, one section newer: without
-                # this the admin's sharing veto, each user's standing answer and
-                # the share_secret behind the stable pseudonyms were re-minted
-                # on every restart (CORR-244).
-                "sharing": self._data.get("sharing", {}),
                 "version": self._data.get("version", self.VERSION),
             }
             # Keep a copy of the last known-good file before truncating it,
@@ -781,49 +772,6 @@ class ConfigManager:
     # =========================================================================
     # USER MANAGEMENT
     # =========================================================================
-
-    # ── Telemetry (FEAT-023) ──
-    # Consent and the install's random identity live here because this file is
-    # the one durable, process-wide store the MCP subprocess can also read.
-    # Nothing in this section is transmitted except `install_id` and `level`;
-    # `install_secret` never leaves the machine. See PRIVACY.md.
-
-    def get_telemetry(self) -> dict:
-        """The telemetry section. Empty dict on an install that never opted in."""
-        section = self._data.get("telemetry")
-        return dict(section) if isinstance(section, dict) else {}
-
-    def update_telemetry(self, **changes) -> dict:
-        """Merge keys into the telemetry section and persist."""
-        section = self._data.setdefault("telemetry", {})
-        if not isinstance(section, dict):
-            section = {}
-            self._data["telemetry"] = section
-        section.update(changes)
-        self._save_config()
-        return dict(section)
-
-    def get_sharing(self) -> dict:
-        """The conversation-sharing section (FEAT-054). Empty on a fresh install.
-
-        Deliberately separate from :meth:`get_telemetry`: the two record
-        different promises to different people. Telemetry consent is the
-        admin's, install-wide, and anonymous counts; sharing holds an admin veto
-        plus this install's own random ids, and the content it gates belongs to
-        individual users.
-        """
-        section = self._data.get("sharing")
-        return dict(section) if isinstance(section, dict) else {}
-
-    def update_sharing(self, **changes) -> dict:
-        """Merge keys into the sharing section and persist."""
-        section = self._data.setdefault("sharing", {})
-        if not isinstance(section, dict):
-            section = {}
-            self._data["sharing"] = section
-        section.update(changes)
-        self._save_config()
-        return dict(section)
 
     def get_user(self, user_id: int) -> Optional[dict]:
         """Get user record."""

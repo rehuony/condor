@@ -3,9 +3,12 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import pytest
+from plotly.subplots import make_subplots
 
-from condor.reports.figure_opt import GL_THRESHOLD, optimize_figure
+from condor.reports import ReportBuilder
+from condor.reports.figure_opt import GL_THRESHOLD, X0DX_THRESHOLD, optimize_figure
 
 BIG = GL_THRESHOLD + 100
 
@@ -32,6 +35,63 @@ def test_regular_timestamps_collapse_to_x0_dx():
     assert "x" not in trace
     assert trace["dx"] == 60_000  # one minute, in milliseconds
     assert trace["x0"].startswith("2026-07-28T04:57:00")
+
+
+@pytest.mark.parametrize("trace_class", [go.Candlestick, go.Ohlc])
+@pytest.mark.parametrize("count", [X0DX_THRESHOLD - 1, X0DX_THRESHOLD])
+def test_financial_traces_keep_valid_explicit_coordinates(trace_class, count):
+    prices = np.arange(count, dtype=float) + 100
+    fig = go.Figure(
+        trace_class(
+            x=_minutes(count),
+            open=prices,
+            high=prices + 2,
+            low=prices - 2,
+            close=prices + 1,
+        )
+    )
+
+    spec = optimize_figure(fig)
+    trace = _traces(spec)[0]
+    assert "x0" not in trace and "dx" not in trace
+    np.testing.assert_array_equal(trace["x"], fig.data[0].x)
+    # Dict shape assertions alone cannot establish that Plotly accepts a trace.
+    assert "Plotly.newPlot" in pio.to_html(
+        spec, full_html=False, include_plotlyjs=False
+    )
+
+
+def test_large_mixed_financial_report_serializes_without_mutating_export_figure():
+    x = _minutes(BIG)
+    prices = np.arange(BIG, dtype=float) + 100
+    hist = np.where(np.arange(BIG) % 2, 1.0, -1.0)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True)
+    fig.add_trace(
+        go.Candlestick(
+            x=x, open=prices, high=prices + 2, low=prices - 2, close=prices + 1
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(go.Scatter(x=x, y=prices, mode="lines"), row=1, col=1)
+    fig.add_trace(
+        go.Bar(x=x, y=hist, marker_color=np.where(hist > 0, "green", "red")),
+        row=2,
+        col=1,
+    )
+    original = fig.to_json()
+
+    spec = optimize_figure(fig)
+    candle, line, *areas = spec["data"]
+    assert candle["type"] == "candlestick" and "x" in candle
+    assert line["type"] == "scattergl" and line["dx"] == 60_000
+    assert len(areas) == 2
+    assert all(area["fill"] == "tozeroy" and area["yaxis"] == "y2" for area in areas)
+    assert "Plotly.newPlot" in pio.to_html(
+        spec, full_html=False, include_plotlyjs=False
+    )
+    ReportBuilder("Mixed financial chart").plotly(fig)
+    assert fig.to_json() == original
 
 
 def test_irregular_timestamps_keep_their_x_array():

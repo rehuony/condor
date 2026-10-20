@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, Mic, Volume2 } from "lucide-react";
 import { useState, useEffect } from "react";
 
+import { SelectField } from "@/components/ui/select-field";
 import { api } from "@/lib/api";
 import type { VoicePrefs } from "@/lib/api";
 
@@ -95,19 +96,12 @@ export function VoiceSettings() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Auto-detect works well for most cases. Fix the language for better accuracy if you always speak the same language.
         </p>
-        <select
+        <SelectField
+          label="Language"
           value={form.language ?? ""}
-          onChange={(e) =>
-            setForm({ ...form, language: e.target.value || null })
-          }
-          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
-        >
-          {Object.entries(languages).map(([code, name]) => (
-            <option key={code} value={code}>
-              {name}
-            </option>
-          ))}
-        </select>
+          onChange={(value) => setForm({ ...form, language: value || null })}
+          options={Object.entries(languages).map(([code, name]) => ({ value: code, label: name }))}
+        />
       </section>
 
       {/* Auto-send */}

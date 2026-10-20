@@ -8,18 +8,10 @@ with that agent; and, occasionally, **a procedure the conversation worked out**,
 which goes to :mod:`condor.memory.proposals` as an *offer* — a playbook a human
 accepts before it ever reaches a prompt (FEAT-074).
 
-The shape of this module is borrowed on purpose.
-
-**A conversation never formally ends**, so ``condor/sharing/sweep.py`` had to
-invent a notion of "finished" and settled on "nothing has happened for
-:data:`IDLE_S`", with a job-queue tick, a per-tick budget, oldest-first pooling
-across users and a blanket "one bad conversation is not the tick". That is
-exactly this problem, so this is exactly that answer rather than a second
-notion of finished. What is *not* borrowed is everything the sharing sweep
-needed because its payload leaves the machine: there is no consent gate here,
-no rate limit and no forward-only rule, because nothing here goes anywhere.
-``CONDOR_REFLECTION=off`` is the operator's switch, and it is read in
-:func:`eligible` so the sweep goes quiet rather than half-running.
+A conversation qualifies after no activity for :data:`IDLE_S`. A periodic job
+pools eligible conversations oldest first across users and limits each pass to
+a small budget. ``CONDOR_REFLECTION=off`` disables the pass. Reflection uses
+the configured model and stores its results in this install's agent memory.
 
 **The pass runs with no MCP servers and every tool request denied.**
 ``build_llm_client(..., mcp_servers=None, permission_callback=_deny)`` — no MCP
@@ -60,15 +52,12 @@ log = logging.getLogger(__name__)
 ENV_VAR = "CONDOR_REFLECTION"
 OFF = "off"
 
-# How long a conversation must have been untouched to count as finished. The
-# sharing sweep's number, for the sharing sweep's reason: ``updated_at`` is
-# stamped on every merge, so silence is the only available ending.
+# How long a conversation must have been untouched to count as finished.
+# ``updated_at`` is stamped on every merge.
 IDLE_S = 30 * 60
 
-# How often the job runs, and how many reflections one run may spend. Unlike
-# sharing there is no external allowance to divide up — the budget exists only
-# so a backlog drains steadily instead of firing a hundred model runs at once
-# the first time an install turns this on.
+# How often the job runs, and how many reflections one run may spend.
+# The budget lets a backlog drain steadily without a burst of model runs.
 SWEEP_INTERVAL_S = 15 * 60
 PER_TICK = 3
 
@@ -441,9 +430,7 @@ def eligible(user_id: int, now: float | None = None) -> list[ConversationMeta]:
 def _candidates(now: float) -> list[tuple[int, ConversationMeta]]:
     """Everything ready across every user, oldest waiting first.
 
-    Pooled and sorted together rather than swept user by user, exactly as
-    ``condor.sharing.sweep._candidates`` does, so one user with a large backlog
-    drains at the same rate as everyone else instead of owning every tick.
+    Pool and sort across users so a large backlog does not own every tick.
     """
     found: list[tuple[int, ConversationMeta]] = []
     for user_id in _users():
@@ -497,7 +484,7 @@ async def _reflection_job(context) -> None:  # pragma: no cover - PTB plumbing
 
 
 def register_jobs(application) -> None:
-    """Register the pass beside the sharing sweep, the house pattern.
+    """Register the periodic reflection pass.
 
     Registered unconditionally and free on an install with nothing to read: the
     first thing :func:`sweep` does is walk the stores, and a conversation still

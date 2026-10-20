@@ -4,7 +4,7 @@ CATEGORY = "Market Data"
 
 import asyncio
 import logging
-import time
+import math
 from datetime import datetime, timezone
 
 import aiohttp
@@ -55,16 +55,40 @@ class Config(BaseModel):
     send_to_telegram: bool = Field(default=True, description="Send chart to Telegram")
 
 
-def _fmt_mcap(v: float) -> str:
+def _number(value: object) -> float | None:
+    """Keep an absent or invalid metric distinct from a reported zero."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _fmt_mcap(v: float | None) -> str:
+    if v is None:
+        return "N/A"
     if v >= 1e9:
         return f"${v / 1e9:.2f}B"
     if v >= 1e6:
         return f"${v / 1e6:.1f}M"
-    return f"${v / 1e3:.0f}K"
+    if v >= 1e3:
+        return f"${v / 1e3:.0f}K"
+    return f"${v:,.0f}"
 
 
-def _fmt_pct(v: float) -> str:
-    return f"{v:+.1f}%"
+def _fmt_pct(v: float | None) -> str:
+    return f"{v:+.1f}%" if v is not None else "N/A"
+
+
+def _fmt_price(v: float | None) -> str:
+    return f"${v:.4f}" if v is not None else "N/A"
+
+
+def _mcap_change(current: float | None, candles: pd.DataFrame) -> float | None:
+    if current is None or candles.empty or "mcap" not in candles:
+        return None
+    first = _number(candles["mcap"].iloc[0])
+    return (current - first) / first * 100 if first is not None and first > 0 else None
 
 
 async def _fetch_token_info(mint: str) -> dict:
@@ -77,30 +101,38 @@ async def _fetch_token_info(mint: str) -> dict:
 
     data = await gecko_request("GET", f"networks/solana/tokens/{mint}")
     attrs = data.get("data", {}).get("attributes", {})
-    price = float(attrs.get("price_usd") or 0)
-    fdv = float(attrs.get("fdv_usd") or 0)
-    mcap = float(attrs.get("market_cap_usd") or 0)
-    return {"price": price, "fdv": fdv, "mcap": mcap or fdv}
+    return {
+        "price": _number(attrs.get("price_usd")),
+        "fdv": _number(attrs.get("fdv_usd")),
+        "mcap": _number(attrs.get("market_cap_usd")),
+    }
 
 
 async def _fetch_defillama_fees(session: aiohttp.ClientSession, protocol: str) -> dict:
     """Fetch fee/revenue data from DefiLlama."""
     url = f"{DEFILLAMA_BASE}/{protocol}"
     async with session.get(url) as resp:
+        resp.raise_for_status()
         data = await resp.json()
 
     # Extract time series: [[timestamp, value], ...]
     chart = data.get("totalDataChart", [])
     df = pd.DataFrame(chart, columns=["timestamp", "fees"])
     if not df.empty:
+        df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+        df["fees"] = pd.to_numeric(df["fees"], errors="coerce")
         df["date"] = pd.to_datetime(df["timestamp"], unit="s", utc=True)
-        df = df.sort_values("timestamp").reset_index(drop=True)
+        df = (
+            df.dropna(subset=["date", "fees"])
+            .sort_values("timestamp")
+            .reset_index(drop=True)
+        )
 
     return {
-        "total24h": data.get("total24h", 0),
-        "total7d": data.get("total7d", 0),
-        "total30d": data.get("total30d", 0),
-        "totalAllTime": data.get("totalAllTime", 0),
+        "total24h": _number(data.get("total24h")),
+        "total7d": _number(data.get("total7d")),
+        "total30d": _number(data.get("total30d")),
+        "totalAllTime": _number(data.get("totalAllTime")),
         "chart": df,
     }
 
@@ -109,7 +141,7 @@ async def _fetch_candles(
     context: ContextTypes.DEFAULT_TYPE, trading_pair: str, interval: str, days: int
 ) -> pd.DataFrame:
     """Fetch candles from Binance via the Hummingbot backend API."""
-    client = await get_client(context._chat_id)
+    client = await get_client(context._chat_id, context=context)
     result = await client.market_data.get_candles_last_days(
         CONNECTOR, trading_pair, days=days, interval=interval
     )
@@ -126,14 +158,20 @@ async def _fetch_candles(
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     if "timestamp" in df.columns:
-        ts = df["timestamp"]
-        unit = "s" if ts.iloc[0] > 1e12 / 1000 else "ms"
-        df["date"] = pd.to_datetime(ts, unit=unit, utc=True)
-    df = df.sort_values("date").reset_index(drop=True)
+        ts = pd.to_numeric(df["timestamp"], errors="coerce")
+        seconds = ts.where(ts < 1e12, ts / 1000)
+        df["date"] = pd.to_datetime(seconds, unit="s", utc=True, errors="coerce")
+    elif "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
+    else:
+        raise ValueError("Candle data is missing timestamps")
+    df = df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
     return df
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(
+    config: Config, context: ContextTypes.DEFAULT_TYPE
+) -> str | RoutineResult:
     # Parse requested tokens
     requested = [t.strip().upper() for t in config.tokens.split(",") if t.strip()]
     active_tokens = {
@@ -145,8 +183,25 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     token_info = {}
     fee_data = {}
     price_data = {}
+    warnings = []
+    failures = []
+    successful_sources = 0
 
-    # Step 1: Fetch GeckoTerminal token info + DefiLlama fees (parallel, aiohttp)
+    def warn(source: str, name: str, message: str) -> None:
+        warning = f"{source} ({name}): {message}"
+        warnings.append(warning)
+        logger.warning(warning)
+
+    def failed(source: str, name: str, error: Exception) -> None:
+        failures.append(error)
+        reason = str(error) or (
+            "request timed out"
+            if isinstance(error, TimeoutError)
+            else "no details available"
+        )
+        warn(source, name, f"{type(error).__name__}: {reason}")
+
+    # A failed source must not replace another source's valid data with zeros.
     async with aiohttp.ClientSession() as session:
         # Token info from GeckoTerminal. No hand-rolled sleep between calls: the
         # shared gate paces these against every other caller in the process,
@@ -154,12 +209,27 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         for name, td in active_tokens.items():
             try:
                 token_info[name] = await _fetch_token_info(td["mint"])
+                successful_sources += 1
+                missing = [
+                    label
+                    for key, label in (
+                        ("price", "price"),
+                        ("mcap", "market cap"),
+                        ("fdv", "FDV"),
+                    )
+                    if token_info[name][key] is None
+                ]
+                if missing:
+                    warn(
+                        "GeckoTerminal",
+                        name,
+                        f"Unavailable: {', '.join(missing)}. FDV is reported separately from market cap.",
+                    )
                 logger.info(
-                    f"{name}: price=${token_info[name]['price']:.4f}, mcap={_fmt_mcap(token_info[name]['mcap'])}"
+                    f"{name}: price={_fmt_price(token_info[name]['price'])}, mcap={_fmt_mcap(token_info[name]['mcap'])}"
                 )
             except Exception as e:
-                logger.warning(f"Failed to fetch token info for {name}: {e}")
-                token_info[name] = {"price": 0, "fdv": 0, "mcap": 0}
+                failed("GeckoTerminal", name, e)
 
         # DefiLlama fees (parallel — no rate limit issues)
         fee_tasks = {
@@ -169,16 +239,27 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         fee_results = await asyncio.gather(*fee_tasks.values(), return_exceptions=True)
         for name, result in zip(fee_tasks.keys(), fee_results):
             if isinstance(result, Exception):
-                logger.warning(f"Failed to fetch fees for {name}: {result}")
-                fee_data[name] = {
-                    "total24h": 0,
-                    "total7d": 0,
-                    "total30d": 0,
-                    "totalAllTime": 0,
-                    "chart": pd.DataFrame(),
-                }
+                failed("DefiLlama", name, result)
             else:
+                successful_sources += 1
                 fee_data[name] = result
+                missing = [
+                    label
+                    for key, label in (
+                        ("total24h", "24h"),
+                        ("total7d", "7d"),
+                        ("total30d", "30d"),
+                    )
+                    if result[key] is None
+                ]
+                if missing:
+                    warn(
+                        "DefiLlama",
+                        name,
+                        f"Unavailable fee totals: {', '.join(missing)}.",
+                    )
+                if result["chart"].empty:
+                    warn("DefiLlama", name, "No fee history returned.")
 
     # Step 2: Fetch price candles from Binance (sequential — same connector)
     for name, td in active_tokens.items():
@@ -186,66 +267,75 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
             df = await _fetch_candles(
                 context, td["trading_pair"], config.interval, config.days
             )
+            successful_sources += 1
             if df.empty:
-                logger.warning(f"No candle data for {name}")
+                warn("Binance candles", name, "No candle history returned.")
                 continue
 
-            info = token_info[name]
-            if info["price"] > 0 and info["mcap"] > 0:
-                implied_supply = info["mcap"] / info["price"]
+            info = token_info.get(name, {})
+            price = info.get("price")
+            mcap = info.get("mcap")
+            if price is not None and price > 0 and mcap is not None:
+                implied_supply = mcap / price
                 df["mcap"] = df["close"] * implied_supply
-            else:
-                df["mcap"] = 0
 
             df["token"] = name
             price_data[name] = df
         except Exception as e:
-            logger.warning(f"Failed to fetch candles for {name}: {e}")
+            failed("Binance candles", name, e)
 
-    if not price_data and not fee_data:
-        return "Failed to fetch data for all tokens. Try again shortly."
+    if successful_sources == 0:
+        raise RuntimeError(
+            "All market comparison data sources failed: " + "; ".join(warnings)
+        ) from failures[0]
 
     # Build summary
-    lines = ["*Market Cap Comparison — Solana DEX Tokens*", ""]
+    lines = []
+    if warnings:
+        lines.extend(
+            [
+                "*Data availability warnings*",
+                *[f"- {warning}" for warning in warnings],
+                "",
+            ]
+        )
+    lines.extend(["*Market Cap Comparison — Solana DEX Tokens*", ""])
 
     # MCap section
     for name in active_tokens:
         info = token_info.get(name, {})
-        current_mcap = info.get("mcap", 0)
-        if name in price_data and not price_data[name].empty:
-            first_mcap = price_data[name]["mcap"].iloc[0]
-            change = (
-                ((current_mcap - first_mcap) / first_mcap * 100)
-                if first_mcap > 0
-                else 0
-            )
-            lines.append(
-                f"- {name}: {_fmt_mcap(current_mcap)} ({_fmt_pct(change)} over {config.days}d)"
-            )
-        else:
-            lines.append(
-                f"- {name}: {_fmt_mcap(current_mcap) if current_mcap else 'no data'}"
-            )
+        change = _mcap_change(info.get("mcap"), price_data.get(name, pd.DataFrame()))
+        lines.append(
+            f"- {name}: MCap {_fmt_mcap(info.get('mcap'))} | FDV {_fmt_mcap(info.get('fdv'))} | "
+            f"Price {_fmt_price(info.get('price'))} | Estimated {config.days}d change {_fmt_pct(change)}"
+        )
+    lines.extend(
+        [
+            "",
+            "Historical market caps and changes are estimates using candle prices and a constant current implied supply "
+            "(reported market cap / current price). They do not track historical circulating supply.",
+        ]
+    )
 
     # Fee/Revenue section
     lines.append("")
     lines.append("*Protocol Fees (DefiLlama)*")
     for name in active_tokens:
         fd = fee_data.get(name, {})
-        f24 = fd.get("total24h", 0)
-        f7d = fd.get("total7d", 0)
-        f30d = fd.get("total30d", 0)
+        f24 = fd.get("total24h")
+        f7d = fd.get("total7d")
+        f30d = fd.get("total30d")
         lines.append(
             f"- {name}: 24h {_fmt_mcap(f24)} | 7d {_fmt_mcap(f7d)} | 30d {_fmt_mcap(f30d)}"
         )
 
     # MCap/Fees ratio (valuation)
     lines.append("")
-    lines.append("*MCap / 30d Fees (lower = cheaper)*")
+    lines.append("*MCap / Annualized Fees (30d fees × 12)*")
     for name in active_tokens:
-        mcap = token_info.get(name, {}).get("mcap", 0)
-        f30d = fee_data.get(name, {}).get("total30d", 0)
-        if mcap > 0 and f30d > 0:
+        mcap = token_info.get(name, {}).get("mcap")
+        f30d = fee_data.get(name, {}).get("total30d")
+        if mcap is not None and f30d is not None and f30d > 0:
             annualized = f30d * 12
             ratio = mcap / annualized
             lines.append(f"- {name}: {ratio:.1f}x (ann. fees {_fmt_mcap(annualized)})")
@@ -260,28 +350,46 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
 
     colors = {"ORCA": "#00D1FF", "MET": "#E8A317", "RAY": "#8B5CF6"}
 
-    # Figure with 2 rows: mcap + fees
+    # Without every token's valuation, plot the independent candle prices
+    # instead of mixing prices and market caps on the same axis.
+    estimated_mcap = bool(price_data) and all(
+        "mcap" in df for df in price_data.values()
+    )
+    history_key = "mcap" if estimated_mcap else "close"
+    history_title = (
+        "Estimated Market Cap (constant current implied supply)"
+        if estimated_mcap
+        else "Price History"
+    )
+    normalize_history = (
+        config.normalize
+        and bool(price_data)
+        and all(df[history_key].iloc[0] > 0 for df in price_data.values())
+    )
+
+    # Figure with 2 rows: available price/valuation history + independent fees.
     fig = make_subplots(
         rows=2,
         cols=1,
         row_heights=[0.55, 0.45],
         shared_xaxes=True,
         vertical_spacing=0.08,
-        subplot_titles=["Market Cap Evolution", "Daily Protocol Fees"],
+        subplot_titles=[history_title, "Daily Protocol Fees"],
     )
 
-    # Row 1: Market cap
-    y_label = "Market Cap (USD)"
+    # Row 1: Market-cap estimates, or prices when valuations are unavailable.
+    y_label = "Estimated Market Cap (USD)" if estimated_mcap else "Price (USD)"
+    if normalize_history:
+        y_label = "Indexed (100 = start)"
     for name in active_tokens:
         if name not in price_data:
             continue
         df = price_data[name]
-        if df.empty or df["mcap"].sum() == 0:
+        if df.empty:
             continue
-        y_values = df["mcap"]
-        if config.normalize and y_values.iloc[0] > 0:
+        y_values = df[history_key]
+        if normalize_history:
             y_values = (y_values / y_values.iloc[0]) * 100
-            y_label = "Indexed (100 = start)"
         fig.add_trace(
             go.Scatter(
                 x=df["date"],
@@ -289,7 +397,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
                 mode="lines",
                 name=name,
                 line=dict(color=colors.get(name, "#FFFFFF"), width=2),
-                hovertemplate=f"{name}<br>%{{x|%b %d}}<br>%{{y:,.0f}}<extra></extra>",
+                hovertemplate=f"{name}<br>%{{x|%b %d}}<br>%{{y:,.4g}}<extra></extra>",
                 legendgroup=name,
             ),
             row=1,
@@ -315,9 +423,9 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
                 mode="lines",
                 name=f"{name} fees",
                 line=dict(color=colors.get(name, "#FFFFFF"), width=2, dash="dot"),
-                hovertemplate=f"{name}<br>%{{x|%b %d}}<br>${{y:,.0f}}<extra></extra>",
+                hovertemplate=f"{name}<br>%{{x|%b %d}}<br>$%{{y:,.0f}}<extra></extra>",
                 legendgroup=name,
-                showlegend=False,
+                showlegend=name not in price_data,
             ),
             row=2,
             col=1,
@@ -336,23 +444,10 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     for row in [1, 2]:
         fig.update_xaxes(gridcolor="#21262d", row=row, col=1)
         fig.update_yaxes(gridcolor="#21262d", row=row, col=1)
-    fig.update_yaxes(title_text=y_label, tickformat=",.0f", row=1, col=1)
+    fig.update_yaxes(title_text=y_label, tickformat=",.4g", row=1, col=1)
     fig.update_yaxes(
         title_text="Daily Fees (7d avg, USD)", tickformat="$,.0f", row=2, col=1
     )
-
-    # Send to Telegram
-    if config.send_to_telegram and getattr(context, "bot", None):
-        import io
-
-        chat_id = context._chat_id if hasattr(context, "_chat_id") else None
-        if chat_id:
-            buf = io.BytesIO()
-            fig.write_image(buf, format="png", width=900, height=700, scale=2)
-            buf.seek(0)
-            await context.bot.send_photo(
-                chat_id=chat_id, photo=buf, caption=summary, parse_mode="Markdown"
-            )
 
     # Save HTML report
     from condor.reports import ReportBuilder
@@ -361,7 +456,8 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     builder.source("routine", "mcap_comparison").tags(
         ["market-cap", "fees", "solana"] + [n.lower() for n in active_tokens]
     )
-    builder.markdown(summary)
+    # Preserve the warning-first summary above the charts and table.
+    builder.manual_order().markdown(summary)
     builder.plotly(fig)
 
     table_rows = []
@@ -369,31 +465,43 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         info = token_info.get(name, {})
         fd = fee_data.get(name, {})
         df = price_data.get(name, pd.DataFrame())
-        first_mcap = df["mcap"].iloc[0] if not df.empty else 0
-        change = (
-            ((info.get("mcap", 0) - first_mcap) / first_mcap * 100)
-            if first_mcap > 0
-            else 0
-        )
-        f30d = fd.get("total30d", 0)
-        annualized = f30d * 12
-        mcap = info.get("mcap", 0)
+        change = _mcap_change(info.get("mcap"), df)
+        f30d = fd.get("total30d")
+        annualized = f30d * 12 if f30d is not None else None
+        mcap = info.get("mcap")
         table_rows.append(
             {
                 "Token": name,
-                "Price": f"${info.get('price', 0):.4f}",
+                "Price": _fmt_price(info.get("price")),
                 "MCap": _fmt_mcap(mcap),
-                f"{config.days}d Chg": _fmt_pct(change),
-                "FDV": _fmt_mcap(info.get("fdv", 0)),
-                "Fees 24h": _fmt_mcap(fd.get("total24h", 0)),
+                f"Estimated {config.days}d Chg": _fmt_pct(change),
+                "FDV": _fmt_mcap(info.get("fdv")),
+                "Fees 24h": _fmt_mcap(fd.get("total24h")),
                 "Fees 30d": _fmt_mcap(f30d),
                 "Ann. Fees": _fmt_mcap(annualized),
                 "MCap/Ann.Fees": (
-                    f"{mcap / annualized:.1f}x" if annualized > 0 else "N/A"
+                    f"{mcap / annualized:.1f}x"
+                    if mcap is not None and annualized is not None and annualized > 0
+                    else "N/A"
                 ),
             }
         )
     builder.table(table_rows)
     await builder.save()
+
+    # The full summary is returned below. Keep the image caption short so
+    # source warnings cannot exceed Telegram's caption limit or break Markdown.
+    if config.send_to_telegram and getattr(context, "bot", None):
+        import io
+
+        chat_id = context._chat_id if hasattr(context, "_chat_id") else None
+        if chat_id:
+            buf = io.BytesIO()
+            fig.write_image(buf, format="png", width=900, height=700, scale=2)
+            buf.seek(0)
+            caption = f"Solana DEX Comparison — {config.days}d"
+            if warnings:
+                caption += "\nSome data is unavailable. See the report and run summary for source warnings."
+            await context.bot.send_photo(chat_id=chat_id, photo=buf, caption=caption)
 
     return RoutineResult(text=summary)

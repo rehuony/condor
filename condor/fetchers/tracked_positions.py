@@ -45,5 +45,9 @@ async def fetch_tracked_positions(
 
     positions = result.get("positions", result) if isinstance(result, dict) else result
     if isinstance(positions, list):
+        if strict and any(not isinstance(p, dict) for p in positions):
+            raise ValueError("Malformed tracked positions response")
         return [p for p in positions if isinstance(p, dict)]
+    if strict and not isinstance(positions, dict):
+        raise ValueError("Malformed tracked positions response")
     return [positions] if isinstance(positions, dict) else []

@@ -36,6 +36,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from condor.agents.config import RiskLimitsConfig
 from condor.runtime.danger import (
     CREATE_EXECUTOR_TOOLS,
     DANGEROUS_AMM_ACTIONS,
@@ -81,9 +82,14 @@ class RiskLimits:
     # at setup would otherwise stop trading the moment this shipped.
     max_leverage: float = -1.0
 
+    def __post_init__(self) -> None:
+        validated = RiskLimitsConfig.model_validate(vars(self))
+        for name, value in validated.model_dump().items():
+            setattr(self, name, value)
+
     @classmethod
     def from_dict(cls, d: dict) -> RiskLimits:
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        return cls(**RiskLimitsConfig.model_validate(d).model_dump())
 
 
 @dataclass
@@ -282,7 +288,14 @@ class RiskEngine:
         state = RiskState(limits=self.limits)
 
         try:
-            state.drawdown_pct = tracker.get_drawdown_pct()
+            drawdown_pct = tracker.get_drawdown_pct()
+            if (
+                isinstance(drawdown_pct, bool)
+                or not math.isfinite(drawdown_pct)
+                or drawdown_pct < 0
+            ):
+                raise ValueError("drawdown must be a finite nonnegative percentage")
+            state.drawdown_pct = drawdown_pct
         except Exception as exc:
             log.exception("Failed to compute risk state from tracker")
             # Fail closed: without real metrics we must not approve creates
@@ -787,6 +800,28 @@ def auto_approve_with_risk_check(
         refusal = raw_controller_code_refusal(tool_call)
         if refusal:
             return deny(tool_call_name(tool_call), refusal)
+
+        # A failed risk snapshot or a tripped limit is still binding in a
+        # run_once experiment. Prompts and the loop scheduler are not the
+        # execution boundary; retain only the same brakes as a winddown.
+        if risk_state.is_blocked or risk_state.should_shutdown:
+            unsafe = shutdown_refusal(tool_call)
+            if is_dangerous_tool_call(tool_call):
+                args = tool_call_input(tool_call)
+                unsafe = unsafe or (
+                    _shutdown_refusal(tool_call_name(tool_call), args)
+                    if args is not None
+                    else "its arguments could not be read"
+                )
+            if unsafe:
+                reason = (
+                    risk_state.shutdown_reason
+                    or risk_state.block_reason
+                    or "the risk state is blocked"
+                )
+                return deny(
+                    tool_call_name(tool_call), f"New exposure blocked: {reason}"
+                )
 
         if is_dangerous_tool_call(tool_call):
             tool_name = tool_call_name(tool_call)

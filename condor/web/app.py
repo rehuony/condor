@@ -3,16 +3,16 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from condor.telemetry.taps import web_tap
 from condor.web.routes import (
     admin,
+    admin_photos,
     agents,
     archived,
     auth,
@@ -32,11 +32,11 @@ from condor.web.routes import (
     positions,
     push,
     reports,
+    research,
     routines,
     servers,
     sessions,
     settings,
-    sharing,
     transcribe,
     updates,
     ws,
@@ -129,15 +129,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Usage telemetry (FEAT-023). Reports the matched route *template*
-    # (`/api/v1/bots/{name}`), never the URL, so cardinality is bounded by our
-    # own router and no path parameter — a bot name, a server name, a report id
-    # — is ever read. No-op unless the admin opted in.
-    app.middleware("http")(web_tap)
-
     # ── API routes ──
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(admin.router, prefix="/api/v1")
+    app.include_router(admin_photos.router, prefix="/api/v1")
     app.include_router(servers.router, prefix="/api/v1")
     app.include_router(portfolio.router, prefix="/api/v1")
     app.include_router(bots.router, prefix="/api/v1")
@@ -158,12 +153,12 @@ def create_app() -> FastAPI:
     app.include_router(routines.router, prefix="/api/v1")
     app.include_router(code.router, prefix="/api/v1")
     app.include_router(reports.router, prefix="/api/v1")
+    app.include_router(research.router, prefix="/api/v1")
     app.include_router(settings.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(chat_ws.router, prefix="/api/v1")
     app.include_router(confirmations.router, prefix="/api/v1")
     app.include_router(conversations.router, prefix="/api/v1")
-    app.include_router(sharing.router, prefix="/api/v1")
     app.include_router(transcribe.router, prefix="/api/v1")
     app.include_router(updates.router, prefix="/api/v1")
 
@@ -208,6 +203,15 @@ def create_app() -> FastAPI:
                 )
             if full_path.startswith("reports/"):
                 raise HTTPException(status_code=404, detail="Report not found")
+            # Bookmarked filesystem links from old replies should reach the
+            # authenticated viewer too. This only rewrites an address; content
+            # is exclusively served by the guarded research API.
+            if (
+                full_path.startswith(".condor/research/")
+                or "/.condor/research/" in full_path
+            ):
+                relative = full_path.split(".condor/research/", 1)[1]
+                return RedirectResponse("/research/" + quote(relative, safe="/"))
             if full_path:
                 try:
                     candidate = (dist / full_path).resolve()

@@ -12,18 +12,18 @@ for an HTTP client is a config flip rather than a rewrite.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import time
-from typing import AsyncIterator, Literal
+import uuid
+from contextlib import aclosing
+from typing import AsyncIterator, Callable, Literal
 
-from condor.acp.pydantic_ai_client import model_prefix
-from condor.runtime import conversations, secrets
+from condor.runtime import conversations, secrets, turns
 from condor.runtime.events import EventType, RuntimeEvent
 from condor.runtime.keys import SessionKey
 from condor.runtime.models import PromptRequest, SessionInfo, SessionSpec
 from condor.runtime.timeouts import TIMEOUTS
-from condor.telemetry import taps as telemetry_taps
 
 log = logging.getLogger(__name__)
 
@@ -150,27 +150,6 @@ def _deny_pending_confirmations(raw_key: str) -> None:
         log.info("Denied %d pending confirmation(s) on steering %s", denied, raw_key)
 
 
-# Session surfaces are short codes; the telemetry taxonomy spells them out.
-_SURFACES = {"tg": "telegram", "web": "web", "mcp": "mcp", "": "other"}
-
-
-def _turn_kind(req: PromptRequest, key: SessionKey) -> str:
-    """Which kind of turn this was, from what the request already carries."""
-    kind = (getattr(req, "user_kind", "") or "").lower()
-    if kind in ("consult", "delegate", "tick"):
-        return kind
-    return "chat"
-
-
-def _model_of(agent_key: str) -> str:
-    """The model id without any custom-endpoint nickname.
-
-    ``custom@venice:llama-3.3-70b`` reports ``llama-3.3-70b``: the nickname is
-    something the operator typed and may name their employer or their host.
-    """
-    return agent_key.split(":", 1)[1] if ":" in agent_key else agent_key
-
-
 def _attach_usage(done: RuntimeEvent, session, recorder) -> None:
     """Charge this turn what the client spent since the last one (FEAT-120).
 
@@ -190,29 +169,16 @@ async def prompt(
     req: PromptRequest,
     *,
     on_busy: BusyPolicy = "reject",
+    can_execute: Callable[[], bool] | None = None,
 ) -> AsyncIterator[RuntimeEvent]:
-    """Stream one user turn through the session as canonical RuntimeEvents.
+    """Accept durably, serialize by conversation, then stream one AI turn.
 
-    Both surfaces consume this, so neither can drift from the other's idea of
-    what an event looks like. A mid-stream failure is surfaced as an ``ERROR``
-    followed by a ``DONE`` — a consumer that stops only on ``DONE`` must never
-    be left hanging by an exception.
-
-    Every turn is recorded here, on the one funnel every surface goes through,
-    so Telegram, the dashboard and MCP all get a durable transcript without any
-    per-surface work.
-
-    ``on_busy`` is what a message sent mid-answer does. It lives here rather
-    than on each surface because this is the one funnel both go through, and
-    because the surfaces genuinely differ: the dashboard has a live composer and
-    a Stop button, so sending *steers*; Telegram has neither, so sending
-    *queues*. It defaults to ``reject`` — the pre-FEAT-030 behaviour — so
-    delegations, strategy ticks and every other caller are untouched.
-
-    ``req.images`` travel beside the text to whichever client is behind the
-    session, which turns them into that protocol's own content blocks. They are
-    resolved to bytes by the caller — the funnel never sees an attachment id —
-    and are recorded on the user turn as ``{id, mime, bytes}``, no payload.
+    Delivery is a consumer of this generator, never a condition of acceptance.
+    The conversation queue spans transports; each model client receives any
+    completed history it has not seen before it handles the next input.
+    ``can_execute`` rechecks surface authorization after queueing and session
+    refresh, immediately before execution. Refused input remains in the audit
+    transcript but is excluded from future model context.
     """
     raw_key = str(key)
     session = _local().get_session(key)
@@ -221,178 +187,247 @@ async def prompt(
         yield RuntimeEvent.done("no_session", session_key=raw_key)
         return
 
-    lock_timeout: float | None = None
-    if on_busy != "reject":
-        # A deliberate wait is not a stuck prompt, so it gets its own deadline.
-        lock_timeout = TIMEOUTS.prompt_queue
-        if session.is_busy:
-            if on_busy == "steer":
-                # Order matters: a turn parked on a confirmation nobody will
-                # answer cannot notice a cancel, so the dialog goes first and
-                # the abort lands on an agent that can act on it.
-                _deny_pending_confirmations(raw_key)
-                await abort(key)
-            # Said before blocking, so a surface can show "waiting its turn"
-            # rather than a composer that looks broken.
-            yield RuntimeEvent.queued(session_key=raw_key)
-
-    # A configuration change reaches the chat that is already open (FEAT-093).
-    # A chat session hands its model, instructions, tool profile, mute list and
-    # server to the subprocess exactly once, at session/new, so an operator who
-    # switches a playbook off in the panel used to have to know to start a new
-    # chat. The staleness is recomputed here instead: the start of a turn is the
-    # one moment that is both safe (nothing in flight) and the last at which the
-    # change can still matter. This is the fourth cross-cutting concern this
-    # funnel has claimed, on the same argument as the first three — it is the
-    # only code path every turn on every surface takes.
-    #
-    # After ``on_busy`` on purpose: ``steer`` has just stopped the turn ahead,
-    # so it lands on a session that can be reloaded, while ``queue`` is still
-    # busy and defers to the turn after this one.
-    try:
-        reloaded = await _local().refresh_if_stale(key)
-    except Exception as exc:  # noqa: BLE001 - surfaced to the caller as an event
-        # The destroy happens before the spawn, as it does for every existing
-        # swap, so a configuration that cannot spawn leaves the key empty. The
-        # turn fails; the durable conversation is untouched and each surface's
-        # existing reattach re-creates on the next message.
-        log.exception("Could not reload session %s for a config change", raw_key)
-        yield RuntimeEvent.error(
-            f"Could not apply the new configuration: {exc}", session_key=raw_key
-        )
-        yield RuntimeEvent.done("error", session_key=raw_key)
+    owner, conversation_id = session.user_id, session.conversation_id
+    if (
+        req.request_id
+        and owner is not None
+        and conversations.has_request(owner, req.request_id)
+    ):
+        yield RuntimeEvent.done("duplicate", session_key=raw_key)
         return
 
-    if reloaded:
-        session = _local().get_session(key)
-        if session is None:
-            yield RuntimeEvent.error(f"No session for {raw_key}", session_key=raw_key)
-            yield RuntimeEvent.done("no_session", session_key=raw_key)
-            return
-        yield RuntimeEvent.reloaded(reloaded, session_key=raw_key)
-        # Recorded *after* the respawn, so the note is not swept into its own
-        # replay, and so a reload that failed leaves no note claiming it
-        # happened. Part names only — never a digest, never what changed.
-        conversations.record_system(
-            session.user_id,
-            session.conversation_id,
-            f"Reloaded to apply configuration changes ({', '.join(reloaded)})",
-            kind="reload",
-        )
-
-    # An agent that says it does not take pictures is told so here, before the
-    # prompt is built, rather than by a mid-turn protocol rejection the user
-    # cannot read. ACP answers this at the handshake; the pydantic-ai client has
-    # nothing equivalent to introspect and defaults to True, forwarding
-    # optimistically so the provider's own error is what surfaces (FEAT-098).
-    if req.images and not getattr(session.client, "accepts_images", True):
-        yield RuntimeEvent.error(
-            f"{session.label} cannot read images. "
-            "Switch the model, or describe what is in the picture.",
-            session_key=raw_key,
-        )
-        yield RuntimeEvent.done("error", session_key=raw_key)
-        return
-
-    # Key material never gets past this line (FEAT-056). It is the same
-    # argument the funnel already makes for recording and for ``on_busy``,
-    # applied to a third cross-cutting concern: ``clean`` feeds both the
-    # Recorder below and ``prompt_stream`` further down, so sanitising it here
-    # covers Telegram, the dashboard, background wakes, delegations and MCP at
-    # once — and covers surface number four, which would otherwise inherit the
-    # omission. Only *certain* shapes are replaced; ``findings`` carries the
-    # ambiguous ones too, for telemetry to count and for the surfaces to warn
-    # about. See :mod:`condor.runtime.secrets`.
-    clean, findings = secrets.redact(req.text)
-    # Redacted like the text, for the same reason and by the same rule — a
-    # page that renders a credential must not be the one hole in FEAT-056. Its
-    # findings are dropped on purpose: ``findings`` drives the secret *notice*,
-    # which tells the user about something they typed.
+    clean, _ = secrets.redact(req.text)
     view, _ = secrets.redact(req.view_context)
-    # The model hears the page; the transcript keeps only the user's words.
-    # Anything recorded is replayed on resume and shown by ShareConversation,
-    # and a page the user was on is true of a moment, not of the conversation.
     wire = f"{view}\n\n{clean}" if view.strip() else clean
-
-    # Stamped from the live session, not from the conversation meta: the meta's
-    # agent_key/agent_slug are last-write-wins, so a chat that switches models
-    # mid-way would attribute its whole history to whatever answered last.
+    request_id = req.request_id or uuid.uuid4().hex
+    queue_id = conversation_id or raw_key
+    queue = turns.state(owner, queue_id)
+    queue.pending[request_id] = raw_key
     recorder = conversations.Recorder(
-        session.user_id,
-        session.conversation_id,
+        owner,
+        conversation_id,
         clean,
         agent_key=session.agent_key,
         agent_slug=session.agent_slug,
-        # Empty for a turn the user typed; set when something else drove it
-        # (a background task waking the chat), so the opening line is recorded
-        # as a system note rather than as the user's words.
         user_kind=req.user_kind,
-        # The reference, never the payload: an id under this conversation's
-        # own attachments/ directory, its type and its size. That is what lets
-        # a reload put the picture back in the user's bubble — and what makes a
-        # share of this conversation carry an inert reference no corpus can
-        # resolve, which needed no special case in condor/sharing.
+        request_id=request_id,
         attachments=[
             {"id": image.id, "mime": image.mime, "bytes": len(image.data)}
             for image in req.images
             if image.id
         ],
     )
-    # Turn shape for telemetry (FEAT-023): counts and categories only. Nothing
-    # about what was asked, answered, or which file a tool touched.
-    started = time.monotonic()
-    tool_kinds: dict[str, int] = {}
-    outcome = "aborted"
     try:
-        async for event in session.prompt_stream(
-            wire, images=req.images or None, lock_timeout=lock_timeout
+        recorder.accept()
+    except Exception:
+        turns.release(owner, queue_id, request_id)
+        log.exception("Could not save incoming message for session %s", raw_key)
+        yield RuntimeEvent.error(
+            "Could not save your message. The agent was not run; please retry.",
+            session_key=raw_key,
+        )
+        yield RuntimeEvent.done("error", session_key=raw_key)
+        return
+
+    locked = False
+    executed = False
+    outcome = "aborted"
+    # Reserve FIFO position before yielding to a transport that may be slow.
+    was_busy = len(queue.pending) > 1 or session.is_busy
+    acquire = asyncio.create_task(queue.lock.acquire())
+    try:
+        turns.publish(owner, conversation_id, raw_key, "accepted")
+        accepted = RuntimeEvent.accepted(session_key=raw_key)
+        accepted.data.update(
+            request_id=request_id,
+            conversation_id=conversation_id,
+            agent_slug=session.agent_slug,
+        )
+        yield accepted
+        if was_busy:
+            if on_busy == "steer":
+                active = queue.active_key or (raw_key if session.is_busy else "")
+                if active:
+                    _deny_pending_confirmations(active)
+                    await abort(SessionKey.parse(active))
+            if on_busy != "reject":
+                yield RuntimeEvent.queued(session_key=raw_key)
+        timeout = (
+            TIMEOUTS.prompt_queue
+            if on_busy != "reject"
+            else _local().PROMPT_LOCK_TIMEOUT
+        )
+        try:
+            await asyncio.wait_for(asyncio.shield(acquire), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError(
+                "Agent is busy and not responding. Your message was saved; please retry when it is idle."
+            ) from exc
+        locked = True
+        queue.active_key = raw_key
+        queue.active_request = request_id
+
+        if request_id in queue.cancelled:
+            outcome = "cancelled"
+            recorder.observe(
+                RuntimeEvent.error(
+                    "Request cancelled before execution.", session_key=raw_key
+                )
+            )
+            yield RuntimeEvent.done("cancelled", session_key=raw_key)
+            return
+
+        # A queued request may outlive a model switch or session teardown.
+        session = _local().get_session(key)
+        if (
+            session is None
+            or session.conversation_id != conversation_id
+            or session.user_id != owner
         ):
-            runtime_event = RuntimeEvent.from_acp(event, session_key=raw_key)
-            if runtime_event.type is EventType.TOOL_CALL:
-                # The ACP `kind` ("read", "execute", …), never the `title`: a
-                # title is free text and routinely contains a file path.
-                kind = str(runtime_event.field("kind") or "other")
-                tool_kinds[kind] = tool_kinds.get(kind, 0) + 1
-            elif runtime_event.type is EventType.DONE:
-                outcome = "done"
-                _attach_usage(runtime_event, session, recorder)
-            recorder.observe(runtime_event)
-            yield runtime_event
-    except Exception as exc:  # noqa: BLE001 - surfaced to the caller as an event
+            raise RuntimeError(
+                "The session changed while your message was waiting. Your message was saved; reopen this conversation to continue."
+            )
+        reloaded = await _local().refresh_if_stale(key)
+        if reloaded:
+            session = _local().get_session(key)
+            if session is None:
+                raise RuntimeError("The session could not be reloaded.")
+            if session.conversation_id != conversation_id or session.user_id != owner:
+                raise RuntimeError(
+                    "The session changed while your message was waiting. Your message was saved; reopen this conversation to continue."
+                )
+            yield RuntimeEvent.reloaded(reloaded, session_key=raw_key)
+            conversations.record_system(
+                owner,
+                conversation_id,
+                f"Reloaded to apply configuration changes ({', '.join(reloaded)})",
+                kind="reload",
+            )
+        recorder.bind_agent(session.agent_key, session.agent_slug)
+        if request_id in queue.cancelled:
+            outcome = "cancelled"
+            recorder.observe(
+                RuntimeEvent.error(
+                    "Request cancelled before execution.", session_key=raw_key
+                )
+            )
+            yield RuntimeEvent.done("cancelled", session_key=raw_key)
+            return
+        if can_execute is not None:
+            try:
+                allowed = can_execute()
+            except Exception as exc:
+                # A failing access lookup is a refusal, never permission. Its
+                # exception may contain credentials, so log only the type.
+                log.warning(
+                    "Prompt authorization failed error_type=%s", type(exc).__name__
+                )
+                allowed = False
+            if not allowed:
+                outcome = "error"
+                failure = RuntimeEvent.error(
+                    "Your access changed. This message was saved but was not sent to the agent.",
+                    session_key=raw_key,
+                )
+                done = RuntimeEvent.done("access_denied", session_key=raw_key)
+                recorder.observe(failure)
+                # Mark the durable result before yielding: closing the consumer
+                # after ERROR must still exclude the refused input from replay.
+                recorder.observe(done)
+                queue.active_request = ""
+                yield failure
+                yield done
+                return
+        if req.images and not getattr(session.client, "accepts_images", True):
+            outcome = "error"
+            failure = RuntimeEvent.error(
+                f"{session.label} cannot read images. Switch the model, or describe what is in the picture.",
+                session_key=raw_key,
+            )
+            failure.data["code"] = "images_unsupported"
+            done = RuntimeEvent.done("error", session_key=raw_key)
+            recorder.observe(failure)
+            recorder.observe(done)
+            queue.active_request = ""
+            yield failure
+            yield done
+            return
+
+        revision = _local().conversation_revision(owner, conversation_id)
+        if conversation_id and getattr(session, "history_revision", 0) != revision:
+            replay = conversations.replay_context(
+                owner,
+                conversation_id,
+                exclude_request_ids=turns.pending_requests(owner, conversation_id),
+            )
+            if replay:
+                wire = (
+                    "Updated conversation history from the shared transcript. "
+                    "Use this as context; do not execute earlier requests again.\n\n"
+                    f"{replay}\n\nCurrent user message:\n{wire}"
+                )
+        executed = True
+        async with aclosing(
+            session.prompt_stream(
+                wire,
+                images=req.images or None,
+                lock_timeout=TIMEOUTS.prompt_queue if on_busy != "reject" else None,
+            )
+        ) as stream:
+            async for event in stream:
+                runtime_event = RuntimeEvent.from_acp(event, session_key=raw_key)
+                if runtime_event.type is EventType.DONE:
+                    outcome = "done"
+                    _attach_usage(runtime_event, session, recorder)
+                    # A delivered terminal event is no longer stoppable, even
+                    # while its consumer holds the generator open to finalize UI.
+                    queue.active_request = ""
+                recorder.observe(runtime_event)
+                yield runtime_event
+    except Exception as exc:
         outcome = "error"
         log.exception("Prompt failed for session %s", raw_key)
         failure = RuntimeEvent.error(str(exc), session_key=raw_key)
         recorder.observe(failure)
         yield failure
         done = RuntimeEvent.done("error", session_key=raw_key)
-        _attach_usage(done, session, recorder)
+        recorder.observe(done)
+        if queue.active_request == request_id:
+            queue.active_request = ""
+        if executed:
+            _attach_usage(done, session, recorder)
         yield done
     finally:
-        # A turn that never reached DONE — the abandoned generator below — is
-        # counted here or not at all. After a DONE this takes nothing.
-        recorder.note_usage(session.take_usage())
-        # Not on DONE: the dashboard abandons this generator constantly (page
-        # reload, abort_prompt cancelling the task, WS disconnect), and an
-        # abandoned async generator only ever gets GeneratorExit. Losing the
-        # half-written reply is the bug this feature exists to fix.
-        recorder.flush()
-        # Here for the same reason: this is the one funnel Telegram, the
-        # dashboard and MCP all cross, and it is the only place that sees an
-        # abandoned turn end.
-        telemetry_taps.agent_turn(
-            kind=_turn_kind(req, key),
-            provider=model_prefix(session.agent_key) or "acp",
-            model=_model_of(session.agent_key),
-            tool_calls=sum(tool_kinds.values()),
-            duration_ms=int((time.monotonic() - started) * 1000),
-            outcome=outcome,
-            surface=_SURFACES.get(getattr(key, "surface", ""), "other"),
-            tools=tool_kinds,
-            # Counts per kind, never an offset and never a value — the same
-            # "counts and categories only" contract the rest of this call
-            # already holds to.
-            secrets=secrets.counts(findings),
+        if not acquire.done():
+            acquire.cancel()
+            try:
+                await acquire
+            except asyncio.CancelledError:
+                pass
+        owns_lock = locked or (
+            not acquire.cancelled() and acquire.exception() is None and acquire.result()
         )
+        if executed:
+            recorder.note_usage(session.take_usage())
+        if outcome == "aborted":
+            recorder.observe(
+                RuntimeEvent.error(
+                    "Response interrupted. The saved request will not be executed again automatically.",
+                    session_key=raw_key,
+                )
+            )
+            recorder.observe(RuntimeEvent.done("cancelled", session_key=raw_key))
+        recorder.flush()
+        if owns_lock:
+            queue.active_key = ""
+            queue.active_request = ""
+            queue.lock.release()
+        turns.release(owner, queue_id, request_id)
+        if executed:
+            # Notes or cancelled queued inputs may have landed while the model
+            # ran. They were not read by this client and must be replayed next time.
+            session.history_revision = revision + recorder.written_turns
+        turns.publish(owner, conversation_id, raw_key, "completed")
 
 
 async def prompt_once(key: SessionKey, text: str) -> str:
@@ -422,8 +457,49 @@ async def abort(key: SessionKey) -> bool:
     """Abort the in-flight prompt. Returns True if a session existed."""
     session = _local().get_session(key)
     if session is None:
+        if key.surface != "web" or not key.owner.isdecimal() or not key.slot:
+            return False
+        owner, conversation_id = int(key.owner), key.slot
+    else:
+        owner, conversation_id = session.user_id, session.conversation_id or str(key)
+    active = turns.cancel_current(owner, conversation_id)
+    if active:
+        session = _local().get_session(SessionKey.parse(active))
+        if session is not None and (
+            session.user_id != owner
+            or (session.conversation_id or str(session.key)) != conversation_id
+        ):
+            # Telegram reuses its session key when switching conversations.
+            # Stop belongs to the old turn, never the new session at that key.
+            return True
+    if session is None:
+        return bool(active)
+    _deny_pending_confirmations(str(session.key))
+    if session.is_busy or not active:
+        await session.abort()
+    return True
+
+
+async def abort_turn(user_id: int, conversation_id: str, request_id: str) -> bool:
+    """Stop exactly the active request in its original user's conversation.
+
+    Returns False for queued, finished, already stopped or unknown requests.
+    Capture the concrete session before awaiting cancellation: Telegram can
+    reuse its key for another conversation while an old response is on screen.
+    A missing or rebound session still leaves the original turn marked stopped,
+    but its replacement's confirmations and provider are never touched.
+    """
+    active = turns.cancel_current(user_id, conversation_id, request_id=request_id)
+    if not active:
         return False
-    await session.abort()
+    session = _local().get_session(SessionKey.parse(active))
+    if session is not None and (
+        session.user_id == user_id
+        and (session.conversation_id or str(session.key)) == conversation_id
+    ):
+        _deny_pending_confirmations(str(session.key))
+        if session.is_busy:
+            await session.abort()
     return True
 
 

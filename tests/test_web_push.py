@@ -168,35 +168,6 @@ def test_half_a_keypair_in_the_environment_is_ignored(monkeypatch):
     assert paths.vapid_key_path().is_file()
 
 
-def test_the_scrubber_knows_the_key_by_value_once_one_exists():
-    """A pasted key file must not survive a share.
-
-    Tier 1, not a tier-2 pattern: a raw P-256 scalar is 43 base64url characters,
-    which is also an id and a digest, so the *shape* is not decidable. The value
-    is one the install knows, and it reaches a transcript by one plausible
-    route — an operator debugging "push stopped working" pastes the key file in.
-    """
-    from condor.sharing.scrub import install_values
-
-    key = push.private_key()
-    assert (key, "known_key") in install_values()
-
-
-def test_reading_the_key_for_the_scrubber_does_not_mint_one():
-    """An install that never turned push on must not get a keypair from a share.
-
-    Generating one here would be worse than a missed value: it writes a durable
-    secret as a side effect of an unrelated action, and (because the file is
-    written once and never rewritten) fixes this install's push identity
-    forever.
-    """
-    from condor.sharing.scrub import install_values
-
-    assert push.configured_private_key() == ""
-    install_values()
-    assert not paths.vapid_key_path().exists()
-
-
 # ── The routes ──
 
 

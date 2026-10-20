@@ -43,7 +43,6 @@ from condor.memory.paths import (
     iter_agent_slugs,
     shared_routines_roots,
 )
-from condor.telemetry import taps as telemetry_taps
 from routines.base import (
     RoutineResult,
     _merged_from,
@@ -110,7 +109,11 @@ class _HttpBot:
                 resp = await client.post(url, json=data)
             result = resp.json()
             if not result.get("ok"):
-                logger.warning(f"Telegram {method} failed: {resp.text}")
+                logger.warning(
+                    "Telegram %s rejected request error_code=%s",
+                    method,
+                    result.get("error_code"),
+                )
             return result
 
     async def send_message(self, *a, **kw):
@@ -119,15 +122,41 @@ class _HttpBot:
         data = {"chat_id": chat_id, "text": text}
         if kw.get("parse_mode"):
             data["parse_mode"] = kw["parse_mode"]
+        if kw.get("disable_web_page_preview") is not None:
+            data["disable_web_page_preview"] = kw["disable_web_page_preview"]
+        if "disable_notification" in kw:
+            data["disable_notification"] = kw["disable_notification"]
+        if kw.get("reply_markup") is not None:
+            markup = kw["reply_markup"]
+            data["reply_markup"] = (
+                markup.to_dict() if hasattr(markup, "to_dict") else markup
+            )
         return await self._post("sendMessage", data)
 
     async def send_photo(self, *a, **kw):
+        import mimetypes
+        import os
+
         chat_id = kw.get("chat_id") or (a[0] if a else None)
         photo = kw.get("photo") or (a[1] if len(a) > 1 else None)
         data = {"chat_id": chat_id}
         if kw.get("caption"):
             data["caption"] = kw["caption"]
-        files = {"photo": ("chart.png", photo, "image/png")} if photo else None
+        if kw.get("parse_mode"):
+            data["parse_mode"] = kw["parse_mode"]
+        files = None
+        if photo is not None:
+            filename = kw.get("filename") or getattr(photo, "name", None) or "chart.png"
+            # TemporaryFile.name is a file descriptor; arbitrary file-like
+            # inputs may expose other non-path values. Keep accepting these
+            # uploads without passing their metadata into MIME inference.
+            filename = (
+                os.fsdecode(filename)
+                if isinstance(filename, (str, os.PathLike))
+                else "chart.png"
+            )
+            mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            files = {"photo": (filename, photo, mime)}
         return await self._post("sendPhoto", data, files=files)
 
     async def send_document(self, *a, **kw):
@@ -150,7 +179,27 @@ class _HttpBot:
 
     async def edit_message_text(self, *a, **kw):
         data = {k: v for k, v in kw.items() if v is not None}
+        if hasattr(data.get("reply_markup"), "to_dict"):
+            data["reply_markup"] = data["reply_markup"].to_dict()
+        elif "reply_markup" in kw and kw["reply_markup"] is None:
+            data["reply_markup"] = {"inline_keyboard": []}
         return await self._post("editMessageText", data)
+
+    async def send_chat_action(self, **kw):
+        return await self._post("sendChatAction", kw)
+
+    async def edit_message_reply_markup(self, **kw):
+        data = dict(kw)
+        markup = data.get("reply_markup")
+        data["reply_markup"] = (
+            markup.to_dict()
+            if hasattr(markup, "to_dict")
+            else (markup or {"inline_keyboard": []})
+        )
+        return await self._post("editMessageReplyMarkup", data)
+
+    async def delete_message(self, **kw):
+        return await self._post("deleteMessage", kw)
 
     def has_token(self) -> bool:
         """Can this actually deliver? Without a token every send is a no-op.
@@ -725,7 +774,6 @@ class RoutineStore:
         failed_status: str | None = None,
         fire_hooks: bool = True,
         agent: str = "",
-        trigger: str = "other",
     ) -> None:
         """Run a routine once, store the result, update instance metadata, fire hooks.
 
@@ -812,20 +860,6 @@ class RoutineStore:
             # terminal instance appears, so it is the moment to enforce the cap.
             self._prune_instances()
 
-        # Usage telemetry (FEAT-023): whether it ran, how it was triggered and
-        # how long it took. The routine's own name only when the file ships in
-        # this repo — a user's private routine is called `custom` — and never
-        # its config, its output or its error text.
-        telemetry_taps.routine_run(
-            routine=telemetry_taps.shipped_routine_name(
-                (routine.name or "").split("/")[-1]
-            ),
-            kind="continuous" if getattr(routine, "continuous", False) else "oneshot",
-            trigger=trigger,
-            duration_ms=int(duration * 1000),
-            ok=not failed,
-        )
-
         await self._report_run(instance_id, summary, error_msg)
 
         if fire_hooks:
@@ -895,7 +929,6 @@ class RoutineStore:
         server_name: str,
         user_id: int = 0,
         agent: str = "",
-        trigger: str = "manual",
     ) -> None:
         await self._execute_and_record(
             instance_id,
@@ -906,7 +939,6 @@ class RoutineStore:
             status_after="completed",
             failed_status="failed",
             agent=agent,
-            trigger=trigger,
         )
 
     async def start_continuous(
@@ -968,7 +1000,6 @@ class RoutineStore:
             status_after="stopped",
             fire_hooks=False,
             agent=agent,
-            trigger="manual",
         )
 
     async def schedule(
@@ -1021,7 +1052,6 @@ class RoutineStore:
                     server_name,
                     user_id,
                     status_after="scheduled",
-                    trigger="schedule",
                 )
                 # A cancel that lands mid-run is swallowed (and recorded) by
                 # _execute_and_record; stop() removed the instance, so bail out

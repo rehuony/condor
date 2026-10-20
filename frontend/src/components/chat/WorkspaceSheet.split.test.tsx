@@ -72,7 +72,7 @@ function Workspace({
           bleed
           defaultZen
         >
-          <p data-testid="report">report body</p>
+          <p data-testid="report">report body<input aria-label="Reader draft" defaultValue="" /></p>
         </WorkspaceSheet>
       )}
       {second && (
@@ -179,6 +179,13 @@ afterEach(() => {
 });
 
 describe("WorkspaceSheet beside a conversation", () => {
+  it("portals an overlay out of the dock stacking and scrolling ancestors", async () => {
+    setWide(false);
+    await render();
+    expect(overlay()?.parentElement).toBe(document.body);
+    expect(container.contains(report())).toBe(false);
+  });
+
   it("opens in the pane, leaving the chat on screen", async () => {
     await render();
 
@@ -213,13 +220,25 @@ describe("WorkspaceSheet beside a conversation", () => {
   it("goes full screen and comes back, without persisting either", async () => {
     await render();
 
+    const original = report();
+    const draft = original!.querySelector("input")!;
+    draft.value = "unsaved config";
+    original!.scrollTop = 42;
     await click(button("Full screen")!);
+    expect(report()).toBe(original);
+    expect(draft.value).toBe("unsaved config");
+    expect(original!.scrollTop).toBe(42);
     expect(overlay()).toBeTruthy();
     expect(outlet()!.contains(report())).toBe(false);
 
+    // A wider viewport can eliminate overflow and clamp the reader to the top.
+    original!.scrollTop = 0;
     await click(button("Back beside the chat")!);
+    expect(original!.scrollTop).toBe(42);
     expect(overlay()).toBeNull();
     expect(outlet()!.contains(report())).toBe(true);
+    expect(report()).toBe(original);
+    expect(report()!.querySelector("input")!.value).toBe("unsaved config");
     // Nothing written down: the next report opens beside the chat again.
     expect(localStorage.getItem("condor_sheet_zen")).toBeNull();
   });

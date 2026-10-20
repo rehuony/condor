@@ -29,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useCredentials } from "@/hooks/useCredentials";
 import { ServerContext } from "@/hooks/useServer";
+import { credentialsQuery } from "@/lib/queryClient";
 import { ApiKeysSettings } from "./ApiKeysSettings";
 
 declare global {
@@ -39,6 +40,9 @@ let container: HTMLDivElement;
 let root: Root;
 let requested: string[] = [];
 let clockOffset = 0;
+let credentialStatus = 200;
+let walletStatus = 200;
+let credentials = [{ connector_name: "binance", connector_type: "spot" }];
 const realNow = Date.now;
 
 function respond(path: string): unknown {
@@ -46,7 +50,7 @@ function respond(path: string): unknown {
     return [{ name: "prod", host: "h", port: 8000, online: true, permission: "owner" }];
   }
   if (path.includes("/settings/credentials")) {
-    return { credentials: [{ connector_name: "binance", connector_type: "spot" }] };
+    return { credentials };
   }
   if (path.includes("/settings/connectors")) return { connectors: [] };
   if (path.includes("/gateway/wallets")) {
@@ -60,12 +64,18 @@ beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   requested = [];
   clockOffset = 0;
+  credentialStatus = 200;
+  walletStatus = 200;
+  credentials = [{ connector_name: "binance", connector_type: "spot" }];
   vi.spyOn(Date, "now").mockImplementation(() => realNow() + clockOffset);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string) => {
       requested.push(path);
-      return new Response(JSON.stringify(respond(path)), {
+      const status = path.includes("/settings/credentials") ? credentialStatus
+        : path.includes("/gateway/wallets") ? walletStatus : 200;
+      return new Response(JSON.stringify(status === 200 ? respond(path) : { detail: "Hummingbot API is unavailable" }), {
+        status,
         headers: { "Content-Type": "application/json" },
       });
     }),
@@ -96,9 +106,18 @@ async function flush() {
 
 /** The Keys tab, with the app-wide `useCredentials` observer mounted beside it. */
 function Harness() {
-  useCredentials();
-  return <ApiKeysSettings />;
+  const { hasKeys } = useCredentials();
+  return (
+    <>
+      <output aria-label="Credential availability">
+        {hasKeys === undefined ? "unknown" : hasKeys ? "available" : "missing"}
+      </output>
+      <ApiKeysSettings />
+    </>
+  );
 }
+
+const availability = () => container.querySelector("output")?.textContent;
 
 /** Mount the pair on one cache that carries the real client's 5s default. */
 async function mountKeysTab() {
@@ -180,5 +199,59 @@ describe("ApiKeysSettings credential traffic", () => {
     // The DELETE plus the invalidate-driven refetch of the shared key.
     expect(requested.some((u) => u.includes("/settings/credentials/binance"))).toBe(true);
     expect(credentialCalls()).toBeGreaterThan(2);
+  });
+});
+
+describe("ApiKeysSettings unavailable credentials", () => {
+  it("reports an unavailable list without treating saved keys as missing, then recovers on retry", async () => {
+    credentialStatus = 502;
+    walletStatus = 502;
+    await mountKeysTab();
+
+    expect(availability()).toBe("unknown");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Could not load API keys");
+    expect(container.textContent).not.toContain("No API keys configured");
+    expect(container.textContent).not.toContain("0 credentials");
+    expect(button("Add API Key").disabled).toBe(true);
+
+    credentialStatus = 200;
+    await act(async () => button("Retry").click());
+    await flush();
+
+    expect(availability()).toBe("available");
+    expect(container.textContent).toContain("binance");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(button("Add API Key").disabled).toBe(false);
+  });
+
+  it("keeps cached credentials visible and usable when a background refresh fails", async () => {
+    walletStatus = 502;
+    const qc = await mountKeysTab();
+    credentialStatus = 502;
+    await act(async () => { await qc.invalidateQueries({ queryKey: credentialsQuery("prod").queryKey }); });
+    await flush();
+
+    expect(availability()).toBe("available");
+    expect(container.textContent).toContain("binance");
+    expect(container.textContent).toContain("1 credential configured");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Showing the last loaded credentials");
+    expect(container.textContent).not.toContain("No API keys configured");
+  });
+
+  it("only confirms missing keys after a successful empty response", async () => {
+    credentials = [];
+    walletStatus = 502;
+    const qc = await mountKeysTab();
+    expect(availability()).toBe("missing");
+    expect(container.textContent).toContain("No API keys configured");
+
+    credentialStatus = 502;
+    await act(async () => { await qc.invalidateQueries({ queryKey: credentialsQuery("prod").queryKey }); });
+    await flush();
+
+    expect(availability()).toBe("unknown");
+    expect(container.textContent).not.toContain("No API keys configured");
+    expect(container.textContent).not.toContain("0 credentials");
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 });

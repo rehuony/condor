@@ -562,11 +562,8 @@ describe("the loop bar", () => {
   it("moves the scope and drops the run and the tick with it", async () => {
     await render("/?open=fleet&strategy=brl_mm&run=s:3&tick=40");
 
-    const picker = container.querySelector<HTMLSelectElement>("select")!;
-    await act(async () => {
-      picker.value = "sol_lp";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label="Loop"]')!);
+    await click(document.querySelector<HTMLButtonElement>('[role="listbox"][aria-label="Loop"] [data-value="sol_lp"]')!);
     await settle();
 
     const params = new URLSearchParams(search());
@@ -750,8 +747,11 @@ describe("a strategy whose runs are behind newer chats (CORR-376)", () => {
     getAgentRuns.mockResolvedValue([...chats, SESSION_1]);
     await render("/?run=s:1");
 
-    const picker = container.querySelector<HTMLSelectElement>('select[aria-label="Run"]')!;
-    expect(picker.value).toBe("s:1");
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label="Run"]')!);
+    expect(
+      document.querySelector('[role="listbox"][aria-label="Run"] [aria-selected="true"]')?.getAttribute("data-value"),
+    ).toBe("s:1");
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label="Run"]')!);
     // TickSpine is mounted (an empty journal draws its empty state).
     expect(
       container.querySelector('[data-testid="tick-spine"], [data-spine-empty]'),

@@ -32,6 +32,7 @@ vi.mock("@/lib/api", () => ({
         routine("scout/beta_check", "agent:scout"),
       ]),
     getRoutineReports: (...a: unknown[]) => getRoutineReports(...a),
+    getReportsGrouped: () => Promise.resolve([]),
     getRoutineInstance: (...a: unknown[]) => getRoutineInstance(...a),
     getRoutineSource: () => Promise.resolve({ filename: "x.py", source: "" }),
     runRoutine: () => Promise.resolve({ instance_id: "i9" }),
@@ -129,8 +130,8 @@ async function render(props: Record<string, unknown> = {}) {
 
 const heading = () => container.querySelector("h2")?.textContent?.trim();
 const scope = () =>
-  container.querySelector<HTMLSelectElement>(
-    'select[aria-label="Routine scope"]',
+  container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Routine scope"]',
   )!;
 const frame = () => container.querySelector('[data-testid="frame"]')?.textContent;
 const tab = (name: string) =>
@@ -160,23 +161,21 @@ describe("the library's scope picker", () => {
 
     // Hosted, the routine list is a 48px rail — the filter it used to live in
     // is unreachable there, which made it no filter at all.
-    expect(container.querySelector(".w-12")).toBeTruthy();
+    expect(container.querySelector('[class~="md:w-12"]')).toBeTruthy();
     expect(scope()).toBeTruthy();
-    expect(scope().value).toBe("all");
+    expect(scope().textContent).toBe("All routines");
   });
 
   it("narrows the list, and takes the reader with it", async () => {
     await render();
     expect(heading()).toBe("Alpha Check");
 
-    await act(async () => {
-      scope().value = "scout";
-      scope().dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await act(async () => scope().click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((option) => option.textContent === "Scout")!.click());
 
     // Narrowing to an agent whose routines exclude the open one has to move to
     // one that is in scope, or the pane shows what its own list denies.
-    expect(scope().value).toBe("scout");
+    expect(scope().textContent).toBe("Scout");
     expect(heading()).toBe("Beta Check");
   });
 });
@@ -226,4 +225,28 @@ describe("the library opened on one run", () => {
     });
     expect(container.textContent).toContain("No reports yet");
   });
+});
+
+
+it.each([true])("isolates scope picker keys from report shortcuts (hosted=%s)", async (hosted) => {
+  const onClose = vi.fn();
+  await render({ hosted, page: !hosted, onClose });
+  const initialHeading = heading();
+  await act(async () => scope().dispatchEvent(new KeyboardEvent("keydown", {
+    key: "ArrowDown", bubbles: true, cancelable: true,
+  })));
+  expect(heading()).toBe(initialHeading);
+  expect(document.querySelector('[role="listbox"]')).not.toBeNull();
+  for (const key of ["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "End", "Home"]) {
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", {
+      key, bubbles: true, cancelable: true,
+    })));
+    expect(heading()).toBe(initialHeading);
+  }
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Escape", bubbles: true, cancelable: true,
+  })));
+  expect(document.querySelector('[role="listbox"]')).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(scope());
 });

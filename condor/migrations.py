@@ -8,7 +8,7 @@ chat history, so it cannot depend on anyone reading a release note.
 :func:`ensure_migrated` is therefore called from ``startup()``, before anything
 has read a conversation and before boot reconciliation. It does two things:
 
-1. ``condor/.runtime/{conversations,state,telemetry}`` → ``.condor/…``, with
+1. ``condor/.runtime/{conversations,state}`` → ``.condor/…``, with
    conversations re-keyed under ``users/{id}/conversations/``.
 2. every ``agents/{slug}/delegations/{task_id}.*`` that records a ``user_id`` →
    ``.condor/users/{user_id}/delegations/{task_id}/``.
@@ -162,7 +162,6 @@ class MigrationReport:
     conversations: int = 0
     dropped_stubs: int = 0
     state: int = 0
-    telemetry: int = 0
     delegations: int = 0
     skipped: int = 0
     # v2 (FEAT-115)
@@ -185,7 +184,6 @@ class MigrationReport:
         return (
             self.conversations
             + self.state
-            + self.telemetry
             + self.delegations
             + self.agent_artefacts
             + self.agent_dirs
@@ -325,7 +323,7 @@ def ensure_migrated(agents_root: Path | None = None) -> MigrationReport:
         log.warning(
             "Runtime migrated to %s: %d conversations, %d delegations, "
             "%d stranded delegations, %d set-aside agent files, "
-            "%d state namespaces, %d telemetry files, %d agent artefacts, "
+            "%d state namespaces, %d agent artefacts, "
             "%d agent directories, %d hoisted forks, "
             "loops_renamed=%d loop_md_renamed=%d mutes_rewritten=%d "
             "(%d empty conversation stubs dropped, %d already present)",
@@ -335,7 +333,6 @@ def ensure_migrated(agents_root: Path | None = None) -> MigrationReport:
             report.stranded_delegations,
             report.agent_backups,
             report.state,
-            report.telemetry,
             report.agent_artefacts,
             report.agent_dirs,
             report.agent_forks,
@@ -393,7 +390,7 @@ def _prune_if_empty(directory: Path) -> None:
         pass  # not empty, or already gone: both are fine
 
 
-# ── step 1: the three runtime stores ──
+# ── step 1: the runtime stores ──
 
 
 def _migrate_runtime_stores(report: MigrationReport) -> None:
@@ -403,9 +400,8 @@ def _migrate_runtime_stores(report: MigrationReport) -> None:
 
     _migrate_conversations(legacy / "conversations", report)
     _migrate_flat(legacy / "state", paths.runtime_root() / "state", report, "state")
-    _migrate_flat(legacy / "telemetry", paths.telemetry_dir(), report, "telemetry")
 
-    for name in ("conversations", "state", "telemetry"):
+    for name in ("conversations", "state"):
         _prune_if_empty(legacy / name)
     _prune_if_empty(legacy)
 
@@ -459,7 +455,7 @@ def _migrate_flat(
 
     Per entry rather than by renaming the whole directory because the
     destination may already exist — a process that booted on the new build
-    before the migration ran has a live telemetry spool there.
+    before the migration ran may have already written local state there.
     """
     if not source.is_dir():
         return

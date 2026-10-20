@@ -13,6 +13,8 @@ import {
 import { useState } from "react";
 
 import { invalidateLifecycle } from "@/components/agent/agentQueries";
+import { SelectField } from "@/components/ui/select-field";
+import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { api } from "@/lib/api";
 
@@ -95,9 +97,9 @@ export function StartSessionDialog({
   const labelClass = "mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onClose}>
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-6 shadow-2xl"
+        className={`${DIALOG_PANEL} max-h-[85dvh] max-w-lg bg-[var(--color-bg)] p-5 sm:p-6`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -163,18 +165,20 @@ export function StartSessionDialog({
               <Server className="h-3.5 w-3.5" />
               Server
             </label>
-            <select
+            <SelectField
+              size="field"
+              label="Server"
               value={serverName}
-              onChange={(e) => setServerName(e.target.value)}
-              className={inputClass}
-            >
-              <option value="">Auto (current default)</option>
-              {servers?.map((s) => (
-                <option key={s.name} value={s.name} disabled={!s.online}>
-                  {s.name} {s.online ? "" : "(offline)"}
-                </option>
-              ))}
-            </select>
+              onChange={setServerName}
+              options={[
+                { value: "", label: "Auto (current default)" },
+                ...(servers ?? []).map((s) => ({
+                  value: s.name,
+                  label: s.online ? s.name : `${s.name} (offline)`,
+                  disabled: !s.online,
+                })),
+              ]}
+            />
           </div>
 
           {/* Budget + Frequency + Tick timeout row */}

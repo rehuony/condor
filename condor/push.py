@@ -344,22 +344,6 @@ def vapid_keys() -> dict[str, str]:
     return keys
 
 
-def configured_private_key() -> str:
-    """The signing half *if this install already has one*, and never a new one.
-
-    :func:`vapid_keys` generates on first use, which is right for a push and
-    wrong for anyone merely asking whether a key exists -- the sharing
-    scrubber's known-value table, for one. An install that has never turned
-    notifications on must not mint a keypair because somebody shared a
-    conversation.
-    """
-    env_private = os.environ.get(PRIVATE_KEY_ENV, "").strip()
-    if env_private and os.environ.get(PUBLIC_KEY_ENV, "").strip():
-        return env_private
-    existing = _read_keys()
-    return existing["private_key"] if existing else ""
-
-
 def public_key() -> str:
     """The ``applicationServerKey`` a browser needs in order to subscribe."""
     return vapid_keys()["public_key"]

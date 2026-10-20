@@ -166,6 +166,7 @@ def test_an_unknown_id_refuses_the_whole_turn(ws_env):
 
     assert _Client.calls == []
     assert ws.events("error")
+    assert [event["stop_reason"] for event in ws.events("prompt_done")] == ["error"]
 
 
 def test_a_traversal_on_the_frame_is_refused(ws_env):

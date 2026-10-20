@@ -64,9 +64,7 @@ class _CountingClient:
         ]
 
     async def get_candles(self, *a, **kw):
-        # The fallback leg of the ladder. `fetch_historical_candles` is called
-        # with fallback_on_error=True, so a fetch only fails outright when this
-        # leg fails too.
+        # A bounded history failure must never reach this recent-window path.
         if self._fail:
             raise RuntimeError("upstream down")
         return []

@@ -14,6 +14,8 @@ interface FavoritesStripProps {
   /** The pair on screen, highlighted in the strip. */
   pair: string;
   onPick: (market: MarketPick) => void;
+  /** Placement: the default is a full-width bar of its own. */
+  className?: string;
 }
 
 /** A chip as rendered, carrying the index of the star it came from. */
@@ -66,6 +68,7 @@ export function FavoritesStrip({
   connector,
   pair,
   onPick,
+  className = "shrink-0 border-b border-[var(--color-border)] px-2 py-1",
 }: FavoritesStripProps) {
   const { favorites, toggle, reorder } = useMarketFavorites(server);
   // Where the drag started, and the gap it would land in. Both are indices into
@@ -126,7 +129,7 @@ export function FavoritesStrip({
     <div
       role="toolbar"
       aria-label="Starred markets"
-      className="flex items-center gap-1 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 scrollbar-none"
+      className={`flex items-center gap-1 overflow-x-auto bg-[var(--color-surface)] scrollbar-none ${className}`}
     >
       <Star className="h-3 w-3 shrink-0 fill-[var(--color-yellow)] text-[var(--color-yellow)]" />
       {chips.map(({ fav: f, index: i }, pos) => {

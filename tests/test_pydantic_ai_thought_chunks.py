@@ -16,10 +16,11 @@ import asyncio
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo
 
 from condor.acp.client import TextChunk, ThoughtChunk
 from condor.acp.pydantic_ai_client import PydanticAIClient
+from tests.pydantic_ai_helpers import response_model
 
 
 def _client_returning(parts: list) -> PydanticAIClient:
@@ -29,7 +30,7 @@ def _client_returning(parts: list) -> PydanticAIClient:
         return ModelResponse(parts=list(parts))
 
     client = PydanticAIClient("openai:gpt-4o")
-    client._agent = Agent(FunctionModel(respond))
+    client._agent = Agent(response_model(respond))
     return client
 
 

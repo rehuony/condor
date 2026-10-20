@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Loader2, Search, Star, X } from "lucide-react";
 
 import { formatConnectorName } from "@/lib/formatters";
+import { SelectField } from "@/components/ui/select-field";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import type { Ticker } from "@/lib/api";
 import { formatCompactVolume, formatPrice } from "@/lib/formatters";
@@ -96,6 +97,23 @@ export function MarketBrowser({
   );
 
   const listRef = useRef<HTMLDivElement>(null);
+  // Narrow panels run to the bottom of the screen. What sits above them (the
+  // favourites strip, a scrolled page) varies, so measure instead of guessing.
+  const [room, setRoom] = useState<number | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const focusPanel = useCallback((node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    node?.focus({ preventScroll: true });
+  }, []);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const top = panelRef.current?.getBoundingClientRect().top;
+      if (top != null) setRoom(Math.max(240, Math.floor(window.innerHeight - top)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
 
   // Esc and the header's X close it; the market chip that opened it toggles it
   // shut. No outside-click dismiss — the config panel stays usable while the
@@ -218,7 +236,18 @@ export function MarketBrowser({
   // top bar reset the pair to the new venue's default before you had picked one.
   const pick = (t: Ticker) => onPick({ connector: venue, pair: t.trading_pair });
 
+  const changeVenue = (next: string) => {
+    browseVenue(next);
+    // A quote that exists on Binance may not exist on the venue you moved
+    // to; a filter that survives the move would show an empty table and
+    // no reason why.
+    setQuote(ALL_QUOTES);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Native selects and buttons own their keys. Only the search/table cursor
+    // may commit a highlighted market on Enter.
+    if (e.target instanceof Element && e.target.closest("select, button")) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, visible.length - 1));
@@ -258,8 +287,11 @@ export function MarketBrowser({
     <div
       role="dialog"
       aria-label="Browse markets"
+      tabIndex={-1}
+      ref={focusPanel}
       onKeyDown={handleKeyDown}
-      className="absolute left-0 top-0 z-40 flex w-full max-w-3xl max-h-[min(34rem,70vh)] rounded-br-lg border-b border-r border-[var(--color-border)] bg-[var(--color-bg)] shadow-lg"
+      style={room != null ? ({ "--market-room": `${room}px` } as React.CSSProperties) : undefined}
+      className="absolute left-0 top-0 z-40 flex h-[var(--market-room,70dvh)] w-full max-w-3xl border-b border-[var(--color-border)] bg-[var(--color-bg)] shadow-lg md:h-auto md:max-h-[min(34rem,75dvh)] md:rounded-br-lg md:border-r"
     >
       {/* The venue axis. Re-lists the table; never moves the chart. */}
       <VenueRail
@@ -267,94 +299,113 @@ export function MarketBrowser({
         credentialed={credentialed}
         value={venue}
         current={connector}
-        onChange={(v) => {
-          browseVenue(v);
-          // A quote that exists on Binance may not exist on the venue you moved
-          // to; a filter that survives the move would show an empty table and
-          // no reason why.
-          setQuote(ALL_QUOTES);
-        }}
+        onChange={changeVenue}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Header: search, quote filter, favourites filter, close. The venue is
             named by the search placeholder rather than a chip of its own — the
             rail on the left is the control that changes it. */}
-        <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-2">
-          <Search className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
-          <input
-            autoFocus
-            type="text"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setActiveIndex(0);
-            }}
-            placeholder={`Search ${formatConnectorName(venue)} markets...`}
-            aria-label={`Search ${formatConnectorName(venue)} markets`}
-            className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
-          />
-
-          {/* What the pair dropdown used to say by grouping. A filter rather
-              than a grouping, because this list also sorts — quote runs and a
-              volume sort cannot both own the row order. */}
-          {quotes.length > 1 && (
-            <select
-              value={quote}
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+          <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 transition-colors focus-within:border-[var(--color-primary)] md:h-8">
+            <Search className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+            <input
+              type="text"
+              value={search}
               onChange={(e) => {
-                setQuote(e.target.value);
+                setSearch(e.target.value);
                 setActiveIndex(0);
               }}
-              aria-label="Filter by quote asset"
-              title="Filter by quote asset"
-              className="shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 py-1 text-[11px] text-[var(--color-text)] focus:outline-none"
+              placeholder={`Search ${formatConnectorName(venue)} markets...`}
+              aria-label={`Search ${formatConnectorName(venue)} markets`}
+              className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+            />
+            {isFetching && (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--color-text-muted)]" />
+            )}
+          </label>
+
+          {/* Filters: their own row on phones, inline beside the search above.
+              The venue menu stands in for the rail, which narrow panels hide;
+              it and the quote filter share one segmented control. */}
+          <div className="order-last flex w-full items-center gap-2 md:order-none md:w-auto">
+            <div className={`flex h-7 items-center divide-x divide-[var(--color-border)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-px ${quotes.length > 1 ? "" : "md:hidden"}`}>
+              <SelectField
+                size="inline"
+                fit
+                label="Exchange"
+                title="Browse another exchange"
+                value={venue}
+                onChange={changeVenue}
+                options={connectors.map((c) => ({
+                  value: c,
+                  label: formatConnectorName(c),
+                  group: credentialed
+                    ? credentialed.has(c) ? "Your accounts" : "View only"
+                    : undefined,
+                }))}
+                className="h-full md:hidden"
+              />
+
+              {/* What the pair dropdown used to say by grouping. A filter rather
+                  than a grouping, because this list also sorts — quote runs and a
+                  volume sort cannot both own the row order. */}
+              {quotes.length > 1 && (
+                <SelectField
+                  size="inline"
+                  fit
+                  label="Filter by quote asset"
+                  title="Filter by quote asset"
+                  value={quote}
+                  onChange={(value) => {
+                    setQuote(value);
+                    setActiveIndex(0);
+                  }}
+                  options={[
+                    { value: ALL_QUOTES, label: "All quotes" },
+                    ...quotes.map((q) => ({ value: q, label: q })),
+                  ]}
+                  className="h-full"
+                />
+              )}
+            </div>
+
+            <button
+              onClick={() => {
+                setFavoritesOnly((v) => !v);
+                setActiveIndex(0);
+              }}
+              aria-pressed={favoritesOnly}
+              title="Show starred markets only"
+              className={`flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors ${
+                favoritesOnly
+                  ? "border-[var(--color-yellow)]/50 bg-[var(--color-yellow)]/10 text-[var(--color-yellow)]"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+              }`}
             >
-              <option value={ALL_QUOTES}>All quotes</option>
-              {quotes.map((q) => (
-                <option key={q} value={q}>
-                  {q}
-                </option>
-              ))}
-            </select>
-          )}
-
-          <button
-            onClick={() => {
-              setFavoritesOnly((v) => !v);
-              setActiveIndex(0);
-            }}
-            aria-pressed={favoritesOnly}
-            title="Show starred markets only"
-            className={`flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[11px] transition-colors ${
-              favoritesOnly
-                ? "border-[var(--color-yellow)] text-[var(--color-yellow)]"
-                : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            <Star className={`h-3 w-3 ${favoritesOnly ? "fill-current" : ""}`} />
-            Starred
-          </button>
-
-          {isFetching && (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--color-text-muted)]" />
-          )}
+              <Star className={`h-3 w-3 ${favoritesOnly ? "fill-current" : ""}`} />
+              Starred
+            </button>
+          </div>
 
           <button
             onClick={onClose}
             title="Close (Esc)"
             aria-label="Close market browser"
-            className="shrink-0 rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] md:h-8 md:w-8"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Column headers */}
-        <div className="grid grid-cols-[1.5rem_1fr_8rem_7rem_6rem] items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-          <span />
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
+        {/* Column headers. Phones fold the columns into two-line rows, so the
+            sort keys sit in one line there instead of above their columns. */}
+        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] md:grid md:grid-cols-[1.5rem_minmax(0,1fr)_7rem_6rem_5rem] md:gap-2">
+          <span className="hidden md:block" />
           <button
             onClick={() => toggleSort("trading_pair")}
-            className="flex items-center gap-1 hover:text-[var(--color-text)]"
+            className="mr-auto flex items-center gap-1 hover:text-[var(--color-text)] md:mr-0"
           >
             Pair {sortIcon("trading_pair")}
           </button>
@@ -380,7 +431,7 @@ export function MarketBrowser({
         </div>
 
         {/* Rows */}
-        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div>
           {isLoading ? (
             <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
               Loading markets...
@@ -404,7 +455,7 @@ export function MarketBrowser({
                 <div
                   key={t.trading_pair}
                   data-market-row
-                  className={`grid grid-cols-[1.5rem_1fr_8rem_7rem_6rem] items-center gap-2 px-3 text-xs ${
+                  className={`grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2 px-3 text-xs md:grid-cols-[1.5rem_minmax(0,1fr)_7rem_6rem_5rem] ${
                     i === cursor
                       ? "bg-[var(--color-primary)]/10"
                       : "hover:bg-[var(--color-surface-hover)]"
@@ -414,7 +465,7 @@ export function MarketBrowser({
                     onClick={() => toggle({ connector: venue, pair: t.trading_pair })}
                     aria-pressed={starred}
                     aria-label={`${starred ? "Unstar" : "Star"} ${t.trading_pair}`}
-                    className="flex h-6 w-6 items-center justify-center"
+                    className="row-span-2 flex h-6 w-6 items-center justify-center md:row-span-1"
                   >
                     <Star
                       className={`h-3.5 w-3.5 ${
@@ -426,7 +477,7 @@ export function MarketBrowser({
                   </button>
                   <button
                     onClick={() => pick(t)}
-                    className={`truncate py-1.5 text-left ${
+                    className={`truncate pt-2 text-left text-sm md:py-1.5 md:text-xs ${
                       selected ? "text-[var(--color-primary)]" : "text-[var(--color-text)]"
                     }`}
                   >
@@ -435,14 +486,15 @@ export function MarketBrowser({
                   </button>
                   <button
                     onClick={() => pick(t)}
-                    className="py-1.5 text-right font-mono tabular-nums text-[var(--color-text)]"
+                    className="pt-2 text-right font-mono text-sm tabular-nums text-[var(--color-text)] md:py-1.5 md:text-xs"
                   >
                     {formatPrice(t.price)}
                   </button>
                   <button
                     onClick={() => pick(t)}
-                    className="py-1.5 text-right font-mono tabular-nums text-[var(--color-text-muted)]"
+                    className="pb-2 text-left font-mono text-[11px] tabular-nums text-[var(--color-text-muted)] md:py-1.5 md:text-right md:text-xs"
                   >
+                    <span className="font-sans md:hidden">Vol </span>
                     {t.usd_volume != null ? formatCompactVolume(t.usd_volume) : "—"}
                   </button>
                   <button
@@ -452,7 +504,7 @@ export function MarketBrowser({
                         ? changeWindowTitle(t.change_window_s)
                         : undefined
                     }
-                    className={`py-1.5 text-right font-mono tabular-nums ${
+                    className={`pb-2 text-right font-mono text-[11px] tabular-nums md:py-1.5 md:text-xs ${
                       t.change_pct == null
                         ? "text-[var(--color-text-muted)]"
                         : t.change_pct >= 0
@@ -466,6 +518,7 @@ export function MarketBrowser({
               );
             })
           )}
+        </div>
         </div>
 
         {/* Footer: how many of how many */}

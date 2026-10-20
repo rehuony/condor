@@ -119,3 +119,32 @@ def test_cancelled_waiter_does_not_kill_the_shared_fetch():
     assert calls["count"] == 1, "the cancellation must not have started a second fetch"
     assert survived == {"value": 1}, "the surviving waiter still gets the value"
     assert not sds._inflight
+
+
+def test_server_invalidation_refreshes_existing_waiters():
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+        calls = 0
+
+        async def fetch(_client, **_params):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                started.set()
+                await release.wait()
+                return {"value": "old"}
+            return {"value": "new"}
+
+        sds = _make_sds(fetch)
+        published = []
+        sds.add_listener(lambda key, value: published.append(value))
+        read = asyncio.create_task(sds.get_or_fetch("srv", ServerDataType.PORTFOLIO))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        sds.invalidate_server("srv")
+        release.set()
+
+        assert await asyncio.wait_for(read, timeout=1) == {"value": "new"}
+        assert published == [{"value": "new"}]
+        assert calls == 2
+
+    asyncio.run(scenario())

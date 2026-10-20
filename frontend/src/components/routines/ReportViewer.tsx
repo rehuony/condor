@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ReportFrame } from "@/components/routines/ReportFrame";
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
+import { SelectField } from "@/components/ui/select-field";
 import { type ReportSummary } from "@/lib/api";
 
 interface ReportViewerProps {
@@ -66,41 +67,39 @@ export function ReportViewer({
 
   return (
     <div
-      className={`flex flex-col overflow-hidden ${
+      className={`@container/report-viewer min-h-0 min-w-0 flex flex-col overflow-hidden ${
         fullscreen
           ? "fixed inset-0 z-50 rounded-none bg-[var(--color-bg)]"
           : "flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
       }`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2.5">
-        <div className="min-w-0 flex-1">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-2.5 @max-[639px]/report-viewer:flex-wrap @max-[639px]/report-viewer:px-3 @max-[639px]/report-viewer:py-2">
+        <div className="min-w-0 flex-1 @max-[639px]/report-viewer:basis-full">
           <h2 className="truncate text-sm font-semibold text-[var(--color-text)]">
             {report.title}
           </h2>
-          <div className="flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
+          <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-[var(--color-text-muted)]">
             <span>{new Date(report.created_at).toLocaleString()}</span>
             {report.source_name && (
-              <span>{report.source_type}: {report.source_name}</span>
+              <span className="min-w-0 break-words">{report.source_type}: {report.source_name}</span>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1 @max-[639px]/report-viewer:w-full @max-[639px]/report-viewer:flex-wrap [&>span]:whitespace-nowrap">
           {/* Source switcher */}
           {sourceNames && sourceNames.length > 1 && onSourceChange && (
-            <div className="mr-2 flex items-center gap-1">
+            <div className="mr-2 flex min-w-0 items-center gap-1">
               <Layers className="h-3 w-3 text-[var(--color-text-muted)]" />
-              <select
+              <SelectField
+                size="compact"
+                fit
+                label="Report source"
+                className="max-w-48"
                 value={report.source_name}
-                onChange={(e) => onSourceChange(e.target.value)}
-                className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
-              >
-                {sourceNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
+                onChange={onSourceChange}
+                options={sourceNames.map((name) => ({ value: name, label: name.replace(/_/g, " ") }))}
+              />
             </div>
           )}
           {/* Navigation counter */}
@@ -169,13 +168,13 @@ export function ReportViewer({
       </div>
 
       {/* iframe */}
-      <div className="relative flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1">
         <ReportFrame reportId={report.id} title={report.title} />
         {/* Fullscreen chevron overlays */}
         {fullscreen && hasPrev && (
           <button
             onClick={goPrev}
-            className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/70 hover:bg-black/70 hover:text-white transition-all"
+            className="@max-[639px]/routine-browser:hidden @max-[639px]/report-viewer:hidden absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/70 hover:bg-black/70 hover:text-white transition-all"
             title="Previous report"
             aria-label="Previous report"
           >
@@ -185,7 +184,7 @@ export function ReportViewer({
         {fullscreen && hasNext && (
           <button
             onClick={goNext}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/70 hover:bg-black/70 hover:text-white transition-all"
+            className="@max-[639px]/routine-browser:hidden @max-[639px]/report-viewer:hidden absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/70 hover:bg-black/70 hover:text-white transition-all"
             title="Next report"
             aria-label="Next report"
           >

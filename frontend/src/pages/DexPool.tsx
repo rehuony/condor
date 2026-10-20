@@ -23,6 +23,7 @@ import { useLpConfig } from "@/components/executor/lp-config";
 import { OrderConfigPanel } from "@/components/executor/OrderConfigPanel";
 import { useOrderConfig } from "@/components/executor/order-config";
 import { useVenues } from "@/components/market/useVenues";
+import { ChartRangeToolbar } from "@/components/trade/ChartRangeToolbar";
 import { TradeBottomPane } from "@/components/trade/TradeBottomPane";
 import { TradeChart, type ChartPriceAxis } from "@/components/trade/TradeChart";
 import { useDexUpstream } from "@/hooks/useDexUpstream";
@@ -70,16 +71,14 @@ export function DexPool() {
   const upstream = useDexUpstream(server ?? null);
 
   const [wantedTab, setTab] = useState<Tab>("order");
-  // 15m over 7 days: the widest window one GeckoTerminal request pays for, at
-  // the coarsest interval that still shows a pool's intraday shape. One request
-  // is 1000 candles at most (see `gecko-candles.ts`), so 15m spans ~10 days
-  // while 1m fills only ~16h of any window — the buffer then sits permanently
-  // short and re-backfills. Coarser candles also earn a slower live poll (the
-  // gecko budget is shared by every chart on the dashboard; see
-  // `_gecko_poll_interval` in condor/web/streams/candles.py), so this default
-  // costs a third of what 5m did and shows twice the history.
+  // A 15m / 7d default fits in one upstream page; wider or finer ranges are
+  // paged without changing the user's selected candle interval.
   const [interval, setIntervalValue] = useState("15m");
   const [lookbackSeconds, setLookbackSeconds] = useState(7 * 86400);
+  const [rangeRequestId, setRangeRequestId] = useState(0);
+  const [customRangeKey, setCustomRangeKey] = useState<string | null>(null);
+  const rangeKey = `${server}:${network}:${address}:${interval}:${lookbackSeconds}:${rangeRequestId}`;
+  const isCustomRange = customRangeKey === rangeKey;
   const [rightPanelWidth, setRightPanelWidth] = useState(288);
   const [bottomPaneHeight, setBottomPaneHeight] = useState(200);
   const [selectedExecutorId, setSelectedExecutorId] = useState<string | null>(null);
@@ -391,7 +390,7 @@ export function DexPool() {
   const pairLabel = poolLabel(pool);
 
   return (
-    <div className="-m-6 flex h-[calc(100%+3rem)] flex-col">
+    <div className="-m-3 flex min-h-full flex-col sm:-m-6 lg:h-[calc(100%+3rem)]">
       {/* Nothing on this page fails loudly when the budget is spent — the chart
           just stops moving and the stats freeze — so it is said here instead. */}
       <UpstreamNotice state={upstream} className="shrink-0 border-b" />
@@ -492,44 +491,24 @@ export function DexPool() {
       </div>
 
       {/* Interval / lookback */}
-      <div className="flex shrink-0 items-center gap-4 border-b border-[var(--color-border)] px-3 py-1.5">
-        <div className="flex items-center gap-1">
-          <span className="text-[11px] text-[var(--color-text-muted)]">Interval</span>
-          {DEX_INTERVALS.map((iv) => (
-            <button
-              key={iv}
-              onClick={() => setIntervalValue(iv)}
-              className={`rounded px-1.5 py-0.5 text-[11px] transition-colors ${
-                interval === iv
-                  ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              }`}
-            >
-              {iv}
-            </button>
-          ))}
-        </div>
-        <div className="h-4 w-px bg-[var(--color-border)]" />
-        <div className="flex items-center gap-1">
-          <span className="text-[11px] text-[var(--color-text-muted)]">Window</span>
-          {LOOKBACK_OPTIONS.map((o) => (
-            <button
-              key={o.label}
-              onClick={() => setLookbackSeconds(o.seconds)}
-              className={`rounded px-1.5 py-0.5 text-[11px] transition-colors ${
-                lookbackSeconds === o.seconds
-                  ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <ChartRangeToolbar
+        intervals={DEX_INTERVALS}
+        interval={interval}
+        onIntervalChange={setIntervalValue}
+        ranges={LOOKBACK_OPTIONS}
+        rangeSeconds={lookbackSeconds}
+        isCustomRange={isCustomRange}
+        onRangeChange={(seconds) => {
+          setCustomRangeKey(null);
+          setRangeRequestId((id) => id + 1);
+          setLookbackSeconds(seconds);
+        }}
+        rangeLabel="Window"
+        className="shrink-0 border-b border-[var(--color-border)] px-3 py-1 md:py-1.5"
+      />
 
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className="flex min-w-0 flex-1 flex-col min-h-[480px] lg:min-h-0">
           {/* What you already hold here, above the chart that shows where it sits */}
           <LpPositionBar
             executors={executors}
@@ -541,7 +520,7 @@ export function DexPool() {
           <div className="flex min-h-0 flex-1">
             <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <TradeChart
-              key={`${network}:${pool.address}:${interval}`}
+              key={`${server}:${network}:${pool.address}:${interval}`}
               server={server}
               connector={network}
               pair={pair}
@@ -549,6 +528,8 @@ export function DexPool() {
               poolAddress={pool.address}
               interval={interval}
               lookbackSeconds={lookbackSeconds}
+              rangeRequestId={rangeRequestId}
+              onCustomRange={() => setCustomRangeKey(rangeKey)}
               pricePrecision={pricePrecision}
               startPrice={active.chartProps.startPrice}
               endPrice={active.chartProps.endPrice}
@@ -628,14 +609,14 @@ export function DexPool() {
         </div>
 
         <div
-          className="group/vdrag relative w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] transition-colors hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20"
+          className="group/vdrag relative hidden lg:block w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] transition-colors hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20"
           onMouseDown={startHDrag}
         >
           <div className="absolute inset-y-0 left-1/2 my-auto h-12 w-px -translate-x-1/2 rounded bg-amber-400/60 transition-colors group-hover/vdrag:bg-amber-400" />
         </div>
 
         <div
-          className="flex shrink-0 flex-col border-l border-[var(--color-border)]"
+          className="flex shrink-0 flex-col border-l border-[var(--color-border)] max-lg:min-h-[420px] max-lg:w-full! max-lg:border-t max-lg:border-l-0"
           style={{ width: rightPanelWidth }}
         >
           <div className="flex border-b border-[var(--color-border)]">

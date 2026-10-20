@@ -2,17 +2,16 @@ import { memo, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
-  Check,
   Loader2,
   MessageSquare,
   Pencil,
   Plus,
   Send,
-  Share2,
   Trash2,
 } from "lucide-react";
 
-import { ShareConversation } from "@/components/chat/ShareConversation";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { TextInputDialog } from "@/components/ui/TextInputDialog";
 import { api, type ConversationMeta } from "@/lib/api";
 
 const QUERY_KEY = ["conversations"] as const;
@@ -68,10 +67,9 @@ export const ConversationList = memo(function ConversationList({
   onOpen: (meta: ConversationMeta) => void;
 }) {
   const queryClient = useQueryClient();
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [sharing, setSharing] = useState<string | null>(null);
+  // Rename and delete ask in a dialog, so the row never changes height.
+  const [renaming, setRenaming] = useState<ConversationMeta | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ConversationMeta | null>(null);
 
   // The rail mounts with the chat workspace, so "always" is one fetch per
   // arrival at the workspace — and a chat started seconds ago is at the top
@@ -87,19 +85,19 @@ export const ConversationList = memo(function ConversationList({
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
       api.renameConversation(id, title),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      setRenaming(null);
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteConversation(id),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      setConfirmDelete(null);
+    },
   });
-
-  const commitRename = (id: string) => {
-    const title = draftTitle.trim();
-    if (title) renameMutation.mutate({ id, title });
-    setRenaming(null);
-  };
 
   // One pass, not one per bucket, and the day boundaries are computed once
   // instead of two or three Dates per conversation. Held across renders
@@ -163,7 +161,6 @@ export const ConversationList = memo(function ConversationList({
             </div>
             {items.map((meta) => {
               const isActive = meta.id === activeId;
-              const isRenaming = renaming === meta.id;
               return (
                 <div
                   key={meta.id}
@@ -173,51 +170,7 @@ export const ConversationList = memo(function ConversationList({
                       : "hover:bg-[var(--color-surface-hover)]"
                   }`}
                 >
-                  {isRenaming ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        autoFocus
-                        value={draftTitle}
-                        onChange={(e) => setDraftTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitRename(meta.id);
-                          if (e.key === "Escape") setRenaming(null);
-                        }}
-                        className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
-                      />
-                      <button
-                        onClick={() => commitRename(meta.id)}
-                        className="rounded p-1 text-[var(--color-green)] hover:bg-[var(--color-surface-hover)]"
-                        title="Save"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ) : confirmDelete === meta.id ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs text-[var(--color-text-muted)]">
-                        Delete this conversation?
-                      </span>
-                      <div className="flex shrink-0 gap-1">
-                        <button
-                          onClick={() => {
-                            deleteMutation.mutate(meta.id);
-                            setConfirmDelete(null);
-                          }}
-                          className="rounded bg-[var(--color-red)] px-2 py-0.5 text-[10px] font-medium text-white"
-                        >
-                          Delete
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete(null)}
-                          className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[10px]"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
+                  <>
                       <button
                         onClick={() => onOpen(meta)}
                         className="w-full text-left"
@@ -267,8 +220,8 @@ export const ConversationList = memo(function ConversationList({
                       <div className="absolute right-2 top-1.5 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                         <button
                           onClick={() => {
-                            setDraftTitle(meta.title);
-                            setRenaming(meta.id);
+                            renameMutation.reset();
+                            setRenaming(meta);
                           }}
                           className="rounded bg-[var(--color-surface)] p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                           title="Rename"
@@ -276,30 +229,17 @@ export const ConversationList = memo(function ConversationList({
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
-                          onClick={() => setSharing(meta.id)}
-                          className={`rounded bg-[var(--color-surface)] p-1 hover:text-[var(--color-primary)] ${
-                            meta.share_id
-                              ? "text-[var(--color-primary)]"
-                              : "text-[var(--color-text-muted)]"
-                          }`}
-                          title={
-                            meta.share_id
-                              ? "Shared with Condor — review or unshare"
-                              : "Share with Condor"
-                          }
-                        >
-                          <Share2 className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete(meta.id)}
+                          onClick={() => {
+                            deleteMutation.reset();
+                            setConfirmDelete(meta);
+                          }}
                           className="rounded bg-[var(--color-surface)] p-1 text-[var(--color-text-muted)] hover:text-[var(--color-red)]"
                           title="Delete"
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
                       </div>
-                    </>
-                  )}
+                  </>
                 </div>
               );
             })}
@@ -307,15 +247,30 @@ export const ConversationList = memo(function ConversationList({
         ))}
       </div>
 
-      {/* One dialog for the whole rail rather than one per row: it is mounted
-          only while a conversation is selected, and its preview query is keyed
-          on that id. */}
-      {sharing && (
-        <ShareConversation
-          conversationId={sharing}
-          open
-          onClose={() => setSharing(null)}
+      {/* Dialogs mount only for the selected conversation. */}
+      {renaming && (
+        <TextInputDialog
+          title="Rename Conversation"
+          label="Title"
+          initialValue={renaming.title}
+          placeholder="Untitled chat"
+          pending={renameMutation.isPending}
+          error={renameMutation.error instanceof Error ? renameMutation.error.message : null}
+          onSubmit={(title) => renameMutation.mutate({ id: renaming.id, title })}
+          onCancel={() => setRenaming(null)}
         />
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this conversation?"
+          confirmLabel="Delete"
+          pending={deleteMutation.isPending}
+          error={deleteMutation.error instanceof Error ? deleteMutation.error.message : null}
+          onConfirm={() => deleteMutation.mutate(confirmDelete.id)}
+          onCancel={() => setConfirmDelete(null)}
+        >
+          <p>{confirmDelete.title || "Untitled chat"}</p>
+        </ConfirmDialog>
       )}
     </div>
   );

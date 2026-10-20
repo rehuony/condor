@@ -64,6 +64,7 @@ import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from condor.agents import deeds
@@ -74,6 +75,7 @@ from condor.agents.run_records import (
     TERMINAL_STATES,
     record_run,
 )
+from condor.runtime.timeouts import TIMEOUTS
 from condor.runtime.wake import (  # noqa: F401 - re-exported, see ON_COMPLETE below
     ON_COMPLETE_CHOICES,
     ON_COMPLETE_NOTIFY,
@@ -91,7 +93,7 @@ log = logging.getLogger(__name__)
 _delegations: dict[str, "DelegateTask"] = {}
 
 # Default per-task wall-clock budget; a hung ACP subprocess is cancelled after this.
-DEFAULT_TIMEOUT_S = 900
+DEFAULT_TIMEOUT_S = TIMEOUTS.delegate_default
 
 # Ceiling on a single tool payload wherever a transcript is *read* -- the on-disk
 # markdown and the wire projection share it so the two can never disagree about
@@ -517,33 +519,61 @@ async def _run(dt: DelegateTask, bot, timeout_s: int) -> None:
     """Background runner: drive the agent to completion, persist, notify."""
     from condor.agents.agent_run import run_agent_to_completion
 
+    deadline = datetime.fromtimestamp(
+        time.time() + timeout_s, tz=timezone.utc
+    ).isoformat()
+    context = (
+        f"Background task budget: {timeout_s}s; deadline: {deadline}. "
+        "Save durable progress as you work. Reserve the final two minutes to "
+        "save a checkpoint and return completed work, artifact paths, actual "
+        "test results, and remaining steps. Do not start another long operation "
+        "near the deadline or claim unfinished work is complete."
+    )
+    budget = asyncio.timeout(timeout_s)
     try:
-        dt.result = await asyncio.wait_for(
-            run_agent_to_completion(
+        async with budget:
+            dt.result = await run_agent_to_completion(
                 slug=dt.agent_slug,
                 user_id=dt.user_id,
                 chat_id=dt.chat_id,
                 server_name=dt.server_name,
                 task=dt.task,
-                context="",
+                context=context,
                 event_sink=_make_event_sink(dt),
                 delegate_worker=True,  # background seat: worker framing, no recursion
-            ),
-            timeout=timeout_s,
-        )
+                # The outer deadline owns cancellation and result recording;
+                # the client's backstop must not cut a long delegation short.
+                timeout_s=timeout_s + TIMEOUTS.agent_cleanup,
+            )
+        # A provider can swallow cancellation and return partial text. That is
+        # still a timeout, never a successful completion.
+        if budget.expired():
+            raise TimeoutError
+        if dt.status == "stopped" or asyncio.current_task().cancelling():
+            raise asyncio.CancelledError
         dt.status = "done"
     except asyncio.CancelledError:
         dt.status = "stopped"
         raise
-    except asyncio.TimeoutError:
+    except TimeoutError as exc:
         dt.status = "error"
-        dt.error = f"Timed out after {timeout_s}s"
-        log.warning("Delegation %s timed out after %ss", dt.task_id, timeout_s)
+        if budget.expired():
+            dt.error = f"Timed out after {timeout_s}s"
+            log.warning("Delegation %s timed out after %ss", dt.task_id, timeout_s)
+        else:
+            dt.error = str(exc) or "Agent operation timed out before the task deadline"
     except Exception as e:  # noqa: BLE001 -- surface any runtime failure as task error
         dt.status = "error"
         dt.error = str(e)
         log.exception("Delegation %s failed", dt.task_id)
     finally:
+        if dt.status != "done":
+            # Public progress only: never turn private thoughts or tool payloads
+            # into a result. Keep the recent tail where handoff paths usually are.
+            progress = dt.result or "\n".join(
+                event["text"] for event in dt.events if event.get("type") == "text"
+            )
+            dt.result = progress[-6000:].strip()
         # The terminal disk writes (deeds, transcript + events sidecar, status
         # record and its retention sweep) are ~10-50 ms of rendering and file IO,
         # so a finished run does them on a worker thread rather than on the loop
@@ -561,10 +591,9 @@ async def _run(dt: DelegateTask, bot, timeout_s: int) -> None:
             except Exception:
                 log.exception("Failed to notify delegation %s done", dt.task_id)
             # Last, and never before the notification: a wake that fails must
-            # not cost the user their message. Only a task that actually
-            # produced something is worth continuing from -- a failed or timed
-            # out one gives the agent nothing to work with, and the error is
-            # already in the chat and in the transcript.
+            # not cost the user their message. Only successful runs auto-resume;
+            # an interrupted run may have performed external actions, so its
+            # partial progress is shown for review rather than replayed blindly.
             #
             # Exactly one of the two reaches the session: the resume turn already
             # carries the outcome, so pushing the note as well would say the same
@@ -614,6 +643,9 @@ async def stop_delegation(task_id: str) -> bool:
         return False
     dt._task.cancel()
     dt.status = "stopped"
+    # Cancellation before the runner's first instruction never enters its
+    # finally block. Persist now so even that case survives a restart honestly.
+    _record_delegation_status(dt)
     return True
 
 
@@ -844,8 +876,6 @@ def _persist_transcript(dt: DelegateTask) -> None:
     task is running. Both are projections of the same ``dt.events`` through the
     same output bound, so they cannot drift apart.
     """
-    import json
-
     from condor.agents.delegation_history import (
         DELEGATION_EVENTS_FILENAME,
         DELEGATION_TRANSCRIPT_FILENAME,
@@ -869,28 +899,30 @@ def _persist_transcript(dt: DelegateTask) -> None:
         f"## {'Error' if dt.status == 'error' else 'Result'}\n\n"
         f"{body or '(none)'}\n"
     )
-    (record_dir / DELEGATION_TRANSCRIPT_FILENAME).write_text(content)
-    (record_dir / DELEGATION_EVENTS_FILENAME).write_text(
-        json.dumps({"events": events_for_wire(dt.events)}, indent=2)
+    from condor.fsutil import atomic_write_json, atomic_write_text
+
+    atomic_write_text(record_dir / DELEGATION_TRANSCRIPT_FILENAME, content)
+    atomic_write_json(
+        record_dir / DELEGATION_EVENTS_FILENAME,
+        {"events": events_for_wire(dt.events)},
+        indent=2,
     )
 
 
 def _completion_text(dt: DelegateTask) -> str:
-    """The one-line outcome of a finished delegation.
+    """The complete public result shared by chat, notification and transcript.
 
-    Single source for both places the outcome is announced -- the chat push and
-    the conversation transcript -- so the two can never tell the user different
-    stories about the same task. The result is clipped here, not by the caller:
-    a long answer must not bloat a transcript that is replayed into the next
-    session's context.
+    Telegram splits this at delivery time. Replay has its own context budget;
+    it must not truncate the answer the user receives on either surface.
     """
+    agent = dt.agent_slug.replace("_", " ")
     if dt.status == "error":
-        return f"❌ Delegated task {dt.task_id} failed: {dt.error}"
+        text = f"❌ {agent} · failed: {dt.error}"
+        if dt.result:
+            text += f"\n\nPartial progress (task incomplete):\n{dt.result}"
+        return text
 
-    snippet = (dt.result or "").strip()
-    if len(snippet) > 1500:
-        snippet = snippet[:1500] + "…"
-    return f"✅ Delegated task {dt.task_id} done\n\n{snippet}".rstrip()
+    return f"✅ {agent} · done\n\n{(dt.result or '').strip()}".rstrip()
 
 
 def _record_completion_turn(dt: DelegateTask) -> None:
@@ -1092,4 +1124,5 @@ async def _notify_done(dt: DelegateTask, bot) -> None:
         bot=bot,
         title=f"Delegation · {dt.agent_slug}",
         link=f"/agents/{dt.agent_slug}",
+        parse_mode="Markdown",
     )

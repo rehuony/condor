@@ -16,6 +16,7 @@ import contextlib
 import logging
 
 from condor.acp.pydantic_ai_client import PydanticAIClient
+from tests.pydantic_ai_helpers import response_model
 
 
 class _FakeAgent:
@@ -173,7 +174,6 @@ mcp.run()
 def _tool_calling_model():
     """Calls ``ping`` once, then answers with whatever the tool said."""
     from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-    from pydantic_ai.models.function import FunctionModel
 
     def respond(messages, info):
         last = messages[-1].parts[-1]
@@ -181,7 +181,7 @@ def _tool_calling_model():
             return ModelResponse(parts=[TextPart(f"tool said: {last.content}")])
         return ModelResponse(parts=[ToolCallPart("ping", {})])
 
-    return FunctionModel(respond)
+    return response_model(respond)
 
 
 async def _started_client(tmp_path, monkeypatch) -> tuple[PydanticAIClient, int]:

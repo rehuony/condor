@@ -9,6 +9,9 @@ skill library, and the pydantic-ai tool allowlist.
 import asyncio
 from types import SimpleNamespace
 
+from pydantic_ai.models.test import TestModel as PydanticTestModel
+from pydantic_ai.usage import RunUsage
+
 from condor.acp.pydantic_ai_client import PydanticAIClient
 from condor.agents import agent as agent_module
 from condor.agents import strategy as strategy_module
@@ -364,6 +367,12 @@ class _FakeRun:
         for node in self._nodes:
             yield node
 
+    def new_messages(self):
+        return []
+
+    def usage(self):
+        return RunUsage()
+
 
 def _collect_prompt_stream(client):
     async def _run():
@@ -380,7 +389,9 @@ def _prompt_done_reasons(events):
 
 def test_prompt_stream_success_emits_single_end_turn():
     client = PydanticAIClient(model="ollama:x")
-    client._agent = SimpleNamespace(iter=lambda *a, **k: _FakeRun([]))
+    client._agent = SimpleNamespace(
+        model=PydanticTestModel(), iter=lambda *a, **k: _FakeRun([])
+    )
     client._request_semaphore = asyncio.Semaphore(1)
 
     events = _collect_prompt_stream(client)
@@ -395,7 +406,7 @@ def test_prompt_stream_error_emits_text_then_single_error():
     def _boom(*a, **k):
         raise RuntimeError("kaboom")
 
-    client._agent = SimpleNamespace(iter=_boom)
+    client._agent = SimpleNamespace(model=PydanticTestModel(), iter=_boom)
     client._request_semaphore = asyncio.Semaphore(1)
 
     events = _collect_prompt_stream(client)
@@ -411,18 +422,39 @@ def test_prompt_stream_timeout_emits_single_timeout():
     def _timeout(*a, **k):
         raise asyncio.TimeoutError()
 
-    client._agent = SimpleNamespace(iter=_timeout)
+    client._agent = SimpleNamespace(model=PydanticTestModel(), iter=_timeout)
     client._request_semaphore = asyncio.Semaphore(1)
 
     events = _collect_prompt_stream(client)
     assert _prompt_done_reasons(events) == ["timeout"]
 
 
+def test_background_prompt_budget_stops_a_hung_provider_and_releases_slot():
+    class SlowRun(_FakeRun):
+        async def __aenter__(self):
+            await asyncio.Event().wait()
+
+    client = PydanticAIClient(model="ollama:x")
+    client._agent = SimpleNamespace(
+        model=PydanticTestModel(), iter=lambda *a, **k: SlowRun([])
+    )
+    client._request_semaphore = asyncio.Semaphore(1)
+
+    async def run():
+        return [event async for event in client.prompt_stream("build", timeout_s=0.01)]
+
+    events = asyncio.run(asyncio.wait_for(run(), timeout=1))
+    assert _prompt_done_reasons(events) == ["timeout"]
+    assert not client._request_semaphore.locked()
+
+
 def test_prompt_stream_runs_without_semaphore_for_cloud_providers():
     # Cloud providers leave _request_semaphore None (PERF-038): prompt_stream
     # must still work, with the serialization guard acting as a no-op.
     client = PydanticAIClient(model="anthropic:claude-sonnet-4-6")
-    client._agent = SimpleNamespace(iter=lambda *a, **k: _FakeRun([]))
+    client._agent = SimpleNamespace(
+        model=PydanticTestModel(), iter=lambda *a, **k: _FakeRun([])
+    )
     client._request_semaphore = None
 
     events = _collect_prompt_stream(client)
@@ -665,7 +697,7 @@ def test_resolve_acp_model_suffix():
     from condor.acp.client import resolve_acp
 
     # Returns (command, env, model_pref). The suffix is surfaced as model_pref so
-    # ACPClient can select it via session/set_model (the bridge ignores env).
+    # ACPClient can verify/select it through the bridge's ACP model control.
     cmd, env, pref = resolve_acp("claude-acp:opus")
     assert cmd == "claude-agent-acp"
     assert env == {"ANTHROPIC_MODEL": "opus"}

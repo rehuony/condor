@@ -56,6 +56,7 @@ from condor.agents.sessions_index import (
 from condor.agents.strategy import LOOP_MD, LOOPS_DIRNAME
 from condor.fsutil import atomic_write_text
 from condor.layering import fork_if_stock, write_preserving_stamp
+from condor.runtime.timeouts import TIMEOUTS
 from condor.web.auth import (
     check_server_access,
     get_current_user,
@@ -840,22 +841,18 @@ class StartStrategyRequest(BaseModel):
 # ── The delegation budget (ARCH-310) ──
 #
 # ``timeout_s`` is the wall-clock ceiling ``start_delegation`` puts around the
-# whole background run. 900s stays the DEFAULT -- a reasonable guard against a
-# runaway unattended session -- but a caller who knows the job is longer (a
-# multi-step build, a research sweep) can raise it instead of having the work
-# silently cut in half. The bounds are not decoration: 0 or a negative would
-# make ``asyncio.wait_for`` kill the worker before its first tool call, and an
-# ACP prompt has its own ~31-minute hard ceiling, so a budget beyond that buys
-# nothing but a longer wait for the same cut-off.
-DEFAULT_DELEGATE_TIMEOUT_S = 900  # in sync with delegate.DEFAULT_TIMEOUT_S (pinned)
-MAX_DELEGATE_TIMEOUT_S = 1800
-# ...and 900s is also the FLOOR. Since ARCH-310 a caller can name its own budget,
+# whole background run. Background work defaults to an hour and can request two;
+# the runner passes its budget through to the model stream as well. Chat turns
+# keep their own shorter limit. All deployment overrides live in TimeoutPolicy.
+DEFAULT_DELEGATE_TIMEOUT_S = TIMEOUTS.delegate_default
+MAX_DELEGATE_TIMEOUT_S = TIMEOUTS.delegate_max
+# The default is also the FLOOR. Since ARCH-310 a caller can name its own budget,
 # and the caller is usually a model, which guesses: a real run was handed 300s and
 # cut off mid-answer, having been given a third of the budget nobody asked to
 # shorten. Raising the budget is a real need; lowering it below the default never
 # was, so an ask under the floor is quietly raised to it rather than refused --
 # a 400 would only cost the model a turn to retry with the number we already want.
-MIN_DELEGATE_TIMEOUT_S = 900
+MIN_DELEGATE_TIMEOUT_S = DEFAULT_DELEGATE_TIMEOUT_S
 
 
 class DelegateRequest(BaseModel):
@@ -872,8 +869,9 @@ class DelegateRequest(BaseModel):
 
 
 class NotifyRequest(BaseModel):
-    text: str
-    parse_mode: str = "Markdown"
+    text: str = ""
+    parse_mode: Literal["Markdown", "HTML", "MarkdownV2", ""] = "Markdown"
+    image_path: str = ""
     chat_id: int = 0  # Telegram chat to push to (0 = nothing to push to)
     # Canonical key of the session announcing something (posted by the condor
     # MCP server from CONDOR_SESSION_KEY). Resolved to a conversation id below.
@@ -1690,9 +1688,8 @@ async def list_delegation_history(
     # In a worker thread, not on the loop (PERF-293): the on-disk half of this
     # list is a directory walk that reads a ``status.json`` per recorded run, up
     # to retention's caps, and this loop is also uvicorn's and the Telegram
-    # poller's. Same reason and same shape as the sharing routes (PERF-235); the
-    # live registry above and the code-run index below are in-memory reads and
-    # stay inline.
+    # poller's. The live registry above and the code-run index below are
+    # in-memory reads and stay inline.
     history = await asyncio.to_thread(
         list_history,
         user_id=_delegation_scope(user),
@@ -2520,7 +2517,9 @@ async def ask_agent(
 # ── Delegate (fire-and-forget background tasks) ──
 
 
-async def _owned_conversation_for_session(session_key: str, user: WebUser) -> str:
+async def _owned_conversation_for_session(
+    session_key: str, user: WebUser, *, strict_owner: bool = False
+) -> str:
     """Resolve the caller's own session key to the conversation behind it.
 
     ``session_key`` is a plain body field, and what it resolves to is where a
@@ -2551,7 +2550,7 @@ async def _owned_conversation_for_session(session_key: str, user: WebUser) -> st
     if info.user_id is None or info.user_id != user.id:
         from config_manager import get_config_manager
 
-        if not get_config_manager().is_admin(user.id):
+        if strict_owner or not get_config_manager().is_admin(user.id):
             raise HTTPException(status_code=403, detail="Not your session")
     return info.conversation_id
 
@@ -2567,9 +2566,9 @@ async def delegate_agent(
     ``/ask``, and what an attended caller should prefer -- a caller that wants
     the answer itself asks for ``on_complete="resume"``.
 
-    ``timeout_s`` is the whole run's wall-clock budget: the default 900s, or
+    ``timeout_s`` is the whole run's wall-clock budget: the default 3600s, or
     whatever the caller asked for within the bounds above (ARCH-310) -- an ask
-    below the 900s floor is raised to it.
+    below the default floor is raised to it.
     """
     from condor.agents.delegate import ON_COMPLETE_CHOICES, start_delegation
     from condor.runtime import wake
@@ -2651,8 +2650,8 @@ async def notify_user(req: NotifyRequest, user: WebUser = Depends(get_current_us
     dead ``session_key`` simply means there is no conversation behind this call,
     which is the truth for a routine- or tick-started agent.
     """
-    if not req.text:
-        raise HTTPException(status_code=400, detail="text is required")
+    if not req.text and not req.image_path:
+        raise HTTPException(status_code=400, detail="text or image_path is required")
 
     # The push target must belong to the caller — mirror the JWT-not-body
     # user_id rule below for the outbound address, and refuse before any side
@@ -2661,20 +2660,63 @@ async def notify_user(req: NotifyRequest, user: WebUser = Depends(get_current_us
 
     # The caller is the JWT, never a body-supplied user_id: mirror delegate so an
     # authenticated session cannot write into another user's transcript.
-    conversation_id = await _owned_conversation_for_session(req.session_key, user)
+    photo = None
+    if req.image_path:
+        from condor.web.routes.code import _may_run_code
+
+        # Reading a server file is an explicit code-run capability, not an
+        # extra privilege granted to everyone who can send a notification.
+        if not _may_run_code(user.id):
+            raise HTTPException(403, "Not allowed to read generated images")
+        conversation_id = await _owned_conversation_for_session(
+            req.session_key, user, strict_owner=True
+        )
+        from condor.telegram_media import load_photo
+
+        try:
+            photo = await asyncio.to_thread(load_photo, req.image_path)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(
+                400, "Image is unreadable or invalid: " + str(exc)
+            ) from exc
+    else:
+        conversation_id = await _owned_conversation_for_session(req.session_key, user)
     recorded = False
+    image_recorded = False
+    image_error = None
+    stored_image = None
     if conversation_id:
         try:
             from condor.runtime.conversations import record_system
 
-            record_system(user.id, conversation_id, req.text, kind="notification")
+            if photo is not None:
+                from condor.runtime import attachments
+
+                stored_image = await asyncio.to_thread(
+                    attachments.save, user.id, conversation_id, photo[0]
+                )
+                record_system(
+                    user.id,
+                    conversation_id,
+                    req.text,
+                    kind="notification",
+                    attachments=[asdict(stored_image)],
+                    durable=True,
+                )
+                image_recorded = True
+            else:
+                record_system(user.id, conversation_id, req.text, kind="notification")
             recorded = True
         except Exception:
+            if photo is not None:
+                image_error = "The image could not be saved in the conversation"
             log.debug(
                 "Could not note a notification in conversation %s",
                 conversation_id,
                 exc_info=True,
             )
+    elif photo is not None:
+        image_error = "No active conversation; the image was not saved in chat history"
 
     # The Telegram push and the dashboard bell (FEAT-048) are one decision, not
     # two: ``announce`` resolves the outbound ladder once and files the bell
@@ -2683,21 +2725,56 @@ async def notify_user(req: NotifyRequest, user: WebUser = Depends(get_current_us
     # Telegram (ARCH-212). The bell entry is addressed to the caller themselves,
     # never to ``req.chat_id``, which may legitimately be a group they belong to
     # but which has no dashboard owner. This is what makes ``send_notification``
-    # succeed on an install with no Telegram: the tool already counts
-    # ``recorded`` as delivered, and ``sent`` now says the honest "no".
+    # work on an install with no Telegram: ``recorded`` describes the dashboard
+    # delivery, while ``sent`` exclusively describes complete Telegram delivery.
     sent = False
+    error = None
+    image_sent = False
+    text_sent = False
     try:
         from condor.notifications import announce
 
         delivery = await announce(
-            user.id, req.chat_id, req.text, kind="agent", parse_mode=req.parse_mode
+            user.id,
+            req.chat_id,
+            req.text,
+            kind="agent",
+            parse_mode=req.parse_mode,
+            **(
+                {
+                    "photo": photo,
+                    "link": (
+                        f"/?conversation={conversation_id}" if image_recorded else None
+                    ),
+                }
+                if photo is not None
+                else {}
+            ),
         )
         sent = delivery.sent
         recorded = recorded or delivery.recorded
-    except Exception:
+        error = delivery.error
+        if photo is not None:
+            image_sent = delivery.image_sent
+            text_sent = delivery.text_sent
+    except Exception as exc:
+        error = str(exc)
         log.debug("Could not announce a notification for %s", user.id, exc_info=True)
 
-    return {"sent": sent, "recorded": recorded}
+    result = {"sent": sent, "recorded": recorded}
+    if photo is not None:
+        result.update(
+            image_sent=image_sent,
+            text_sent=text_sent,
+            image_recorded=image_recorded,
+        )
+        if image_recorded:
+            result["attachment"] = asdict(stored_image)
+        if image_error:
+            result["image_error"] = image_error
+    if error:
+        result["error"] = error
+    return result
 
 
 # ── Strategy CRUD ──
@@ -2846,6 +2923,12 @@ async def update_strategy_md(
     # ``default_config`` in the front matter carries the strategy's server pin;
     # compared against the same field of the file being replaced (SEC-693).
     new_defaults = _frontmatter_meta(req.content).get("default_config")
+    from condor.agents.config import AgentConfig
+
+    try:
+        AgentConfig.from_dict({} if new_defaults is None else new_defaults)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     _gate_pin_change(
         user,
         new_defaults.get("server_name") if isinstance(new_defaults, dict) else None,
@@ -2870,14 +2953,18 @@ async def update_strategy_config(
     _require_no_foreign_live_run(slug, sslug, user)
     from condor.agents.config import load_full_config, save_full_config
 
-    config_dict = load_full_config(strategy.home, strategy.default_config)
     _gate_pin_change(
         user,
         req.config.get("server_name"),
         _strategy_server(strategy.home, strategy.default_config),
     )
-    config_dict.update(req.config)
-    save_full_config(strategy.home, config_dict)
+    try:
+        config_dict = load_full_config(
+            strategy.home, strategy.default_config, overrides=req.config
+        )
+        save_full_config(strategy.home, config_dict)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"updated": True, "config": config_dict}
 
 
@@ -3075,9 +3162,12 @@ async def _start(agent, strategy, req: StartStrategyRequest, user_id: int) -> di
     from condor.agents.engine import TickEngine
     from config_manager import get_config_manager
 
-    config_dict = load_full_config(strategy.home, strategy.default_config)
-    if req.config:
-        config_dict.update(req.config)
+    try:
+        config_dict = load_full_config(
+            strategy.home, strategy.default_config, overrides=req.config
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # The engine notifies ``chat_id`` on every tick, so the same ownership rule
     # as /notify applies to it (SEC-198).
@@ -3118,6 +3208,7 @@ async def _start(agent, strategy, req: StartStrategyRequest, user_id: int) -> di
         agent_key,
         user_id=user_id,
         base_url_override=config_dict.get("model_base_url") or None,
+        execution_mode=config_dict.get("execution_mode", "loop"),
     )
     if problem:
         raise HTTPException(

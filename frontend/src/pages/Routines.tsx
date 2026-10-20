@@ -24,8 +24,7 @@ import { api } from "@/lib/api";
  *
  * `?agent=<slug>` still scopes the list, which is what the agent pages link
  * with; `?routine=<name>` opens straight onto one, and `?report=<id>` /
- * `?run=<id>` onto exactly what was on screen — which is what maximizing the
- * chat's routine pane hands over, so the page opens where the pane left off.
+ * `?run=<id>` selects a specific run when following a direct link.
  */
 export function Routines() {
   const { server } = useServer();

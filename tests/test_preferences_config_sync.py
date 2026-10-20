@@ -1,17 +1,11 @@
 """Every preference write reaches config.yml, and every read hydrates from it.
 
-The sync to ConfigManager used to be opt-in per setter, and six setters never
-called it — so the wallets, DEX pools and executor defaults chosen in Telegram
-existed only in the pickle. The sharing scrubber reads the config.yml copy to
-learn which wallets are the user's own, so those wallets were never redacted
-(ARCH-604). Hydration had the mirror hole: only two of ~15 accessors called it,
-so a cold pickle read defaults over a populated config.yml.
-
-Both directions are now structural: writes go through ``_mutate``, reads through
-``_migrate_legacy_data``.
+Writes go through ``_mutate`` and reads through ``_migrate_legacy_data`` so
+Telegram preferences persist and a cold pickle reads the saved configuration.
 """
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -133,3 +127,82 @@ def test_every_mutator_routes_through_mutate():
     # ...and there is exactly one place left that syncs a section.
     source = inspect.getsource(prefs_module)
     assert source.count("_sync_section_to_cm(user_data, section)") == 1
+
+
+def test_web_model_pick_replaces_stale_telegram_cache(cm):
+    from condor.runtime.binding import remember_model_choice
+    from handlers.agents import _reclaim_default_agent, set_active_llm
+
+    telegram = SimpleNamespace(user_data={"_user_id": USER_ID})
+    set_active_llm(telegram, "claude-code")
+    telegram.user_data["agent_llm_auto"] = True
+
+    remember_model_choice(USER_ID, "", "claude-acp:sonnet")
+
+    assert _reclaim_default_agent(telegram) == "claude-acp:sonnet"
+    assert "agent_llm_auto" not in telegram.user_data
+    assert prefs_module.get_active_agent_key(USER_ID) == "claude-acp:sonnet"
+
+    # Selecting the old cached model is still a deliberate write, not a no-op.
+    remember_model_choice(USER_ID, "", "claude-acp:opus")
+    set_active_llm(telegram, "claude-acp:sonnet")
+    assert prefs_module.get_active_agent_key(USER_ID) == "claude-acp:sonnet"
+
+
+def test_unrelated_telegram_agent_write_preserves_web_model_choice(cm):
+    telegram = {"_user_id": USER_ID}
+    prefs_module.set_active_agent_key(telegram, "claude-code")
+    prefs_module.set_active_agent_key(
+        prefs_module.load_user_data_for(USER_ID), "claude-acp:sonnet"
+    )
+
+    prefs_module.set_chat_binding(telegram, {"agent_slug": "specialist"})
+
+    assert prefs_module.get_active_agent_key(USER_ID) == "claude-acp:sonnet"
+    assert cm.get_user_preferences(USER_ID)["agent"]["chat_binding"] == {
+        "agent_slug": "specialist"
+    }
+
+
+def test_legacy_telegram_model_is_saved_only_without_a_shared_choice(cm):
+    from handlers.agents import _reclaim_default_agent
+
+    telegram = SimpleNamespace(
+        user_data={"_user_id": USER_ID, "agent_llm": "claude-acp:sonnet"}
+    )
+    assert _reclaim_default_agent(telegram) == "claude-acp:sonnet"
+    assert prefs_module.get_active_agent_key(USER_ID) == "claude-acp:sonnet"
+
+
+def test_temporary_telegram_fallback_does_not_overwrite_a_shared_choice(
+    cm, monkeypatch
+):
+    import handlers.agents as agents
+
+    telegram = SimpleNamespace(user_data={"_user_id": USER_ID})
+    agents.set_active_llm(telegram, "claude-acp:sonnet")
+    telegram.user_data.update(agent_llm="gemini", agent_llm_auto="claude-acp:sonnet")
+    monkeypatch.setattr(agents, "_is_agent_available", lambda key: key == "gemini")
+
+    assert agents._reclaim_default_agent(telegram) == "gemini"
+    assert prefs_module.get_active_agent_key(USER_ID) == "claude-acp:sonnet"
+
+    # An explicit Web pick of that same fallback is still a deliberate choice.
+    prefs_module.set_active_agent_key(
+        prefs_module.load_user_data_for(USER_ID), "gemini"
+    )
+    monkeypatch.setattr(agents, "_is_agent_available", lambda key: True)
+    assert agents._reclaim_default_agent(telegram) == "gemini"
+    assert "agent_llm_auto" not in telegram.user_data
+
+
+def test_telegram_recovers_the_users_model_when_its_cli_returns(cm, monkeypatch):
+    import handlers.agents as agents
+
+    telegram = SimpleNamespace(user_data={"_user_id": USER_ID})
+    agents.set_active_llm(telegram, "claude-acp:sonnet")
+    telegram.user_data.update(agent_llm="gemini", agent_llm_auto="claude-acp:sonnet")
+    monkeypatch.setattr(agents, "_is_agent_available", lambda key: True)
+
+    assert agents._reclaim_default_agent(telegram) == "claude-acp:sonnet"
+    assert "agent_llm_auto" not in telegram.user_data

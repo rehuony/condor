@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useCandleStore } from "@/hooks/useCandleStore";
+import { useCandleHistory } from "@/hooks/useCandleHistory";
 import { useRates } from "@/hooks/useRates";
-import { api, type ConsolidatedPosition } from "@/lib/api";
+import type { ConsolidatedPosition } from "@/lib/api";
 import { candleChannelKey, candleStore } from "@/lib/candle-store";
 import type { ChartLineSlot, ExtraLine, PickSlot } from "@/components/executor/types";
 import { createOverlayTooltipView, getExecutorColor, type ExecutorOverlay } from "@/lib/executor-overlays";
@@ -11,6 +12,8 @@ import { getThemeColors, pnlHexColor } from "@/lib/theme-colors";
 import { roundToPricePrecision } from "@/lib/formatters";
 import { createDragHitPrimitive, type DragTarget } from "./priceLineDrag";
 import { usePriceLineDrag } from "./usePriceLineDrag";
+import { attachTimeAxisLabel } from "@/components/trade/timeAxisLabel";
+import { attachHistoryNavigation, preserveChartViewport } from "@/components/trade/chartHistoryNavigation";
 
 type PickField = PickSlot | null;
 
@@ -72,6 +75,9 @@ interface TradeChartProps {
    */
   poolAddress?: string;
   lookbackSeconds: number;
+  /** A new request even when the same preset is clicked again. */
+  rangeRequestId?: number;
+  onCustomRange?: () => void;
   startPrice: number;
   endPrice: number;
   limitPrice: number;
@@ -101,6 +107,8 @@ export function TradeChart({
   interval,
   poolAddress,
   lookbackSeconds,
+  rangeRequestId = 0,
+  onCustomRange,
   startPrice,
   endPrice,
   limitPrice,
@@ -189,6 +197,7 @@ export function TradeChart({
   // the chart, so that on unmount its cleanup runs *first* and hands panning
   // back to a chart that still exists.
   const dragTargetsRef = useRef<DragTarget[]>([]);
+  const timeAxisLabelRef = useRef<ReturnType<typeof attachTimeAxisLabel> | null>(null);
   const drag = usePriceLineDrag({
     getContainer: () => containerRef.current,
     getChart: () => chartRef.current,
@@ -196,11 +205,12 @@ export function TradeChart({
     getTargets: () => dragTargetsRef.current,
     getPricePrecision: () => pricePrecision,
     onPriceSet,
+    onDragStart: () => timeAxisLabelRef.current?.hide(),
     slopPx: CLICK_SLOP_PX,
   });
 
   // ── Candle data from the singleton store (WS live + cached) ──
-  const { candles: storedCandles, mergeCandles, setDuration } = useCandleStore(
+  const { candles: storedCandles } = useCandleStore(
     server,
     connector,
     pair,
@@ -208,24 +218,51 @@ export function TradeChart({
     poolAddress,
   );
 
-  // ── Only the picked range is drawn ──
-  // The store keeps every candle any chart on this channel has loaded — a
-  // longer range picked earlier, or another chart's — and never trims to one
-  // chart's range. So the chart draws the tail its own picker names, measured
-  // back from the newest candle rather than the clock, which would make render
-  // impure.
+  const history = useCandleHistory({
+    server, connector, pair, interval, poolAddress, lookbackSeconds, rangeRequestId,
+  });
+  const channelKey = candleChannelKey(server, connector, pair, interval, poolAddress);
+  const viewKey = `${channelKey}|${lookbackSeconds}|${rangeRequestId}`;
+  const activeChannelRef = useRef(channelKey);
+  activeChannelRef.current = channelKey;
+  const lastDrawRef = useRef<{
+    channelKey: string; key: string; first: number; last: number; count: number;
+  } | null>(null);
+  const observedRequestRef = useRef<string | null>(null);
+  const presentationFrameRef = useRef<number | null>(null);
+  // Only a completed range may become the displayed chart. Keep its identity
+  // separate from a pending preset so the previous complete view can stay put.
+  const [presentation, setPresentation] = useState<{ channelKey: string; first: number | null } | null>(null);
+  const hasPresentation = chartReady && presentation?.channelKey === channelKey && presentation.first !== null;
+  // An initially empty window may later receive a live candle. An empty page
+  // requested to the left is different: its continuation action must remain.
+  const emptyEarlierWindow = history.loadedFrom !== null && history.loadedTo !== null &&
+    history.loadedFrom < Math.max(0, history.loadedTo - lookbackSeconds);
+  const showHistoryStatus = history.status === "empty"
+    ? !hasPresentation || emptyEarlierWindow
+    : history.status !== "ready" || !hasPresentation;
+  const manualViewRef = useRef<string | null>(null);
+  const navigationRef = useRef<ReturnType<typeof attachHistoryNavigation> | null>(null);
+  const historyCallbacksRef = useRef({ history, onCustomRange, viewKey });
+  useEffect(() => { historyCallbacksRef.current = { history, onCustomRange, viewKey }; });
+
+  // The shared store may hold a much wider range from another chart. The
+  // history loader owns this view's lower boundary, including manual extensions.
   const candles = useMemo(() => {
     if (!storedCandles.length) return storedCandles;
-    const cutoff = storedCandles[storedCandles.length - 1].timestamp - lookbackSeconds;
+    const cutoff = history.loadedFrom;
+    if (cutoff === null) return [];
     const start = storedCandles.findIndex((c) => c.timestamp >= cutoff);
-    return start <= 0 ? storedCandles : storedCandles.slice(start);
-  }, [storedCandles, lookbackSeconds]);
+    return start < 0 ? [] : start === 0 ? storedCandles : storedCandles.slice(start);
+  }, [storedCandles, history.loadedFrom]);
 
   // ── Filter executor overlays to those within candle time range ──
   // Depend on the earliest candle timestamp (not the candles array, whose reference
   // changes on every WS tick) so filteredOverlays keeps a stable identity across
   // live ticks and the overlay rebuild effect below doesn't churn per tick.
-  const minCandleTime = candles.length ? candles[0].timestamp : 0;
+  const minCandleTime = history.initialComplete
+    ? candles[0]?.timestamp ?? 0
+    : presentation?.channelKey === channelKey ? presentation.first ?? 0 : 0;
   const filteredOverlays = useMemo(() => {
     if (!executorOverlays?.length) return executorOverlays;
     return executorOverlays.filter((o) => {
@@ -236,37 +273,6 @@ export function TradeChart({
       return end >= minCandleTime; // minCandleTime === 0 (no candles) → show all
     });
   }, [executorOverlays, minCandleTime, selectedExecutorId]);
-
-  // ── REST backfill on pair/interval/lookback change ──
-  // The dependency array below is the whole gate: React re-runs this only when
-  // one of those six changes. A ref remembering the last key would add nothing
-  // in production and would break development, where StrictMode mounts the
-  // effect twice — the first cleanup throws the in-flight fetch away, and a ref
-  // that outlives the remount would make the second pass a no-op, leaving the
-  // chart with no history at all.
-  useEffect(() => {
-    setDuration(lookbackSeconds);
-
-    let cancelled = false;
-    const startTime = Math.floor(Date.now() / 1000) - lookbackSeconds;
-
-    const fetchWithRetry = (attempt: number) => {
-      if (cancelled) return;
-      api
-        .getCandles(server, connector, pair, interval, 5000, startTime, undefined, poolAddress)
-        .then((fetched) => {
-          if (!cancelled && fetched?.length) mergeCandles(fetched);
-        })
-        .catch(() => {
-          if (!cancelled && attempt < 2) {
-            setTimeout(() => fetchWithRetry(attempt + 1), 2000 * (attempt + 1));
-          }
-        });
-    };
-    fetchWithRetry(0);
-
-    return () => { cancelled = true; };
-  }, [server, connector, pair, interval, poolAddress, lookbackSeconds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Initialize chart ONCE ──
   useEffect(() => {
@@ -286,8 +292,8 @@ export function TradeChart({
           vertLines: { color: colors.grid },
           horzLines: { color: colors.grid },
         },
-        crosshair: { mode: mod.CrosshairMode.Normal },
-        timeScale: { timeVisible: true, secondsVisible: false },
+        crosshair: { mode: mod.CrosshairMode.Normal, vertLine: { labelVisible: false } },
+        timeScale: { timeVisible: true, secondsVisible: false, minBarSpacing: 0.001 },
       });
       chartRef.current = chart;
 
@@ -302,6 +308,7 @@ export function TradeChart({
         }),
       });
       seriesRef.current = series;
+      timeAxisLabelRef.current = attachTimeAxisLabel(chart, containerRef.current);
       setChartReady(true);
 
       // Track the pointer's price/time for click-to-set, the measure tool and
@@ -310,6 +317,7 @@ export function TradeChart({
       const tooltipView = createOverlayTooltipView();
 
       chart.subscribeCrosshairMove((param) => {
+        if (lastDrawRef.current?.channelKey !== activeChannelRef.current || !lastDrawRef.current.count) return;
         if (!param.point || !param.seriesData) {
           cursorPriceRef.current = null;
           crosshairTimeRef.current = null;
@@ -468,7 +476,16 @@ export function TradeChart({
     });
     return () => {
       cancelled = true;
+      timeAxisLabelRef.current?.detach();
+      timeAxisLabelRef.current = null;
       setChartReady(false);
+      setPresentation(null);
+      lastDrawRef.current = null;
+      observedRequestRef.current = null;
+      if (presentationFrameRef.current !== null) cancelAnimationFrame(presentationFrameRef.current);
+      presentationFrameRef.current = null;
+      manualViewRef.current = null;
+      lastZoomedIdRef.current = null;
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
@@ -553,58 +570,111 @@ export function TradeChart({
     return () => observer.disconnect();
   }, [chartReady]);
 
-  // Signature of the last full setData() render: channel key + range +
-  // earliest timestamp + count. Lets us tell a wholesale change (first load,
-  // pair/interval/range switch, history backfill/prepend) apart from a live
-  // tick, where the listener below already applied a cheap series.update().
-  const lastSetDataSigRef = useRef<string>("");
-
-  // ── Push candle data to chart (full setData only on structural changes) ──
+  // Only actual pointer/wheel navigation may request more history. Data
+  // prepends, overlays and preset fitting are programmatic scale changes.
   useEffect(() => {
-    if (!chartReady || !seriesRef.current || !candles.length) return;
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    const container = containerRef.current;
+    if (!chartReady || !chart || !series || !container) return;
+    const navigation = attachHistoryNavigation(chart, series, container, {
+      onNavigate: () => {
+        const current = historyCallbacksRef.current;
+        if (lastDrawRef.current?.channelKey !== activeChannelRef.current || !lastDrawRef.current.count) return;
+        if (manualViewRef.current !== current.viewKey) {
+          manualViewRef.current = current.viewKey;
+          current.onCustomRange?.();
+        }
+      },
+      onLoadEarlier: () => historyCallbacksRef.current.history.loadEarlier(),
+      canLoadEarlier: () => {
+        const current = historyCallbacksRef.current.history;
+        return current.initialComplete && (current.status === "ready" || current.status === "empty");
+      },
+      isDraggingPrice: drag.isDragging,
+    });
+    navigationRef.current = navigation;
+    return () => {
+      navigation.detach();
+      navigationRef.current = null;
+    };
+  }, [chartReady, drag.isDragging]);
 
-    const key = candleChannelKey(server, connector, pair, interval, poolAddress);
+  // A live tick uses series.update below. Structural history changes use
+  // setData, preserving the viewport at the instant the new page arrives.
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chartReady || !chart || !series) return;
+    const previous = lastDrawRef.current?.channelKey === channelKey ? lastDrawRef.current : null;
+    // Discard gestures from the previous request once, not on every arriving
+    // page. New gestures on the retained chart belong to the pending preset.
+    if (observedRequestRef.current !== viewKey) {
+      navigationRef.current?.cancel();
+      if (presentationFrameRef.current !== null) cancelAnimationFrame(presentationFrameRef.current);
+      presentationFrameRef.current = null;
+      observedRequestRef.current = viewKey;
+      if (!previous) {
+        lastDrawRef.current = null;
+        lastZoomedIdRef.current = null;
+        cursorPriceRef.current = null;
+        crosshairTimeRef.current = null;
+        measureAnchorRef.current = null;
+        timeAxisLabelRef.current?.hide();
+        for (const element of [tooltipRef.current, measureBadgeRef.current, measureBoxRef.current]) {
+          if (element) element.style.display = "none";
+        }
+      }
+    } else navigationRef.current?.flush();
+    if (!history.initialComplete) return;
+
+    const reset = !previous || previous.key !== viewKey;
+    if (!candles.length) {
+      if (reset || previous.count) {
+        if (presentationFrameRef.current !== null) cancelAnimationFrame(presentationFrameRef.current);
+        presentationFrameRef.current = null;
+        series.setData([]);
+        lastDrawRef.current = { channelKey, key: viewKey, first: 0, last: 0, count: 0 };
+        setPresentation({ channelKey, first: null });
+      }
+      return;
+    }
     const first = candles[0].timestamp;
-    const prevSig = lastSetDataSigRef.current;
-    const [prevKey, prevRangeStr, prevFirstStr, prevLenStr] = prevSig.split("|");
-    const prevFirst = Number(prevFirstStr);
-    const prevLen = Number(prevLenStr);
+    const last = candles[candles.length - 1].timestamp;
+    const structural = reset || first !== previous.first || candles.length < previous.count ||
+      candles.length > previous.count + 1 ||
+      (candles.length !== previous.count && last <= previous.last);
+    const fit = !previous?.count || (reset && manualViewRef.current !== viewKey);
 
-    // lightweight-charts series.update() only handles the last bar or a single
-    // newer appended bar. So a full setData() is only required when:
-    //   • first load for this chart instance (no prior signature), or
-    //   • the channel key changed (pair/interval/connector/server switch), or
-    //   • the range changed — a shorter one drops bars from the front, which
-    //     update() can't do any more than it can insert them, or
-    //   • the earliest candle moved back in time, i.e. older history was
-    //     prepended (REST backfill) — update() can't insert before the data.
-    // A plain live tick keeps the same key and earliest timestamp (last-bar
-    // update) or grows the count by appending a newer bar; both are already
-    // handled incrementally by the candleStore listener below, so we skip the
-    // expensive map + setData over the whole array on every tick.
-    const isFirstLoad = prevSig === "";
-    const keyChanged = prevKey !== key;
-    const rangeChanged = Number(prevRangeStr) !== lookbackSeconds;
-    const historyPrepended = candles.length > prevLen && first < prevFirst;
-    const needsFullReset = isFirstLoad || keyChanged || rangeChanged || historyPrepended;
-
-    lastSetDataSigRef.current = `${key}|${lookbackSeconds}|${first}|${candles.length}`;
-
-    if (!needsFullReset) return;
-
-    const mapped = candles.map((c) => ({
-      time: c.timestamp as import("lightweight-charts").UTCTimestamp,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-    seriesRef.current.setData(mapped);
-
-    // Every full render is a new picture — a market, a range, or the history a
-    // backfill just brought in — so the view fits it. Live ticks never get here.
-    chartRef.current?.timeScale().fitContent();
-  }, [candles, chartReady, server, connector, pair, interval, poolAddress, lookbackSeconds]);
+    if (structural) {
+      const change = () => series.setData(candles.map((c) => ({
+        time: c.timestamp as import("lightweight-charts").UTCTimestamp,
+        open: c.open, high: c.high, low: c.low, close: c.close,
+      })));
+      if (previous?.count && !fit && presentationFrameRef.current === null) {
+        preserveChartViewport(chart, Math.max(previous.first, first), change);
+      }
+      else change();
+    }
+    lastDrawRef.current = { channelKey, key: viewKey, first, last, count: candles.length };
+    if (fit) {
+      chart.timeScale().fitContent();
+      // The library applies fitContent in its next draw frame. Until then its
+      // getters still report the old range; restoring it would cancel the fit.
+      // Reveal the first chart only after that frame has applied the full view.
+      if (presentationFrameRef.current !== null) cancelAnimationFrame(presentationFrameRef.current);
+      presentationFrameRef.current = requestAnimationFrame(() => {
+        presentationFrameRef.current = null;
+        const displayed = lastDrawRef.current;
+        if (displayed?.key === viewKey && activeChannelRef.current === channelKey) {
+          setPresentation({ channelKey, first: displayed.first });
+        }
+      });
+    } else if (presentationFrameRef.current === null) {
+      setPresentation((current) => current?.channelKey === channelKey && current.first === first
+        ? current : { channelKey, first });
+    }
+  }, [candles, chartReady, channelKey, viewKey, history.initialComplete]);
 
   // ── Real-time last candle update via candle store listener ──
   useEffect(() => {
@@ -612,8 +682,11 @@ export function TradeChart({
     const key = candleChannelKey(server, connector, pair, interval, poolAddress);
 
     const removeListener = candleStore.onUpdate(key, (updated) => {
-      if (!seriesRef.current || !updated.length) return;
+      const displayed = lastDrawRef.current;
+      if (!seriesRef.current || !updated.length || activeChannelRef.current !== key ||
+        displayed?.channelKey !== key || !displayed.count) return;
       const last = updated[updated.length - 1];
+      if (last.timestamp < displayed.last) return;
       seriesRef.current.update({
         time: last.timestamp as import("lightweight-charts").UTCTimestamp,
         open: last.open,
@@ -790,171 +863,181 @@ export function TradeChart({
     const mod = chartModuleRef.current;
     if (!chart || !mod) return;
 
-    for (const s of overlaySeriesRef.current) {
-      try { chart.removeSeries(s); } catch { /* ok */ }
-    }
-    overlaySeriesRef.current = [];
-
-    if (series) {
-      for (const pl of overlayPriceLinesRef.current) {
-        try { series.removePriceLine(pl); } catch { /* ok */ }
+    const change = () => {
+      for (const s of overlaySeriesRef.current) {
+        try { chart.removeSeries(s); } catch { /* ok */ }
       }
-    }
-    overlayPriceLinesRef.current = [];
+      overlaySeriesRef.current = [];
 
-    if (!filteredOverlays?.length) return;
-
-    const hasSelection = !!selectedExecutorId;
-    const isMulti = filteredOverlays.length > 1;
-
-    filteredOverlays.forEach((overlay, idx) => {
-      const isSelectedOverlay = hasSelection && overlay.executorId === selectedExecutorId;
-      const isDimmed = hasSelection && !isSelectedOverlay;
-      // When selected: use bright color and thicker lines; when dimmed: reduce opacity
-      const baseColor = isMulti ? getExecutorColor(idx, overlay.pnl) : undefined;
-      const dimAlpha = 0.2;
-
-      function applyDim(c: string): string {
-        if (!isDimmed) return c;
-        // Add alpha to hex colors
-        if (c.startsWith("#") && c.length === 7) return c + "33";
-        if (c.startsWith("#") && c.length === 4) return c + "3";
-        if (c.startsWith("rgba")) return c.replace(/[\d.]+\)$/, `${dimAlpha})`);
-        return c;
+      if (series) {
+        for (const pl of overlayPriceLinesRef.current) {
+          try { series.removePriceLine(pl); } catch { /* ok */ }
+        }
       }
+      overlayPriceLinesRef.current = [];
 
-      const box = overlay.gridBox;
-      if (box) {
-        const boxColor = applyDim(baseColor ?? box.color);
-        const lineW = (isSelectedOverlay ? 3 : 2) as import("lightweight-charts").LineWidth;
-        const t1 = box.startTime > 1e12 ? Math.floor(box.startTime / 1000) : box.startTime;
-        const t2 = box.endTime > 1e12 ? Math.floor(box.endTime / 1000) : box.endTime;
-        type TS = import("lightweight-charts").UTCTimestamp;
+      if (lastDrawRef.current?.channelKey !== channelKey || !lastDrawRef.current.count || !filteredOverlays?.length) return;
 
-        const span = t2 - t1;
-        if (span < 4) {
-          const seg = chart.addSeries(mod.LineSeries, {
-            color: boxColor, lineWidth: lineW,
-            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-          });
-          seg.setData([
-            { time: t1 as TS, value: box.startPrice },
-            { time: (t1 + 1) as TS, value: box.endPrice },
-          ]);
-          overlaySeriesRef.current.push(seg);
+      const hasSelection = !!selectedExecutorId;
+      const isMulti = filteredOverlays.length > 1;
+
+      filteredOverlays.forEach((overlay, idx) => {
+        const isSelectedOverlay = hasSelection && overlay.executorId === selectedExecutorId;
+        const isDimmed = hasSelection && !isSelectedOverlay;
+        // When selected: use bright color and thicker lines; when dimmed: reduce opacity
+        const baseColor = isMulti ? getExecutorColor(idx, overlay.pnl) : undefined;
+        const dimAlpha = 0.2;
+
+        function applyDim(c: string): string {
+          if (!isDimmed) return c;
+          // Add alpha to hex colors
+          if (c.startsWith("#") && c.length === 7) return c + "33";
+          if (c.startsWith("#") && c.length === 4) return c + "3";
+          if (c.startsWith("rgba")) return c.replace(/[\d.]+\)$/, `${dimAlpha})`);
+          return c;
+        }
+
+        const box = overlay.gridBox;
+        if (box) {
+          const boxColor = applyDim(baseColor ?? box.color);
+          const lineW = (isSelectedOverlay ? 3 : 2) as import("lightweight-charts").LineWidth;
+          const t1 = box.startTime > 1e12 ? Math.floor(box.startTime / 1000) : box.startTime;
+          const t2 = box.endTime > 1e12 ? Math.floor(box.endTime / 1000) : box.endTime;
+          type TS = import("lightweight-charts").UTCTimestamp;
+
+          const span = t2 - t1;
+          if (span < 4) {
+            const seg = chart.addSeries(mod.LineSeries, {
+              color: boxColor, lineWidth: lineW,
+              priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+            });
+            seg.setData([
+              { time: t1 as TS, value: box.startPrice },
+              { time: (t1 + 1) as TS, value: box.endPrice },
+            ]);
+            overlaySeriesRef.current.push(seg);
+            return;
+          }
+
+          try {
+            const top = chart.addSeries(mod.LineSeries, {
+              color: boxColor, lineWidth: lineW,
+              priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+            });
+            top.setData([
+              { time: t1 as TS, value: box.endPrice },
+              { time: t2 as TS, value: box.endPrice },
+            ]);
+            overlaySeriesRef.current.push(top);
+
+            // Solid, matching the top edge — both are grid bounds.
+            const bottom = chart.addSeries(mod.LineSeries, {
+              color: boxColor, lineWidth: lineW,
+              priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+            });
+            bottom.setData([
+              { time: t1 as TS, value: box.startPrice },
+              { time: t2 as TS, value: box.startPrice },
+            ]);
+            overlaySeriesRef.current.push(bottom);
+
+            const left = chart.addSeries(mod.LineSeries, {
+              color: boxColor, lineWidth: 1,
+              priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+            });
+            left.setData([
+              { time: t1 as TS, value: box.startPrice },
+              { time: (t1 + 1) as TS, value: box.endPrice },
+            ]);
+            overlaySeriesRef.current.push(left);
+
+            const right = chart.addSeries(mod.LineSeries, {
+              color: boxColor, lineWidth: 1,
+              priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+            });
+            right.setData([
+              { time: (t2 - 1) as TS, value: box.endPrice },
+              { time: t2 as TS, value: box.startPrice },
+            ]);
+            overlaySeriesRef.current.push(right);
+
+            if (box.limitPrice) {
+              const limit = chart.addSeries(mod.LineSeries, {
+                color: applyDim(getThemeColors().red), lineWidth: 1, lineStyle: mod.LineStyle.Dotted,
+                priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+              });
+              limit.setData([
+                { time: t1 as TS, value: box.limitPrice },
+                { time: t2 as TS, value: box.limitPrice },
+              ]);
+              overlaySeriesRef.current.push(limit);
+            }
+          } catch { /* grid box rendering failed */ }
           return;
         }
 
-        try {
-          const top = chart.addSeries(mod.LineSeries, {
-            color: boxColor, lineWidth: lineW,
-            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-          });
-          top.setData([
-            { time: t1 as TS, value: box.endPrice },
-            { time: t2 as TS, value: box.endPrice },
-          ]);
-          overlaySeriesRef.current.push(top);
+        const seg = overlay.segment;
+        if (!seg) return;
 
-          // Solid, matching the top edge — both are grid bounds.
-          const bottom = chart.addSeries(mod.LineSeries, {
-            color: boxColor, lineWidth: lineW,
-            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-          });
-          bottom.setData([
-            { time: t1 as TS, value: box.startPrice },
-            { time: t2 as TS, value: box.startPrice },
-          ]);
-          overlaySeriesRef.current.push(bottom);
+        const segColor = applyDim(baseColor ?? seg.color);
+        const entryT = seg.entryTime > 1e12 ? Math.floor(seg.entryTime / 1000) : seg.entryTime;
+        const exitT = seg.exitTime > 1e12 ? Math.floor(seg.exitTime / 1000) : seg.exitTime;
 
-          const left = chart.addSeries(mod.LineSeries, {
-            color: boxColor, lineWidth: 1,
-            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-          });
-          left.setData([
-            { time: t1 as TS, value: box.startPrice },
-            { time: (t1 + 1) as TS, value: box.endPrice },
-          ]);
-          overlaySeriesRef.current.push(left);
+        const isOrderActive = overlay.type === "order" && (overlay.status?.toLowerCase() === "running" || overlay.status?.toLowerCase() === "active");
+        const lineStyle = isOrderActive ? mod.LineStyle.Solid : mod.LineStyle.Dashed;
+        const lineW = (isSelectedOverlay ? 3 : 2) as import("lightweight-charts").LineWidth;
 
-          const right = chart.addSeries(mod.LineSeries, {
-            color: boxColor, lineWidth: 1,
-            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-          });
-          right.setData([
-            { time: (t2 - 1) as TS, value: box.endPrice },
-            { time: t2 as TS, value: box.startPrice },
-          ]);
-          overlaySeriesRef.current.push(right);
-
-          if (box.limitPrice) {
-            const limit = chart.addSeries(mod.LineSeries, {
-              color: applyDim(getThemeColors().red), lineWidth: 1, lineStyle: mod.LineStyle.Dotted,
-              priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-            });
-            limit.setData([
-              { time: t1 as TS, value: box.limitPrice },
-              { time: t2 as TS, value: box.limitPrice },
-            ]);
-            overlaySeriesRef.current.push(limit);
-          }
-        } catch { /* grid box rendering failed */ }
-        return;
-      }
-
-      const seg = overlay.segment;
-      if (!seg) return;
-
-      const segColor = applyDim(baseColor ?? seg.color);
-      const entryT = seg.entryTime > 1e12 ? Math.floor(seg.entryTime / 1000) : seg.entryTime;
-      const exitT = seg.exitTime > 1e12 ? Math.floor(seg.exitTime / 1000) : seg.exitTime;
-
-      const isOrderActive = overlay.type === "order" && (overlay.status?.toLowerCase() === "running" || overlay.status?.toLowerCase() === "active");
-      const lineStyle = isOrderActive ? mod.LineStyle.Solid : mod.LineStyle.Dashed;
-      const lineW = (isSelectedOverlay ? 3 : 2) as import("lightweight-charts").LineWidth;
-
-      const lineSeries = chart.addSeries(mod.LineSeries, {
-        color: segColor, lineWidth: lineW, lineStyle,
-        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        const lineSeries = chart.addSeries(mod.LineSeries, {
+          color: segColor, lineWidth: lineW, lineStyle,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        lineSeries.setData([
+          { time: entryT as import("lightweight-charts").UTCTimestamp, value: seg.entryPrice },
+          { time: exitT as import("lightweight-charts").UTCTimestamp, value: seg.exitPrice },
+        ]);
+        overlaySeriesRef.current.push(lineSeries);
       });
-      lineSeries.setData([
-        { time: entryT as import("lightweight-charts").UTCTimestamp, value: seg.entryPrice },
-        { time: exitT as import("lightweight-charts").UTCTimestamp, value: seg.exitPrice },
-      ]);
-      overlaySeriesRef.current.push(lineSeries);
-    });
 
-    // Full-width price lines for active or selected executor
-    if (series && filteredOverlays?.length) {
-      const styleMap: Record<string, number> = {
-        solid: mod.LineStyle.Solid,
-        dashed: mod.LineStyle.Dashed,
-        dotted: mod.LineStyle.Dotted,
-      };
-      for (const overlay of filteredOverlays) {
-        const isRunning = overlay.status?.toLowerCase() === "running" || overlay.status?.toLowerCase() === "active";
-        const isSelectedOverlay = overlay.executorId === selectedExecutorId;
-        // Show price lines for active executors, and always for the selected one
-        if (!isRunning && !isSelectedOverlay) continue;
-        for (const pl of overlay.priceLines) {
-          if (pl.price <= 0) continue;
-          const priceLine = series.createPriceLine({
-            price: pl.price,
-            color: pl.color,
-            lineWidth: (pl.lineWidth ?? 1) as import("lightweight-charts").LineWidth,
-            lineStyle: styleMap[pl.style] ?? mod.LineStyle.Solid,
-            axisLabelVisible: true,
-            title: pl.label,
-          });
-          overlayPriceLinesRef.current.push(priceLine);
+      // Full-width price lines for active or selected executor
+      if (series && filteredOverlays?.length) {
+        const styleMap: Record<string, number> = {
+          solid: mod.LineStyle.Solid,
+          dashed: mod.LineStyle.Dashed,
+          dotted: mod.LineStyle.Dotted,
+        };
+        for (const overlay of filteredOverlays) {
+          const isRunning = overlay.status?.toLowerCase() === "running" || overlay.status?.toLowerCase() === "active";
+          const isSelectedOverlay = overlay.executorId === selectedExecutorId;
+          // Show price lines for active executors, and always for the selected one
+          if (!isRunning && !isSelectedOverlay) continue;
+          for (const pl of overlay.priceLines) {
+            if (pl.price <= 0) continue;
+            const priceLine = series.createPriceLine({
+              price: pl.price,
+              color: pl.color,
+              lineWidth: (pl.lineWidth ?? 1) as import("lightweight-charts").LineWidth,
+              lineStyle: styleMap[pl.style] ?? mod.LineStyle.Solid,
+              axisLabelVisible: true,
+              title: pl.label,
+            });
+            overlayPriceLinesRef.current.push(priceLine);
+          }
         }
       }
-    }
-  }, [filteredOverlays, selectedExecutorId, chartReady]);
+    };
+    navigationRef.current?.flush();
+    const displayed = lastDrawRef.current;
+    const anchor = displayed?.channelKey === channelKey && displayed.count ? displayed.first : undefined;
+    // Overlay endpoints are independent time points. Preserve again around
+    // their rebuild, after the candle prepend has restored its own anchor.
+    if (anchor !== undefined && presentationFrameRef.current === null) preserveChartViewport(chart, anchor, change);
+    else change();
+  }, [filteredOverlays, selectedExecutorId, chartReady, channelKey, viewKey, history.initialComplete]);
 
   // ── Zoom to selected executor (one-time action) ──
   useEffect(() => {
     if (!selectedExecutorId || !chartRef.current || !filteredOverlays?.length) return;
+    if (lastDrawRef.current?.channelKey !== channelKey || !lastDrawRef.current.count) return;
     // Only zoom once per selection — don't re-zoom on overlay data refresh
     if (lastZoomedIdRef.current === selectedExecutorId) return;
     const overlay = filteredOverlays.find((o) => o.executorId === selectedExecutorId);
@@ -967,11 +1050,16 @@ export function TradeChart({
     const end = toSec(overlay.timeRange.end);
     const padding = Math.max((end - start) * 0.3, 300);
 
+    navigationRef.current?.cancel();
+    if (manualViewRef.current !== viewKey) {
+      manualViewRef.current = viewKey;
+      onCustomRange?.();
+    }
     chartRef.current.timeScale().setVisibleRange({
       from: (start - padding) as import("lightweight-charts").UTCTimestamp,
       to: (end + padding) as import("lightweight-charts").UTCTimestamp,
     });
-  }, [selectedExecutorId, filteredOverlays]);
+  }, [selectedExecutorId, filteredOverlays, chartReady, channelKey, viewKey, history.initialComplete, onCustomRange]);
 
   // Reset zoom tracking when executor is deselected
   useEffect(() => {
@@ -1059,6 +1147,7 @@ export function TradeChart({
   // consumed, so the drop cannot re-fire the pick or the executor deselect;
   // inside it the press was a click and every branch below runs as before.
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (!hasPresentation) return;
     drag.onPointerDown(e);
     pointerDownRef.current = {
       x: e.clientX,
@@ -1069,6 +1158,10 @@ export function TradeChart({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (!hasPresentation) {
+      pointerDownRef.current = null;
+      return;
+    }
     // A grab that actually travelled owns this release outright; one that never
     // left the slop was a click after all, and falls through untouched.
     if (drag.onPointerUp(e)) {
@@ -1104,7 +1197,7 @@ export function TradeChart({
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {activePickField && (
         <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5">
           <p className="text-[10px] text-[var(--color-text-muted)]">
@@ -1118,24 +1211,50 @@ export function TradeChart({
           </span>
         </div>
       )}
-      <div className="relative flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1 bg-[var(--color-surface)]" role="region" aria-label="Candlestick chart" aria-busy={history.status === "loading" || history.status === "waiting" || !chartReady}>
         <div
           ref={containerRef}
           className="absolute inset-0"
-          style={{ cursor: activePickField ? "crosshair" : "default" }}
+          aria-hidden={!hasPresentation}
+          style={{
+            cursor: activePickField ? "crosshair" : "default",
+            visibility: hasPresentation ? "visible" : "hidden",
+            opacity: hasPresentation ? 1 : 0,
+            pointerEvents: hasPresentation ? undefined : "none",
+          }}
           onPointerDown={handlePointerDown}
           onPointerMove={drag.onPointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={drag.onPointerCancel}
         />
+        {showHistoryStatus && (
+          <div role="status" className={`absolute z-10 flex items-center gap-2 text-[11px] text-[var(--color-text-muted)] ${hasPresentation
+            ? "left-2 top-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-2 py-1"
+            : "inset-0 justify-center"}`}>
+            {(history.status === "loading" || history.status === "ready") && <span>{hasPresentation && !history.initialComplete ? "Loading selected range…" : "Loading history…"}</span>}
+            {history.status === "waiting" && <span>Rate limited · history will resume shortly</span>}
+            {history.status === "error" && <>
+              <span>{hasPresentation && !history.initialComplete ? "Could not load selected range · showing previous range" : "Could not load history"}</span>
+              <button type="button" className="text-[var(--color-primary)] hover:underline" onClick={history.retry}>Retry</button>
+            </>}
+            {history.status === "empty" && <>
+              <span>No candles in this period</span>
+              <button type="button" className="text-[var(--color-primary)] hover:underline" onClick={() => {
+                manualViewRef.current = viewKey;
+                onCustomRange?.();
+                history.loadEarlier();
+              }}>Load earlier</button>
+            </>}
+          </div>
+        )}
         {/* Measure box overlay — pure DOM, never touches chart series */}
         <div
           ref={measureBoxRef}
           className="pointer-events-none absolute z-10"
-          style={{ display: "none", border: "1px dashed", borderRadius: 2 }}
+          style={{ display: "none", visibility: hasPresentation ? "visible" : "hidden", border: "1px dashed", borderRadius: 2 }}
         />
         {/* Measure-tool and drag discoverability hint */}
-        <div className="pointer-events-none absolute bottom-1 left-2 z-10 text-[9px] text-[var(--color-text-muted)] opacity-60">
+        <div className="pointer-events-none absolute bottom-1 left-2 z-10 text-[9px] text-[var(--color-text-muted)] opacity-60" style={{ visibility: hasPresentation ? "visible" : "hidden" }}>
           ⇧+click: measure range · drag a price line to move it
         </div>
         {/* Executor tooltip overlay — rendered via portal to escape overflow-hidden */}
@@ -1144,6 +1263,7 @@ export function TradeChart({
             ref={tooltipRef}
             style={{
               display: "none",
+              visibility: hasPresentation ? "visible" : "hidden",
               position: "fixed",
               top: 0,
               left: 0,
@@ -1169,6 +1289,7 @@ export function TradeChart({
             ref={measureBadgeRef}
             style={{
               display: "none",
+              visibility: hasPresentation ? "visible" : "hidden",
               position: "fixed",
               top: 0,
               left: 0,

@@ -413,7 +413,7 @@ describe("the panel", () => {
     // destination rather than drawn as a maximize glyph.
     await renderPanel();
 
-    const doors = [...container.querySelectorAll("a")];
+    const doors = [...document.querySelectorAll("a")];
     expect(doors).toHaveLength(1);
     expect(doors[0].getAttribute("href")).toBe("/agents/orca");
     expect(doors[0].textContent).toContain("Workspace");
@@ -438,7 +438,7 @@ describe("the panel", () => {
 
     await renderPanel({ wiring: <span data-testid="host-wiring">wired</span> });
 
-    const node = container.querySelector('[data-testid="host-wiring"]');
+    const node = document.querySelector('[data-testid="host-wiring"]');
     expect(node).not.toBeNull();
     // In the bar beside the one door out, not in the sections' body.
     expect(node!.parentElement!.querySelector("a")!.textContent).toContain(
@@ -460,11 +460,11 @@ describe("the panel", () => {
     const reported: boolean[] = [];
     await renderPanel({ onDirtyChange: (d) => reported.push(d) });
 
-    const edit = [...container.querySelectorAll<HTMLElement>("button")].find(
+    const edit = [...document.querySelectorAll<HTMLElement>("button")].find(
       (b) => b.textContent?.trim() === "Edit",
     )!;
     await click(edit);
-    const textarea = container.querySelector("textarea")!;
+    const textarea = document.querySelector("textarea")!;
     const setter = Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
       "value",

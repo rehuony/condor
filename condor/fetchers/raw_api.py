@@ -87,7 +87,7 @@ async def request(
     params: Optional[dict[str, Any]] = None,
     json: Optional[dict[str, Any]] = None,
     timeout: Optional[Any] = None,
-    unsupported: type[Exception] = ApiRouteUnsupported,
+    unsupported: Optional[type[Exception]] = ApiRouteUnsupported,
 ) -> Any:
     """One raw authenticated request, with upstream's status preserved on failure.
 
@@ -101,7 +101,7 @@ async def request(
         timeout: Per-request override; the session's own timeout applies when omitted.
         unsupported: Exception class raised for a 404 or an unreachable client shape.
             Callers with their own capability exception pass it so their existing
-            ``except`` clauses keep working.
+            ``except`` clauses keep working. Pass None to preserve a resource 404.
 
     Raises:
         unsupported: The route is not served here, or this client cannot reach it.
@@ -110,7 +110,7 @@ async def request(
     """
     reachable = endpoint(client)
     if reachable is None:
-        raise unsupported(f"this client cannot reach {path}")
+        raise (unsupported or ApiRouteUnsupported)(f"this client cannot reach {path}")
     session, base_url = reachable
 
     kwargs: dict[str, Any] = {}
@@ -125,7 +125,7 @@ async def request(
     # existing caller and every test double already speaks.
     send = getattr(session, method.lower())
     async with send(f"{base_url}{path}", **kwargs) as response:
-        if response.status == 404:
+        if response.status == 404 and unsupported is not None:
             raise unsupported(f"{path} is not served by this API version")
         if not response.ok:
             raise aiohttp.ClientResponseError(

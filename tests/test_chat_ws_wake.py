@@ -108,8 +108,15 @@ def test_a_woken_turn_produces_the_frames_a_typed_turn_produces(ws_env):
     typed_frames, woken_frames, woke, slot_id = asyncio.run(scenario())
 
     assert woke is True
+    # Transcript invalidations also reach the attached tab. They are addressed
+    # by conversation and do not alter the existing streamed answer contract.
+    woken_frames = [f for f in woken_frames if f["event"] != "conversation_changed"]
     assert woken_frames == typed_frames
-    assert [f["event"] for f in woken_frames] == ["text_chunk", "prompt_done"]
+    assert [f["event"] for f in woken_frames] == [
+        "heartbeat",
+        "text_chunk",
+        "prompt_done",
+    ]
     # Addressed like every other chat event, so the client routes it into the
     # conversation it belongs to rather than into whichever is on screen.
     assert {f["slot_id"] for f in woken_frames} == {slot_id}
@@ -132,7 +139,11 @@ def test_every_open_tab_sees_the_woken_turn(ws_env):
 
     first, second = asyncio.run(scenario())
 
-    assert first.names() == ["text_chunk", "prompt_done"]
+    assert [name for name in first.names() if name != "conversation_changed"] == [
+        "heartbeat",
+        "text_chunk",
+        "prompt_done",
+    ]
     assert second.sent == first.sent
 
 

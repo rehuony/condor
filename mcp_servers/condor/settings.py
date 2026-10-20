@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 
-from mcp_servers._profiles import parse_profile_flags
+from mcp_servers._profiles import parse_execution_mode, parse_profile_flags
 
 # Imported for its ``load_dotenv()`` side effect as much as for the helper:
 # ``_parse_settings()`` runs at import, before anything else in the process
@@ -57,6 +57,7 @@ class Settings:
     # ACP seat, which cannot be handed an allowlist. Empty is the norm: an
     # install nobody has curated spawns exactly the argv it always did.
     muted_tools: tuple[str, ...] = ()
+    execution_mode: str = ""
 
     @property
     def specialist_slug(self) -> str:
@@ -153,6 +154,7 @@ def _parse_settings() -> Settings:
         ),
         tool_profile=tool_profile,
         muted_tools=muted_tools,
+        execution_mode=parse_execution_mode(),
     )
 
 

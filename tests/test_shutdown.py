@@ -623,6 +623,8 @@ def _engine_with_llm(running, positions_seq, tmp_path, monkeypatch, body):
 class _FakeLLM:
     """A model client that runs ``script(callback)`` as its one prompt."""
 
+    enforces_tool_permissions = True
+
     def __init__(self, permission_callback, script=None):
         self.permission_callback = permission_callback
         self.script = script
@@ -813,21 +815,64 @@ def test_llm_cleanup_failure_does_not_block_winddown(tmp_path, monkeypatch):
 def test_winddown_survives_a_positions_fetch_failure_during_verify(
     tmp_path, monkeypatch
 ):
-    """_verify_and_retry calls the positions fetch unguarded, so it must go
-    through the non-strict fetcher: a failed request reads as no positions and
-    the winddown still completes instead of propagating ([[ARCH-682]])."""
+    """A failed read must finish teardown but never report a verified flat book."""
     running = [{"id": "e_perp", "connector": "binance_perpetual"}]
     engine, client, notes = _fake_engine(running, [[]], monkeypatch, tmp_path)
 
     async def boom(controller_id=None):
-        raise RuntimeError("positions endpoint down")
+        raise RuntimeError("positions endpoint down: http://private-api/secret")
 
     monkeypatch.setattr(client.executors, "get_positions_summary", boom)
     asyncio.run(run_shutdown(engine, "test breach"))
 
-    assert ("shutdown_done", "stopped=1, failures=0, verify=flat") in [
+    assert ("shutdown_failed", "stopped=1, failures=0, verify=unknown") in [
         (a, r) for a, r in engine.journal.actions
     ]
+    assert client.executors.stop_calls == [("e_perp", False)]
+    assert any("could NOT verify" in n for n in notes)
+    assert not any("complete" in n or "private-api" in n for n in notes)
+
+
+def test_winddown_does_not_report_flat_when_retry_verification_fails(
+    tmp_path, monkeypatch
+):
+    running = [{"id": "e_perp", "connector": "binance_perpetual"}]
+    stuck = [{"connector_name": "binance_perpetual", "trading_pair": "SOL-USDT"}]
+    engine, client, notes = _fake_engine(running, [stuck], monkeypatch, tmp_path)
+    reads = 0
+
+    async def positions(controller_id=None):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return {"positions": stuck}
+        raise RuntimeError("positions endpoint down")
+
+    monkeypatch.setattr(client.executors, "get_positions_summary", positions)
+    asyncio.run(run_shutdown(engine, "test breach"))
+
+    assert client.executors.stop_calls == [("e_perp", False), ("e_perp", False)]
+    assert any("could NOT verify" in n for n in notes)
+    assert not any("complete" in n for n in notes)
+    assert ("shutdown_failed", "stopped=1, failures=0, verify=unknown") in (
+        engine.journal.actions
+    )
+
+
+@pytest.mark.parametrize("response", [None, {"positions": None}, {"positions": [None]}])
+def test_winddown_does_not_report_flat_for_malformed_positions(
+    tmp_path, monkeypatch, response
+):
+    engine, client, notes = _fake_engine([], [[]], monkeypatch, tmp_path)
+
+    async def positions(controller_id=None):
+        return response
+
+    monkeypatch.setattr(client.executors, "get_positions_summary", positions)
+    asyncio.run(run_shutdown(engine, "test breach"))
+
+    assert any("could NOT verify" in n for n in notes)
+    assert not any("complete" in n for n in notes)
 
 
 # ── winddown reads only the executor list (PERF-641) ──

@@ -58,7 +58,7 @@ def test_notify_reaches_telegram_and_the_bell_once(store, known_users, monkeypat
     msg = "Agent scout.scalp_3 blocked: max drawdown"
     asyncio.run(engine_module.TickEngine._notify(_engine(), msg))
 
-    assert sent == [{"chat_id": OWNER, "text": msg}]
+    assert sent == [{"chat_id": OWNER, "text": msg, "disable_web_page_preview": True}]
     items = list_for(OWNER)
     assert len(items) == 1
     assert items[0].text == msg

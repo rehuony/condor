@@ -12,8 +12,10 @@ import json
 import os
 from types import SimpleNamespace
 
+import pytest
+
 from condor import setup_llm
-from condor.acp.client import ACPClient, advertised_models
+from condor.acp.client import ACPClient, advertised_models, resolve_model_id
 from condor.llm import readiness
 from condor.llm.readiness import MISSING, READY, UNVERIFIED, Readiness
 from utils import updater
@@ -101,6 +103,53 @@ def test_select_model_sends_nothing_when_already_on_it():
     client, sent = _client_with_fake_peer("opus")
     asyncio.run(client._select_model(CONFIG_OPTIONS_SESSION))
     assert sent == []
+    assert client.active_model_id == "opus[1m]"
+
+
+def test_explicit_version_does_not_match_a_different_version_or_family_alias():
+    models = [
+        {"modelId": "sonnet", "name": "Sonnet 5"},
+        {"modelId": "claude-sonnet-4-6-extended", "name": "Sonnet extended"},
+    ]
+    assert resolve_model_id("claude-sonnet-4-6", models) is None
+    assert resolve_model_id("sonnet", models) == "sonnet"
+
+
+def test_default_selection_keeps_the_advertised_model():
+    client, sent = _client_with_fake_peer("")
+    asyncio.run(client._select_model(CONFIG_OPTIONS_SESSION))
+    assert sent == []
+    assert client.active_model_id == "opus[1m]"
+
+
+def test_unavailable_explicit_model_is_an_error():
+    client, sent = _client_with_fake_peer("claude-sonnet-4-6")
+    with pytest.raises(RuntimeError, match="Requested model .* is not available"):
+        asyncio.run(client._select_model(CONFIG_OPTIONS_SESSION))
+    assert sent == []
+
+
+def test_rejected_model_switch_is_an_error():
+    client, _ = _client_with_fake_peer("sonnet")
+
+    async def reject(*args, **kwargs):
+        raise RuntimeError("Model access denied")
+
+    client._peer.send_request = reject
+    with pytest.raises(RuntimeError, match="Could not select requested model .*denied"):
+        asyncio.run(client._select_model(CONFIG_OPTIONS_SESSION))
+    assert client.active_model_id == "opus[1m]"
+
+
+def test_bridge_cannot_report_a_different_model_as_a_successful_switch():
+    client, _ = _client_with_fake_peer("sonnet")
+
+    async def substituted(*args, **kwargs):
+        return CONFIG_OPTIONS_SESSION
+
+    client._peer.send_request = substituted
+    with pytest.raises(RuntimeError, match="but the agent selected"):
+        asyncio.run(client._select_model(CONFIG_OPTIONS_SESSION))
     assert client.active_model_id == "opus[1m]"
 
 
@@ -237,7 +286,7 @@ def test_the_condor_update_upgrades_an_outdated_bridge(monkeypatch):
     ok, output = asyncio.run(updater.install_dependencies())
 
     assert ok
-    assert ran == [("uv", "sync"), ("sh", "-c", "npm up")]
+    assert ran == [("uv", "sync", "--locked"), ("sh", "-c", "npm up")]
     assert (
         "Upgraded the Claude bridge (was @zed-industries/claude-agent-acp 0.21.0)"
         in output
@@ -273,4 +322,4 @@ def test_a_current_bridge_is_left_alone_by_the_update(monkeypatch):
     monkeypatch.setattr(readiness, "outdated_bridge", lambda cmd: None)
 
     assert asyncio.run(updater.install_dependencies()) == (True, "synced")
-    assert ran == [("uv", "sync")]
+    assert ran == [("uv", "sync", "--locked")]

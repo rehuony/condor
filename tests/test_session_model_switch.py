@@ -195,6 +195,75 @@ def test_an_unbound_chat_still_gets_the_default_model(env):
     assert ws.started()["agent_key"] == FALLBACK
 
 
+def test_new_chat_without_explicit_model_uses_shared_user_preference(env, monkeypatch):
+    monkeypatch.setattr(
+        "condor.preferences.get_active_agent_key", lambda uid: "claude-acp:sonnet"
+    )
+    ws = _FakeWS()
+    asyncio.run(_handle_start_session(ws, USER.id, {}))
+    assert ws.started()["agent_key"] == "claude-acp:sonnet"
+
+
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("slug", ["", "brigado"])
+def test_failed_web_start_does_not_save_the_rejected_model(
+    env, monkeypatch, resume, slug
+):
+    written = _prefs(monkeypatch)
+
+    async def rejected(*args, **kwargs):
+        raise RuntimeError("Requested model is not available")
+
+    monkeypatch.setattr(runtime, "create_session", rejected)
+    ws = _FakeWS()
+    if resume:
+        conv = conversations.new_conversation(
+            USER.id, "web", agent_key=FALLBACK, agent_slug=slug
+        )
+        asyncio.run(
+            _handle_resume_conversation(
+                ws,
+                USER.id,
+                {"conversation_id": conv.id, "agent_key": "claude-acp:haiku"},
+            )
+        )
+    else:
+        asyncio.run(
+            _handle_start_session(
+                ws, USER.id, {"agent_slug": slug, "agent_key": "claude-acp:haiku"}
+            )
+        )
+    assert any("Requested model" in event.get("message", "") for event in ws.sent)
+    assert written == {}
+    assert AgentStore().get("brigado").agent_key == BRIGADO_MODEL
+
+
+def test_failed_model_switch_restores_chat_and_keeps_saved_model(env, monkeypatch):
+    written = _prefs(monkeypatch)
+    key, conversation_id = _live_session(agent_slug="brigado")
+
+    class RejectHaiku(_Client):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.model = kwargs.get("model")
+
+        async def start(self):
+            if self.model == "haiku":
+                raise RuntimeError("Requested model is not available")
+
+    monkeypatch.setattr("condor.acp.client.ACPClient", RejectHaiku)
+    res = _sessions_client().post(
+        f"/sessions/{key}/action",
+        json={"action": "switch", "agent_key": "claude-acp:haiku"},
+    )
+    assert res.status_code == 400
+    restored = asyncio.run(runtime.get_info(SessionKey.parse(key)))
+    assert restored.agent_key == FALLBACK
+    assert restored.conversation_id == conversation_id
+    assert AgentStore().get("brigado").agent_key == BRIGADO_MODEL
+    assert written == {}
+
+
 def test_a_deliberate_pick_still_overrides_the_bound_agent(env, monkeypatch):
     _prefs(monkeypatch)
     ws = _FakeWS()

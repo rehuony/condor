@@ -173,9 +173,10 @@ describe("AgentStrategies delete (READ-408)", () => {
     expect(deletes).toHaveLength(2);
     act(() => deletes[1].click());
 
-    const confirm = Array.from(container.querySelectorAll("button")).find(
+    // The confirmation is portalled to <body>, outside the mounted tree.
+    const confirm = Array.from(document.querySelectorAll('[role="dialog"] button')).find(
       (b) => b.textContent === "Delete",
-    );
+    ) as HTMLButtonElement | undefined;
     expect(confirm).toBeDefined();
     await act(async () => {
       confirm!.click();

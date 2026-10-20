@@ -1,14 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { Bug, Eye, Moon, Sun } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Eye, Moon, Sun } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ConnectKeysOverlay } from "@/components/ConnectKeysOverlay";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { RelaunchBanner } from "@/components/RelaunchBanner";
-import { ReportIssueDialog } from "@/components/ReportIssueDialog";
-import { TelemetryConsentBanner } from "@/components/TelemetryConsentBanner";
 import { ChatProvider } from "@/hooks/useChat";
 import { useCredentials } from "@/hooks/useCredentials";
 import { usePrefetchData } from "@/hooks/usePrefetchData";
@@ -56,7 +54,25 @@ function AppShellBody() {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { hasKeys, isLoading: keysLoading } = useCredentials();
-  const [reportOpen, setReportOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  const [navEdges, setNavEdges] = useState({ left: false, right: false });
+  const updateNavEdges = () => {
+    const nav = navRef.current;
+    if (nav) setNavEdges({ left: nav.scrollLeft > 1, right: nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 1 });
+  };
+  useEffect(() => {
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (nav && active) {
+      const item = active.getBoundingClientRect(), bounds = nav.getBoundingClientRect();
+      if (item.left < bounds.left) nav.scrollLeft -= bounds.left - item.left;
+      else if (item.right > bounds.right) nav.scrollLeft += item.right - bounds.right;
+    }
+    updateNavEdges();
+    const observer = new ResizeObserver(updateNavEdges);
+    if (nav) observer.observe(nav);
+    return () => observer.disconnect();
+  }, [pathname]);
 
   // A pathname is enough: every full-bleed screen is its own route.
   // `/agents/:slug` is an ordinary padded page, deliberately not matched here.
@@ -71,9 +87,9 @@ function AppShellBody() {
   // loops and journals, none of which is an exchange — so blocking it would
   // teach nobody anything. Matched exactly rather than by prefix, because `/`
   // prefixes every route in the app.
-  const exemptRoutes = ["/routines", "/settings"];
+  const exemptRoutes = ["/routines", "/settings", "/research/"];
   const showKeysOverlay =
-    server && !keysLoading && !hasKeys && pathname !== "/" &&
+    server && !keysLoading && hasKeys === false && pathname !== "/" &&
     !exemptRoutes.some((r) => pathname.startsWith(r));
 
   // ⌘K used to toggle the overlay panel. It now goes to the chat, so the
@@ -103,24 +119,24 @@ function AppShellBody() {
   useViewFacts(() => routeFacts(pathname, search, queryClient));
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-dvh min-w-0 flex-col">
       {/* Top bar */}
-      <header className="flex h-12 shrink-0 items-center border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 xl:px-4">
         {/* Left: logo + nav */}
-        <div className="flex items-center gap-6">
-          <NavLink to="/" className="flex items-center gap-2 font-bold tracking-tight">
+        <div className="contents">
+          <NavLink to="/" className="order-1 flex shrink-0 items-center gap-2 font-bold tracking-tight xl:mr-6">
             <img src="/condor_old.jpeg" alt="Condor" className="h-6 w-6 rounded-full" />
-            <span className="text-sm">Condor</span>
+            <span className="hidden text-sm sm:inline">Condor</span>
           </NavLink>
 
-          <nav className="flex items-center">
+          <nav ref={navRef} onScroll={updateNavEdges} aria-label="Main navigation" data-overflow-left={navEdges.left} data-overflow-right={navEdges.right} className="main-navigation order-3 flex w-full items-center overflow-x-auto pb-1 xl:order-2 xl:w-auto xl:pb-0">
             {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={to === "/"}
                 className={({ isActive }) =>
-                  `flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  `flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${
                     isActive
                       ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
                       : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
@@ -135,7 +151,7 @@ function AppShellBody() {
         </div>
 
         {/* Right: server selector + controls */}
-        <div className="ml-auto flex items-center gap-3">
+        <div className="order-2 ml-auto flex min-w-0 items-center gap-1 py-1 xl:order-3 xl:gap-3">
           <ServerSelector />
           <CurrencySelector />
 
@@ -146,14 +162,6 @@ function AppShellBody() {
                 only on the chat workspace — which is what makes the bell
                 update without a reload wherever the user is (FEAT-048). */}
             <NotificationBell />
-
-            <button
-              onClick={() => setReportOpen(true)}
-              className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]"
-              title="Report an issue"
-            >
-              <Bug className="h-4 w-4" />
-            </button>
 
             <button
               onClick={toggleTheme}
@@ -174,21 +182,16 @@ function AppShellBody() {
       </header>
 
       {/* An update landed but this process is still the old one, so the bundle
-          in the browser is ahead of the API answering it. Above `main` for the
-          same reason the consent strip is: every page needs it, and the chat
+          in the browser is ahead of the API answering it. Above `main` because
+          every page needs it, and the chat
           workspace owns its own scrolling. Renders nothing the rest of the
           time, which is nearly always. */}
       <RelaunchBanner />
 
-      {/* Asks once, for an install that has never answered (FEAT-023). Renders
-          nothing for everyone else, including on the chat workspace, which owns
-          its own scrolling — hence outside `main` rather than inside it. */}
-      <TelemetryConsentBanner />
-
       {/* Main content */}
       <main
-        className={`relative flex-1 ${
-          isFullBleed ? "overflow-hidden" : "overflow-auto p-6"
+        className={`relative min-h-0 min-w-0 flex-1 ${
+          isFullBleed ? "overflow-hidden" : "overflow-auto [scrollbar-gutter:stable] p-3 sm:p-6 max-md:pb-[calc(4.5rem+env(safe-area-inset-bottom))]"
         }`}
       >
         <ErrorBoundary resetKey={pathname + server}>
@@ -196,8 +199,6 @@ function AppShellBody() {
         </ErrorBoundary>
         {showKeysOverlay && <ConnectKeysOverlay />}
       </main>
-
-      <ReportIssueDialog open={reportOpen} onClose={() => setReportOpen(false)} />
 
       {/* The quick chat on every page but `/` (FEAT-059). Inside the
           provider, outside `main`, so it neither scrolls with the page nor

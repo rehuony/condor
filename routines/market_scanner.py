@@ -359,7 +359,14 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     try:
         top_pairs = await fetch_top_pairs(config.top_n, config.min_volume_usd)
     except Exception as e:
-        return f"Failed to fetch tickers: {e}"
+        reason = str(e) or (
+            "request timed out"
+            if isinstance(e, TimeoutError)
+            else "no details available"
+        )
+        raise RuntimeError(
+            f"Failed to fetch Binance tickers ({type(e).__name__}): {reason}"
+        ) from e
 
     if not top_pairs:
         return "No pairs found matching volume criteria."

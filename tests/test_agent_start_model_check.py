@@ -120,6 +120,15 @@ def test_runnable_keys_still_start(client, key):
     assert resp.json()["started"] is True
 
 
+@pytest.mark.parametrize("mode", ["loop", "run_once"])
+@pytest.mark.parametrize("key", ["codex", "claude-code", "gemini"])
+def test_unguarded_backend_is_refused_before_live_engine_creation(client, key, mode):
+    resp = _start(client, {"agent_key": key, "execution_mode": mode})
+    assert resp.status_code == 422
+    assert "before every tool call" in resp.json()["detail"]
+    assert FakeEngine.spawned == []
+
+
 def test_an_explicit_base_url_stands_in_for_the_saved_endpoint(client):
     """The engine lets ``model_base_url`` win over the named endpoint; so must the check."""
     resp = _start(
@@ -379,6 +388,7 @@ def test_notify_reaches_the_owner_of_a_dashboard_launch(tmp_path, monkeypatch):
     class Recorder:
         async def send_message(self, **kw):
             sent.append(kw)
+            return {"ok": True, "result": {"message_id": 1}}
 
     monkeypatch.setattr(
         "condor.agents.delegate.resolve_bot", lambda bot=None: Recorder()
@@ -386,7 +396,7 @@ def test_notify_reaches_the_owner_of_a_dashboard_launch(tmp_path, monkeypatch):
 
     asyncio.run(engine_module.TickEngine._notify(engine, "hello"))
 
-    assert sent == [{"chat_id": 42, "text": "hello"}]
+    assert [(item["chat_id"], item["text"]) for item in sent] == [(42, "hello")]
 
 
 # ── CORR-629: a model turn that ends in a failed PromptDone is a failed tick ──

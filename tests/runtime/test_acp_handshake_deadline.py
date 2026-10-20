@@ -77,6 +77,42 @@ def test_start_gives_up_on_an_agent_that_never_answers(monkeypatch):
     assert client._peer._pending == {}, "the abandoned handshake leaked a future"
 
 
+@pytest.mark.parametrize("failure", ["unavailable", "rejected", "timeout"])
+def test_model_selection_failure_stops_the_unready_process(monkeypatch, failure):
+    monkeypatch.setattr(timeouts, "TIMEOUTS", _fast(0.3))
+    client = ACPClient(
+        command="sleep 30", model="missing" if failure == "unavailable" else "sonnet"
+    )
+
+    async def request(method, params, stdin, *, timeout):
+        if method == "initialize":
+            return {}
+        if method == "session/new":
+            return {
+                "sessionId": "s",
+                "models": {
+                    "currentModelId": "opus",
+                    "availableModels": [{"modelId": "sonnet", "name": "Sonnet"}],
+                },
+            }
+        assert method == "session/set_model"
+        assert 0 < timeout <= 0.3
+        if failure == "timeout":
+            await asyncio.wait_for(asyncio.Event().wait(), timeout)
+        raise RuntimeError("Model access denied")
+
+    monkeypatch.setattr(client._peer, "send_request", request)
+
+    async def scenario():
+        error = TimeoutError if failure == "timeout" else RuntimeError
+        with pytest.raises(error):
+            await client.start()
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=10))
+    assert client._process is None
+    assert not client.alive
+
+
 class _NeverReadyAgent:
     """A pydantic-ai agent whose MCP servers never finish coming up."""
 

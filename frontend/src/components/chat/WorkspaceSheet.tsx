@@ -1,5 +1,5 @@
 import { Maximize2, Minimize2, PanelRightClose, X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { WORKSPACE_BAR } from "@/components/chat/workspaceBar";
@@ -37,6 +37,7 @@ export function WorkspaceSheet({
   onClose,
   bleed = false,
   defaultZen = false,
+  rememberZen = true,
   fullscreen = true,
   onFullscreen,
   paneProfile = "read",
@@ -74,6 +75,8 @@ export function WorkspaceSheet({
    * blanked the chat is the thing the pane exists to stop.
    */
   defaultZen?: boolean;
+  /** Restore and persist the overlay size between openings. */
+  rememberZen?: boolean;
   /**
    * Whether the whole window is on offer.
    *
@@ -87,11 +90,7 @@ export function WorkspaceSheet({
   /**
    * Where "full screen" actually goes, for content that has a page of its own.
    *
-   * The routine library is the same browser at `/routines`, with the sidebar
-   * and the runs strip the pane has no room for — so maximizing it is a door,
-   * not a bigger sheet: given this, the bar's Maximize and the `f` key call it
-   * instead of taking over the viewport. Zen stays the gesture for content
-   * that exists nowhere else.
+   * Optional navigation override for surfaces with a dedicated page.
    */
   onFullscreen?: () => void;
   /**
@@ -107,7 +106,7 @@ export function WorkspaceSheet({
   const pane = useWorkspacePane();
   const canSplit = !!pane?.canSplit;
   const [zen, setZen] = useState(() =>
-    !fullscreen || canSplit ? false : readZen(defaultZen),
+    !fullscreen || canSplit ? false : rememberZen ? readZen(defaultZen) : defaultZen,
   );
   /**
    * Whether somebody else is already in the pane.
@@ -123,6 +122,22 @@ export function WorkspaceSheet({
   const token = useId();
   const taken = !!pane?.holder && pane.holder !== token;
   const split = canSplit && !zen && !taken;
+
+  // Keep the portal target stable so resizing does not remount editors or readers.
+  const [host] = useState(() => document.createElement("div"));
+  const scrollPositions = useRef<Record<string, { node: HTMLElement; top: number; left: number }[]>>({});
+  useLayoutEffect(() => {
+    const parent = split ? pane?.host : document.body;
+    host.setAttribute("class", split
+      ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      : `fixed inset-0 z-50 flex ${zen ? "" : "items-center justify-center p-4"}`);
+    if (parent && host.parentElement !== parent) parent.appendChild(host);
+    for (const { node, top, left } of scrollPositions.current[zen ? "zen" : "window"] ?? []) {
+      node.scrollTop = top;
+      node.scrollLeft = left;
+    }
+  }, [host, split, pane?.host, pane?.open, zen]);
+  useLayoutEffect(() => () => host.remove(), [host]);
 
   // Hold the pane open for as long as this sheet is in it, so the outlet takes
   // width exactly while something occupies it.
@@ -144,6 +159,15 @@ export function WorkspaceSheet({
   // Esc closes, as it does for every overlay here. Not in the pane, though: the
   // chat beside it is live and Esc belongs to whatever has focus there.
   useEscapeKey(!split, onClose);
+
+  const toggleZen = useCallback(() => {
+    // A wider reader may no longer overflow; retain the old position for restore.
+    scrollPositions.current[zen ? "zen" : "window"] = Array.from(host.querySelectorAll<HTMLElement>("*"))
+      .filter((node) => node.scrollTop !== 0 || node.scrollLeft !== 0)
+      .map((node) => ({ node, top: node.scrollTop, left: node.scrollLeft }));
+    if (rememberZen && !canSplit) localStorage.setItem(SHEET_ZEN_KEY, zen ? "0" : "1");
+    setZen(!zen);
+  }, [host, zen, rememberZen, canSplit]);
 
   // `f` toggles, matching the report browser's own fullscreen key. Ignored while
   // a field has focus — the chat composer is still mounted beside the sheet.
@@ -167,21 +191,12 @@ export function WorkspaceSheet({
         e.preventDefault();
         return;
       }
-      setZen((z) => {
-        if (!canSplit) localStorage.setItem(SHEET_ZEN_KEY, z ? "0" : "1");
-        return !z;
-      });
+      toggleZen();
       e.preventDefault();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canSplit, fullscreen, onFullscreen, zen]);
-
-  const toggleZen = () =>
-    setZen((z) => {
-      if (!canSplit) localStorage.setItem(SHEET_ZEN_KEY, z ? "0" : "1");
-      return !z;
-    });
+  }, [fullscreen, onFullscreen, toggleZen, zen]);
 
   const chrome = (
     <>
@@ -190,7 +205,7 @@ export function WorkspaceSheet({
           read as one strip rather than as four borders at four heights. Only
           the inset varies: a windowed sheet floats and can afford `px-6`. */}
       <div
-        className={`${WORKSPACE_BAR} justify-between gap-3 ${
+        className={`${WORKSPACE_BAR} @max-[639px]/workspace-sheet:has-[[data-routine-picker]]:h-auto @max-[639px]/workspace-sheet:has-[[data-routine-picker]]:items-start @max-[639px]/workspace-sheet:has-[[data-routine-picker]]:gap-2 @max-[639px]/workspace-sheet:has-[[data-routine-picker]]:px-3 @max-[639px]/workspace-sheet:has-[[data-routine-picker]]:py-2 justify-between gap-3 pointer-coarse:h-auto pointer-coarse:min-h-14 pointer-coarse:py-1.5 ${
           zen || split ? "px-4" : "px-6"
         }`}
       >
@@ -215,7 +230,7 @@ export function WorkspaceSheet({
           {fullscreen && (
             <button
               onClick={onFullscreen && !zen ? onFullscreen : toggleZen}
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] pointer-coarse:h-11 pointer-coarse:w-11"
               title={
                 zen
                   ? canSplit
@@ -227,9 +242,9 @@ export function WorkspaceSheet({
               }
             >
               {zen ? (
-                <Minimize2 className="h-4 w-4" />
+                <Minimize2 className="h-3.5 w-3.5" />
               ) : (
-                <Maximize2 className="h-4 w-4" />
+                <Maximize2 className="h-3.5 w-3.5" />
               )}
             </button>
           )}
@@ -246,13 +261,13 @@ export function WorkspaceSheet({
               same picture. */}
           <button
             onClick={onClose}
-            className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] pointer-coarse:h-11 pointer-coarse:w-11"
             title={split ? "Close" : "Close (Esc)"}
           >
             {split ? (
-              <PanelRightClose className="h-4 w-4" />
+              <PanelRightClose className="h-3.5 w-3.5" />
             ) : (
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             )}
           </button>
         </div>
@@ -263,7 +278,7 @@ export function WorkspaceSheet({
       <div
         className={
           bleed
-            ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+            ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             : `min-h-0 flex-1 overflow-auto px-6 py-4 ${
                 zen || split ? "mx-auto w-full max-w-5xl" : ""
               }`
@@ -274,40 +289,27 @@ export function WorkspaceSheet({
     </>
   );
 
-  if (split) {
-    // No host on the very first render of a provider still mounting; the outlet
-    // is always mounted, so the next one has one.
-    if (!pane?.host) return null;
-    return createPortal(
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {chrome}
-      </div>,
-      pane.host,
-    );
-  }
-
-  return (
-    <div
-      className={`fixed inset-0 z-50 flex ${
-        zen ? "" : "items-center justify-center p-4"
-      }`}
-    >
-      {!zen && (
-        <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+  return createPortal(
+    <>
+      {!split && !zen && (
+        <div key="backdrop" className="absolute inset-0 bg-black/60" onClick={onClose} />
       )}
-      {/* Prose reads badly past a measure, so text stops at `5xl`. A report was
-          laid out for a page of its own and gets the whole window. */}
       <div
+        key="sheet"
+        data-workspace-sheet
         className={
-          zen
-            ? "relative z-10 flex h-full w-full flex-col bg-[var(--color-bg)]"
-            : `relative z-10 flex h-[90vh] w-[95vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl ${
-                bleed ? "" : "max-w-5xl"
-              }`
+          split
+            ? "@container/workspace-sheet flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            : zen
+              ? "@container/workspace-sheet relative z-10 flex h-full w-full min-w-0 flex-col overflow-hidden bg-[var(--color-bg)]"
+              : `@container/workspace-sheet relative z-10 flex h-[90dvh] w-[95vw] min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl ${
+                  bleed ? "" : "max-w-5xl"
+                }`
         }
       >
         {chrome}
       </div>
-    </div>
+    </>,
+    host,
   );
 }

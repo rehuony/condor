@@ -18,11 +18,13 @@ hold — the agent should never open a 2nd slot on the same pool or token.
 
 import asyncio
 import logging
+import math
 import re
 
 from pydantic import BaseModel, Field, field_validator
 from telegram.ext import ContextTypes
 
+from condor.pool_data import lp_provider_for_dex
 from config_manager import get_client
 from handlers.dex.geckoterminal import _extract_pool_data
 
@@ -32,6 +34,7 @@ CATEGORY = "Analysis"
 
 GECKO_NETWORK = "solana"  # GeckoTerminal network id
 CLMM_NETWORK = "solana-mainnet-beta"  # hummingbot-api CLMM network id
+_GECKO_DEX_IDS = {"meteora": "meteora", "orca": "orca", "raydium": "raydium-clmm"}
 _WINDOW_TO_FIELD = {"1h": "volume_1h", "6h": "volume_6h", "24h": "volume_24h"}
 _QUOTE_MINTS = {
     "SOL": "So11111111111111111111111111111111111111112",
@@ -51,7 +54,7 @@ class Config(BaseModel):
     ranking_window: str = Field(
         default="24h", description="Volume window for fees/TVL: 1h, 6h, or 24h"
     )
-    top_n: int = Field(default=10, description="Number of ranked pools to return")
+    top_n: int = Field(default=10, ge=1, description="Number of ranked pools to return")
     min_tvl_usd: float = Field(
         default=25000.0, description="Minimum pool TVL (reserve) in USD"
     )
@@ -85,7 +88,8 @@ async def _gecko_get(path: str, params: dict | None = None) -> dict:
 
 def _num(v, default=0.0) -> float:
     try:
-        return float(v)
+        value = float(v)
+        return value if math.isfinite(value) else default
     except (TypeError, ValueError):
         return default
 
@@ -99,45 +103,95 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     quote_mint = _QUOTE_MINTS.get(quote)
     if not quote_mint:
         return f"lp_scanner: unsupported quote_asset '{quote}' — supported: {', '.join(_QUOTE_MINTS)}."
-    venues = [v.strip().lower() for v in config.venues]
+    venues = list(dict.fromkeys(v.strip().lower() for v in config.venues))
+    unsupported = [v for v in venues if v not in _GECKO_DEX_IDS]
+    if unsupported or not venues:
+        raise ValueError(
+            f"Choose CLMM venues from {', '.join(_GECKO_DEX_IDS)}; received {venues}."
+        )
     vol_field = _WINDOW_TO_FIELD.get(config.ranking_window, "volume_24h")
     excl_pools = {p for p in config.exclude_pools if p}
     excl_mints = {m for m in config.exclude_mints if m}
 
     # 1. Source candidates from GeckoTerminal: global trending + top-per-venue.
     raw: list[dict] = []
-    try:
-        tasks = [_gecko_get(f"networks/{GECKO_NETWORK}/trending_pools")]
-        for v in venues:
-            tasks.append(
-                _gecko_get(f"networks/{GECKO_NETWORK}/dexes/{v}/pools", {"page": 1})
+    sources = [("trending page 1", f"networks/{GECKO_NETWORK}/trending_pools")]
+    sources.extend(
+        (
+            f"{_GECKO_DEX_IDS[v]} page 1",
+            f"networks/{GECKO_NETWORK}/dexes/{_GECKO_DEX_IDS[v]}/pools",
+        )
+        for v in venues
+    )
+    results = await asyncio.gather(
+        *[_gecko_get(path, {"page": 1}) for _, path in sources], return_exceptions=True
+    )
+    source_errors = {}
+    for (source, _), result in zip(sources, results):
+        if not isinstance(result, Exception) and (
+            not isinstance(result, dict) or not isinstance(result.get("data"), list)
+        ):
+            result = ValueError("GeckoTerminal returned an invalid pool list")
+        if isinstance(result, Exception):
+            source_errors[source] = (
+                f"{type(result).__name__}: {str(result) or 'request failed'}"
             )
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for r in results:
-            if isinstance(r, Exception):
-                logger.warning(f"lp_scanner: gecko source failed: {r}")
-                continue
-            raw.extend(r.get("data", []) or [])
-    except Exception as e:
-        return f"lp_scanner: failed to reach GeckoTerminal: {e}"
+            logger.warning("lp_scanner: %s failed: %s", source, result)
+        else:
+            raw.extend(result["data"])
+    succeeded_sources = len(sources) - len(source_errors)
+    if not succeeded_sources:
+        details = "; ".join(
+            f"{source}: {error}" for source, error in source_errors.items()
+        )
+        raise RuntimeError(
+            f"GeckoTerminal unavailable: all {len(sources)} LP sources failed. {details}"
+        )
+    coverage = (
+        f"Coverage: {succeeded_sources}/{len(sources)} GeckoTerminal sources succeeded."
+    )
+    warnings = []
+    if source_errors:
+        warnings.append(
+            f"Incomplete scan. {coverage} Failed sources: "
+            + "; ".join(f"{source}: {error}" for source, error in source_errors.items())
+        )
+
+    def with_warnings(text: str) -> str:
+        return "\n".join([*(f"Warning: {warning}" for warning in warnings), text])
 
     # 2. Parse via shared extractor, filter (quote, venue, TVL floor, excludes), dedupe by address.
     seen: set[str] = set()
     candidates: list[dict] = []
+    stages = {
+        stage: set()
+        for stage in ("unique", "CLMM", "quote", "TVL", "volume", "eligible")
+    }
+    invalid_rows = 0
     for p in raw:
-        d = _extract_pool_data(p)
+        try:
+            d = _extract_pool_data(p)
+        except (AttributeError, TypeError, ValueError):
+            invalid_rows += 1
+            continue
         addr = d.get("address") or ""
-        if not addr or addr in excl_pools:
+        if not addr:
+            invalid_rows += 1
             continue
-        base_sym = d.get("base_token_symbol") or ""
-        quote_sym = d.get("quote_token_symbol") or ""
-        if not base_sym or not quote_sym or "?" in (base_sym, quote_sym):
-            continue
-        dex = d.get("dex_id") or ""
         if addr in seen:
             continue
-        if dex not in venues:
+        stages["unique"].add(addr)
+        base_sym = d.get("base_token_symbol") or ""
+        quote_sym = d.get("quote_token_symbol") or ""
+        if not base_sym or not quote_sym or "?" in base_sym or "?" in quote_sym:
+            invalid_rows += 1
             continue
+        dex = d.get("dex_id") or ""
+        provider = lp_provider_for_dex(dex, GECKO_NETWORK)
+        connector = provider.split("/", 1)[0] if provider else ""
+        if connector not in venues:
+            continue
+        stages["CLMM"].add(addr)
         # Match the quote side by MINT and accept either GeckoTerminal orientation:
         # a SOL-quoted scan must also find pools Gecko lists as SOL/USDC (SOL as base).
         gecko_base_mint = d.get("base_token_address") or ""
@@ -151,17 +205,25 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
             price_usd = _num(d.get("quote_token_price_usd"))
         else:
             continue
+        stages["quote"].add(addr)
         tvl = _num(d.get("reserve_usd"))
         if tvl < config.min_tvl_usd:
             continue
+        stages["TVL"].add(addr)
         vol_window = _num(d.get(vol_field))
         if vol_window <= 0:
             continue
+        stages["volume"].add(addr)
+        if addr in excl_pools or gecko_base_mint in excl_mints:
+            continue
         seen.add(addr)
+        stages["eligible"].add(addr)
         candidates.append(
             {
                 "pool_address": addr,
                 "dex": dex,
+                "connector": connector,
+                "lp_provider": provider,
                 "base_symbol": base_sym,
                 "quote_symbol": quote_sym,
                 "trading_pair": f"{base_sym}-{quote_sym}",
@@ -173,12 +235,19 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
             }
         )
 
+    stage_summary = (
+        f"Stages: {len(raw)} source rows, "
+        + ", ".join(f"{len(addresses)} {stage}" for stage, addresses in stages.items())
+        + f" ({invalid_rows} invalid rows; {len(excl_pools)} pool and {len(excl_mints)} mint exclusions)."
+    )
     if not candidates:
-        return (
-            f"lp_scanner: no {quote}-quoted pools on {venues} passed the filters "
-            f"(TVL >= ${config.min_tvl_usd:,.0f}, window {config.ranking_window}, "
-            f"{len(excl_pools)} pools/{len(excl_mints)} mints excluded)."
+        outcome = (
+            "No pools returned by the successful sources."
+            if not raw
+            else f"No {quote}-quoted CLMM pools on {venues} passed the filters "
+            f"(TVL >= ${config.min_tvl_usd:,.0f}, window {config.ranking_window})."
         )
+        return with_warnings(f"lp_scanner: {outcome}\n{coverage}\n{stage_summary}")
 
     # Pre-rank by turnover (vol/TVL) so we only enrich the most promising ones.
     candidates.sort(
@@ -187,18 +256,29 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     shortlist = candidates[: max(config.top_n * 2, config.top_n)]
 
     # 3. Enrich top candidates with CLMM pool-info (fee %, bin/tick, price, mints).
+    enrichment_errors = {}
+    enrichment_rejections = {"invalid fee": 0, "excluded mint": 0, "missing mint": 0}
+
     async def _enrich(c: dict) -> dict | None:
         try:
             info = await client.gateway_clmm.get_pool_info(
-                connector=c["dex"], network=CLMM_NETWORK, pool_address=c["pool_address"]
+                connector=c["connector"],
+                network=CLMM_NETWORK,
+                pool_address=c["pool_address"],
             )
+            if not isinstance(info, dict):
+                raise ValueError("CLMM pool-info returned an invalid response")
         except Exception as e:
+            enrichment_errors[c["pool_address"]] = (
+                f"{type(e).__name__}: {str(e) or 'request failed'}"
+            )
             logger.info(
                 f"lp_scanner: pool-info failed for {c['dex']} {c['pool_address']}: {e}"
             )
             return None
         fee_pct = _num(info.get("fee_pct") or info.get("base_fee_percentage"))
         if fee_pct <= 0:
+            enrichment_rejections["invalid fee"] += 1
             return None
         # Resolve the MEMECOIN mint = the pool side that is NOT the quote asset.
         mints = [
@@ -210,9 +290,11 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         mints = [m for m in mints if m]
         memecoin_mint = next((m for m in mints if m != quote_mint), "")
         if not memecoin_mint:
-            memecoin_mint = c.get("gecko_base_mint") or (mints[0] if mints else "")
+            enrichment_rejections["missing mint"] += 1
+            return None
         # Diversification: drop tokens already held.
         if memecoin_mint and memecoin_mint in excl_mints:
+            enrichment_rejections["excluded mint"] += 1
             return None
         c["fee_pct"] = fee_pct
         c["bin_step_or_tick"] = info.get("bin_step") or info.get("tick_spacing")
@@ -224,14 +306,34 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
             f"{memecoin_mint}-{quote}" if memecoin_mint else c["trading_pair"]
         )
         c["fee_yield"] = (c["vol_window"] * (fee_pct / 100.0)) / max(c["tvl_usd"], 1.0)
-        c["lp_provider"] = f"{c['dex']}/clmm"
         return c
 
     enriched = [r for r in await asyncio.gather(*[_enrich(c) for c in shortlist]) if r]
+    enrichment_summary = (
+        f"Enrichment: {len(shortlist)} requested, {len(shortlist) - len(enrichment_errors)} responses, "
+        f"{len(enrichment_errors)} fetch failures, {len(enriched)} usable; rejected "
+        + ", ".join(
+            f"{count} {reason}" for reason, count in enrichment_rejections.items()
+        )
+        + "."
+    )
+    if enrichment_errors:
+        details = "; ".join(
+            f"{address}: {error}" for address, error in enrichment_errors.items()
+        )
+        if len(enrichment_errors) == len(shortlist):
+            raise RuntimeError(
+                with_warnings(
+                    f"CLMM pool-info unavailable: every candidate lookup failed. {details}\n{coverage}\n{stage_summary}\n{enrichment_summary}"
+                )
+            )
+        warnings.append(
+            f"Incomplete enrichment. {enrichment_summary} Failed pools: {details}"
+        )
     if not enriched:
-        return (
+        return with_warnings(
             f"lp_scanner: found {len(candidates)} {quote} pools but none usable after "
-            f"pool-info + excludes ({len(excl_mints)} mints held)."
+            f"successful pool-info checks and exclusions.\n{coverage}\n{stage_summary}\n{enrichment_summary}"
         )
 
     # 4. Final rank by fee yield.
@@ -280,6 +382,8 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     builder.source("routine", "lp_scanner").tags(
         ["lp", "solana", "clmm", quote.lower()]
     )
+    for warning in warnings:
+        builder.markdown(f"Warning: {warning}")
     builder.kpi("Candidates", str(len(candidates)))
     builder.kpi("Ranked", str(len(ranked)))
     builder.kpi("Top FeeYield", rows[0]["FeeYield"] if rows else "-")
@@ -290,14 +394,16 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         f"Excluded {len(excl_pools)} pools / {len(excl_mints)} held mints. "
         f"Use **MintPair** for the entry swap and lp_executor trading_pair."
     )
+    builder.markdown(f"{coverage}\n\n{stage_summary}\n\n{enrichment_summary}")
     builder.table(rows, columns)
     builder.manual_order()
     await builder.save()
 
-    summary = (
+    summary = with_warnings(
         f"Ranked {len(ranked)} {quote} CLMM pools by fee yield "
         f"(from {len(candidates)} candidates). Top: {rows[0]['Pair']} @ "
-        f"{rows[0]['Venue']} ({rows[0]['FeeYield']} yield). Use MintPair for swap + lp_executor."
+        f"{rows[0]['Venue']} ({rows[0]['FeeYield']} yield). Use MintPair for swap + lp_executor.\n"
+        f"{coverage}\n{stage_summary}\n{enrichment_summary}"
     )
 
     try:

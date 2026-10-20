@@ -448,8 +448,8 @@ async def _run_nested(routine, cfg, ctx, stack: tuple[str, ...], out: dict, agen
 
     Deliberately not ``_execute_and_record``: a nested call is an implementation
     detail of the caller, so it registers no dock instance, fires no post-run
-    hook, sends the user no message and stamps no separate telemetry run. That
-    split is what ``start_routine`` exists for.
+    hook and sends the user no message. That split is what ``start_routine``
+    exists for.
     """
     from condor.routine_store import _agent_of
 

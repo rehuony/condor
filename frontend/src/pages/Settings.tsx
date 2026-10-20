@@ -7,12 +7,13 @@ import {
   Network,
   Server,
   ServerCog,
-  Shield,
   ShieldCheck,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+
+import { SelectField } from "@/components/ui/select-field";
 
 import { AdminSettings } from "@/components/settings/AdminSettings";
 import { ApiKeysSettings } from "@/components/settings/ApiKeysSettings";
@@ -21,8 +22,6 @@ import { CustomProvidersSettings } from "@/components/settings/CustomProvidersSe
 import { GatewaySettings } from "@/components/settings/GatewaySettings";
 import { NotificationsSettings } from "@/components/settings/NotificationsSettings";
 import { ServersSettings } from "@/components/settings/ServersSettings";
-import { SharingSettings } from "@/components/settings/SharingSettings";
-import { TelemetrySettings } from "@/components/settings/TelemetrySettings";
 import { UpdatesSettings } from "@/components/settings/UpdatesSettings";
 import { VoiceSettings } from "@/components/settings/VoiceSettings";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
@@ -37,7 +36,6 @@ type TabKey =
   | "llm"
   | "voice"
   | "notifications"
-  | "privacy"
   | "admin"
   | "updates";
 
@@ -79,7 +77,6 @@ function buildGroups(server: string | null, isAdmin: boolean): TabGroup[] {
       label: "Account",
       tabs: [
         { key: "notifications", label: "Notifications", icon: Bell },
-        { key: "privacy", label: "Privacy", icon: Shield },
       ],
     },
   ];
@@ -139,22 +136,9 @@ export function Settings() {
       </div>
 
       {/* Narrow screens: one select, grouped the same way as the sidebar. */}
-      <select
-        aria-label="Settings section"
-        value={tab}
-        onChange={(e) => setParams({ tab: e.target.value })}
-        className="mb-4 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] md:hidden"
-      >
-        {groups.map((g) => (
-          <optgroup key={g.label} label={g.label}>
-            {g.tabs.map((t) => (
-              <option key={t.key} value={t.key}>
-                {t.label}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+      <SelectField label="Settings section" value={tab} onChange={(value) => setParams({ tab: value })}
+        className="mb-4 md:hidden"
+        options={groups.flatMap((group) => group.tabs.map((item) => ({ value: item.key, label: item.label, group: group.label })))} />
 
       <div className="flex gap-8">
         <nav
@@ -203,18 +187,6 @@ export function Settings() {
           {tab === "llm" && <CustomProvidersSettings />}
           {tab === "voice" && <VoiceSettings />}
           {tab === "notifications" && <NotificationsSettings />}
-          {/* Two cards, not one switch. Telemetry is anonymous counts the admin
-              consents to install-wide; sharing is content only its author can hand
-              over. They are different promises, and merging the controls would
-              misrepresent one of them — the divider is where the copy says so. */}
-          {tab === "privacy" && (
-            <div className="space-y-8">
-              <TelemetrySettings />
-              <div className="border-t border-[var(--color-border)] pt-8">
-                <SharingSettings />
-              </div>
-            </div>
-          )}
           {tab === "admin" && <AdminSettings />}
           {tab === "updates" && <UpdatesSettings />}
           {deniedTab && <AdminOnlyNotice tab={deniedTab} />}

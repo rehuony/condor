@@ -237,7 +237,12 @@ def test_the_surface_sink_sees_the_whole_turn(registry):
 
     assert sink.opened == 1
     assert sink.closed == 1
-    assert [e.type for e in sink.events] == [EventType.TEXT, EventType.DONE]
+    assert [e.type for e in sink.events] == [
+        EventType.ACCEPTED,
+        EventType.HEARTBEAT,
+        EventType.TEXT,
+        EventType.DONE,
+    ]
 
 
 def test_a_sink_that_blows_up_does_not_kill_the_turn(registry):
@@ -370,8 +375,8 @@ def test_a_wake_waits_its_turn_behind_an_answer_in_flight(gated):
     assert client.finished == ["typed", "woken"]
     assert [(t.role, t.kind) for t in _turns(conv_id)] == [
         ("user", ""),
-        ("assistant", ""),
         ("system", "resume"),
+        ("assistant", ""),
         ("assistant", ""),
     ]
 

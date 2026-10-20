@@ -29,11 +29,6 @@ export class CondorWebSocket {
     this.token = token;
   }
 
-  /** Whether the underlying socket is open right now (diagnostics only). */
-  get isOpen(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
-  }
-
   connect() {
     this.shouldConnect = true;
     this._connect();
@@ -55,11 +50,6 @@ export class CondorWebSocket {
     this.channels.delete(channel);
     this._channelExtras.delete(channel);
     this._send({ action: "unsubscribe", channel });
-  }
-
-  /** Send a duration update for a candle channel without re-subscribing. */
-  setCandleDuration(channel: string, duration: number) {
-    this._send({ action: "set_candle_duration", channel, duration });
   }
 
   onMessage(handler: MessageHandler) {

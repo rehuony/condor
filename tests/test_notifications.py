@@ -17,6 +17,7 @@ import pytest
 from condor import notifications, paths
 from condor.notifications import (
     NotifyBot,
+    clear,
     list_for,
     mark_read,
     record,
@@ -108,6 +109,21 @@ def test_mark_read_cannot_reach_across_users(store):
     assert left == 0  # A has nothing of their own
     assert unread_count(USER_B) == 1
     assert list_for(USER_B)[0].read is False
+
+
+def test_clear_removes_only_the_callers_notifications(store):
+    async def notes():
+        await record(USER_A, "A one")
+        await record(USER_A, "A two")
+        await record(USER_B, "B's task")
+
+    asyncio.run(notes())
+
+    assert clear(USER_A) == 2
+    assert list_for(USER_A) == []
+    assert unread_count(USER_A) == 0
+    assert [n.text for n in list_for(USER_B)] == ["B's task"]
+    assert clear(USER_A) == 0
 
 
 def test_mark_read_all_and_by_id(store):
@@ -348,6 +364,44 @@ def test_delegation_completion_lights_the_bell_once(store, known_users):
     assert len(items) == 1
     assert items[0].text == _completion_text(dt) == sent[0]["text"]
     assert items[0].kind == "delegation"
+
+
+def test_long_delegation_delivers_its_tail_and_records_only_one_notification(
+    store, known_users
+):
+    from condor.agents.delegate import DelegateTask, _completion_text, _notify_done
+    from condor.telegram_text import plain_text
+
+    result = (
+        "结论：等待。\n\n"
+        + "依据🪙 " * 1900
+        + "\n\n最终风险：[原始公告](https://example.com/source)"
+    )
+    dt = DelegateTask(
+        task_id="t-long",
+        agent_slug="scout",
+        user_id=USER_A,
+        chat_id=USER_A,
+        server_name=None,
+        task="scan",
+        status="done",
+        result=result,
+    )
+    messages = []
+
+    class Bot:
+        async def send_message(self, **kw):
+            messages.append(kw)
+            return {"ok": True}
+
+    asyncio.run(_notify_done(dt, Bot()))
+    assert len(messages) > 2
+    text = "".join(plain_text(m["text"]) for m in messages)
+    assert text.count("依据🪙") == 1900
+    assert text.endswith("最终风险：原始公告 (https://example.com/source)")
+    assert len(list_for(USER_A)) == 1
+    assert list_for(USER_A)[0].text == _completion_text(dt)
+    assert list_for(USER_A)[0].text.endswith(result)
 
 
 def test_delegation_over_the_bell_ladder_is_not_recorded_twice(
@@ -673,3 +727,36 @@ def test_pending_update_is_announced_once_not_once_per_hour(
     asyncio.run(update_handler._periodic_update_check(_Ctx()))
     assert len(list_for(USER_A)) == 3
     assert len(sent) == 3
+
+
+def test_the_clear_route_is_scoped_to_the_jwt_caller(store):
+    from condor.web.routes.notifications import clear_notifications
+
+    asyncio.run(record(USER_A, "A's task"))
+    asyncio.run(record(USER_B, "B's task"))
+
+    result = asyncio.run(clear_notifications(user=WebUser(id=USER_A, role="user")))
+
+    assert result == {"removed": 1, "unread": 0}
+    assert list_for(USER_A) == []
+    assert len(list_for(USER_B)) == 1
+
+
+def test_clear_does_not_report_success_when_the_store_cannot_be_written(
+    store, monkeypatch
+):
+    from condor.web.routes.notifications import clear_notifications
+
+    asyncio.run(record(USER_A, "A's task"))
+    asyncio.run(record(USER_B, "B's task"))
+
+    def unwritable(data):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(notifications, "_write_all", unwritable)
+    with pytest.raises(OSError, match="disk full"):
+        asyncio.run(clear_notifications(user=WebUser(id=USER_A, role="user")))
+
+    assert [n.text for n in list_for(USER_A)] == ["A's task"]
+    assert unread_count(USER_A) == 1
+    assert len(list_for(USER_B)) == 1

@@ -15,11 +15,14 @@ pinned separately: every broadcast must still be the full accumulated prefix.
 """
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 import condor.web.streams.hummingbot_ws as executor_stream_module
 import config_manager as cm_module
+from condor.server_data_service import ServerDataService, ServerDataType
 from condor.web.models import ExecutorInfo
 from condor.web.ws_manager import WebSocketManager
 
@@ -76,6 +79,9 @@ class _FakeSDS:
 
     def get(self, server_name, data_type):
         return []
+
+    def get_revision(self, server_name, data_type):
+        return 0
 
     def put(self, server_name, data_type, value):
         self.puts.append(value)
@@ -187,3 +193,66 @@ def test_prefetch_broadcasts_the_full_accumulated_snapshot(monkeypatch):
 
     assert len(puts) == 1, "the pre-fetch did not reach its sds.put"
     assert puts[0] == all_raw, "SDS must still receive the complete raw list"
+
+
+@pytest.mark.parametrize("invalidate_during", ["client", "page", "broadcast"])
+def test_invalidated_prefetch_preserves_fresh_cache_and_continues_live_stream(
+    monkeypatch, invalidate_during
+):
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+        client = _PagingClient(_pages_of([WS_FIRST_PAGE, 1]))
+        sds = ServerDataService()
+        sds.put("srv", ServerDataType.EXECUTORS, [])
+        search = client.executors.search_executors
+
+        async def gated_search(**kwargs):
+            result = await search(**kwargs)
+            if invalidate_during == "page" and len(client.calls) == 2:
+                started.set()
+                await release.wait()
+            return result
+
+        client.executors.search_executors = gated_search
+
+        async def get_client(_server):
+            if invalidate_during == "client":
+                started.set()
+                await release.wait()
+            return client
+
+        monkeypatch.setattr(
+            executor_stream_module, "get_server_data_service", lambda: sds
+        )
+        monkeypatch.setattr(
+            cm_module,
+            "get_config_manager",
+            lambda: SimpleNamespace(get_client=get_client),
+        )
+        manager = WebSocketManager()
+        broadcasts = []
+
+        async def broadcast(_channel, data):
+            broadcasts.append(data)
+            if invalidate_during == "broadcast" and len(broadcasts) == 2:
+                started.set()
+                await release.wait()
+
+        manager.broadcast = broadcast
+        manager._run_ws_stream = AsyncMock()
+        pending = asyncio.create_task(manager._executor_stream("executors:srv"))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            sds.invalidate("srv", ServerDataType.EXECUTORS)
+            fresh = _rows(100, 1)
+            sds.put("srv", ServerDataType.EXECUTORS, fresh)
+            broadcast_count = len(broadcasts)
+        finally:
+            release.set()
+        await asyncio.wait_for(pending, timeout=2)
+
+        assert sds.get("srv", ServerDataType.EXECUTORS) == fresh
+        assert len(broadcasts) == broadcast_count
+        manager._run_ws_stream.assert_awaited_once()
+
+    asyncio.run(scenario())

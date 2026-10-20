@@ -1,5 +1,3 @@
-import { ChevronDown } from "lucide-react";
-
 import {
   formatDuration,
   isLiveRun,
@@ -10,6 +8,7 @@ import {
   dueInSec,
   tickCountdownLabel,
 } from "@/components/agent/workspace/fleet";
+import { SelectField } from "@/components/ui/select-field";
 import { useSeconds } from "@/hooks/useSeconds";
 import { countdown } from "@/lib/agent-attribution";
 import type {
@@ -152,24 +151,5 @@ function Picker({
   options: { value: string; label: string }[];
   onChange: (value: string) => void;
 }) {
-  return (
-    <label className="flex items-center gap-1 text-[var(--color-text-muted)]">
-      <span className="sr-only">{label}</span>
-      <span className="relative flex items-center">
-        <select
-          aria-label={label}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="appearance-none rounded border border-[var(--color-border)] bg-[var(--color-surface)] py-0.5 pl-2 pr-6 text-xs font-medium text-[var(--color-text)] transition-colors hover:border-[var(--color-primary)]/50"
-        >
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-1.5 h-3 w-3 text-[var(--color-text-muted)]" />
-      </span>
-    </label>
-  );
+  return <SelectField size="compact" fit label={label} value={value} onChange={onChange} options={options} />;
 }

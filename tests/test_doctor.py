@@ -484,6 +484,48 @@ def test_hummingbot_api_check_fails_when_env_exists_but_config_does_not(
 # ── The dashboard-port check reads the bind it was given (macOS lsof) ──
 
 
+def test_failed_ss_probe_falls_back_to_lsof(monkeypatch):
+    """iproute2mac has ss, but cannot apply the Linux port filter."""
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(doctor.shutil, "which", lambda command: f"/usr/bin/{command}")
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if command[0] == "ss":
+            return CompletedProcess(command, 1, "", "FILTER is not yet implemented")
+        return CompletedProcess(
+            command,
+            0,
+            "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n"
+            "python 123 user 3u IPv4 0x1 0t0 TCP 127.0.0.1:8088 (LISTEN)\n",
+            "",
+        )
+
+    monkeypatch.setattr(doctor.subprocess, "run", run)
+
+    assert doctor._listening_binds(8088) == ["127.0.0.1:8088"]
+    assert [command[0] for command in commands] == ["ss", "lsof"]
+
+
+def test_successful_empty_ss_probe_does_not_need_lsof(monkeypatch):
+    """No listeners is a valid result when the probe actually succeeded."""
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(doctor.shutil, "which", lambda command: f"/usr/bin/{command}")
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(doctor.subprocess, "run", run)
+
+    assert doctor._listening_binds(8088) == []
+    assert [command[0] for command in commands] == ["ss"]
+
+
 def test_a_loopback_bind_is_not_reported_as_public():
     """``lsof -sTCP:LISTEN`` prints the state as its own trailing token.
 

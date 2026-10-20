@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
-from condor.telemetry import taps as telemetry_taps
 from mcp_servers._profiles import make_resolver
 from mcp_servers._profiles import register_tools as _register_tools
 from mcp_servers._profiles import resolve_profiles
@@ -354,7 +353,6 @@ mcp = FastMCP("condor", instructions=_build_instructions())
 
 
 @handle_errors("delegate task")
-@telemetry_taps.tracked("delegate")
 async def delegate(
     action: Literal["start", "ask", "list", "get", "stop"],
     agent: str = "",
@@ -430,15 +428,17 @@ async def delegate(
             then draft the summary"). With "resume" you must end your turn after
             starting the task: you will be woken with the answer.
         timeout_sec: Wall-clock budget for the whole background task, in seconds
-            (for start). Omit it (0) for the default of 900s. This knob only
-            goes UP: 900s is also the floor, and a smaller number is raised back
-            to it, so do not try to give a task less. Raise it when you KNOW the
+            (for start). Omit it (0) for the default of 3600s (60 minutes).
+            This knob only goes UP: the default is also the floor, and a smaller
+            number is raised back to it. Raise it when you KNOW the
             job is long — several routines to build, a research sweep, a
             multi-step backtest — because a task that outlives its budget is
-            cut off mid-run and loses whatever it had not finished. The ceiling
-            is 1800s: an agent session has its own ~31-minute hard stop, so
-            asking for more only delays the same cut-off. For work bigger than
-            that, split it across delegations.
+            stopped with partial progress preserved, not reported as completed.
+            The default ceiling is 7200s (120 minutes); deployments may override
+            both limits. The background model stream follows this budget.
+            Save progress during long work and reserve the final two minutes
+            for a checkpoint and handoff. For work bigger than that, split it
+            across delegations.
         context: Extra context for the agent — relevant numbers, the user's
             intent (for ask).
 
@@ -451,25 +451,40 @@ async def delegate(
 
 
 @handle_errors("send notification")
-@telemetry_taps.tracked("send_notification")
 async def send_notification(
-    text: str,
+    text: str = "",
     parse_mode: Literal["Markdown", "HTML"] = "Markdown",
+    image_path: str = "",
 ) -> dict:
-    """Send a Telegram message to the user.
+    """Deliver text and/or a generated image to the user.
 
     Args:
-        text: Message text to send.
-        parse_mode: Telegram parse mode. Default: "Markdown".
+        text: Full message text; long messages are split automatically. Optional
+            when image_path is supplied. Sent separately from the image.
+        parse_mode: Standard Markdown or Telegram HTML. Default: "Markdown".
+        image_path: Server-local PNG/JPEG generated with run_code, at most 5 MiB.
+            Absolute paths or paths relative to the Condor repository work.
+            Requires the same code_run permission as run_code. Images are kept
+            in the originating conversation and displayed in the dashboard.
+            Use this instead of a Markdown image link or a direct bot call.
 
     Returns:
-        {"sent": true} on success, {"error": "..."} on failure.
+        ``sent`` is true only when all requested Telegram text and images were accepted.
+        ``recorded`` separately reports delivery to the dashboard. A recorded
+        notice with sent=false did NOT reach Telegram in full. Delivery
+        failures also include ``error``; do not resend the whole notice after
+        a partial failure, as earlier pages may already have arrived.
+        With an image, image_sent and text_sent identify Telegram receipts;
+        image_recorded means the conversation retained the image. Inspect
+        these separately: a saved image is not a Telegram delivery. A missing
+        session cannot retain an image in a conversation. Local mode can retain
+        it with image_recorded=true while sent=false. An unconfirmed request
+        may have delivered; never automatically replay it.
     """
-    return await notification.send_notification(text, parse_mode)
+    return await notification.send_notification(text, parse_mode, image_path)
 
 
 @handle_errors("manage routines")
-@telemetry_taps.tracked("manage_routines")
 async def manage_routines(
     action: Literal[
         "list",
@@ -554,7 +569,6 @@ async def manage_routines(
 
 
 @handle_errors("manage agent controllers")
-@telemetry_taps.tracked("manage_agent_controllers")
 async def manage_agent_controllers(
     action: Literal[
         "list",
@@ -646,7 +660,6 @@ async def manage_agent_controllers(
 
 
 @handle_errors("run code")
-@telemetry_taps.tracked("run_code")
 async def run_code(
     code: str | None = None,
     action: Literal["run", "history", "get"] = "run",
@@ -716,7 +729,6 @@ async def run_code(
 
 
 @handle_errors("manage servers")
-@telemetry_taps.tracked("manage_servers")
 async def manage_servers(
     action: Literal["list", "status"],
     name: str | None = None,
@@ -741,7 +753,6 @@ async def manage_servers(
 
 
 @handle_errors("get available models")
-@telemetry_taps.tracked("get_available_models")
 async def get_available_models(
     openrouter_query: str = "", openrouter_limit: int = 20
 ) -> dict:
@@ -797,7 +808,6 @@ async def get_available_models(
 
 
 @handle_errors("manage agents")
-@telemetry_taps.tracked("manage_agents")
 async def manage_agents(
     action: Literal[
         "list",
@@ -905,7 +915,6 @@ async def manage_agents(
 
 
 @handle_errors("manage loops")
-@telemetry_taps.tracked("manage_loops")
 async def manage_loops(
     action: Literal[
         "list",
@@ -978,7 +987,6 @@ async def manage_loops(
 
 
 @handle_errors("control agent")
-@telemetry_taps.tracked("control_agent")
 async def control_agent(
     action: Literal[
         "list",
@@ -1065,7 +1073,6 @@ async def control_agent(
 
 
 @handle_errors("manage memory")
-@telemetry_taps.tracked("manage_memory")
 async def manage_memory(
     action: Literal["write", "read", "search", "list", "delete", "audit"],
     name: str | None = None,
@@ -1118,7 +1125,6 @@ async def manage_memory(
 
 
 @handle_errors("manage skill")
-@telemetry_taps.tracked("manage_skill")
 async def manage_skill(
     action: Literal[
         "list",
@@ -1238,7 +1244,6 @@ async def manage_skill(
 
 
 @handle_errors("journal read")
-@telemetry_taps.tracked("trading_agent_journal_read")
 async def trading_agent_journal_read(
     agent_id: str,
     section: str = "recent",
@@ -1268,7 +1273,6 @@ async def trading_agent_journal_read(
 
 
 @handle_errors("journal write")
-@telemetry_taps.tracked("trading_agent_journal_write")
 async def trading_agent_journal_write(
     agent_id: str,
     entry_type: str,
@@ -1352,6 +1356,7 @@ def register_tools(
     server: FastMCP,
     profile: str = DEFAULT_TOOL_PROFILE,
     muted: Iterable[str] = (),
+    execution_mode: str = "",
 ) -> None:
     """Register this profile's tools on ``server``, minus the muted ones.
 
@@ -1359,25 +1364,16 @@ def register_tools(
     rather than widening to ``full``, ``muted`` only ever subtracts — live once,
     in ``mcp_servers/_profiles.py``.
     """
-    _register_tools(server, TOOL_PROFILES, profile, muted)
+    _register_tools(server, TOOL_PROFILES, profile, muted, execution_mode)
 
 
 # Registration happens at import: ``mcp`` is a module-level singleton and the
 # profile and the mute list are resolved from argv at import (settings), so the
 # server object is complete for anything that inspects it before startup.
-register_tools(mcp, settings.tool_profile, settings.muted_tools)
+register_tools(
+    mcp, settings.tool_profile, settings.muted_tools, settings.execution_mode
+)
 
 
 if __name__ == "__main__":
-    # This server runs in its own process, spawned by the agent: a different
-    # interpreter, a different heap, and no job_queue. hosted=False makes emit()
-    # append to `spool.<pid>.jsonl`, which the host process drains and deletes.
-    # Still a no-op unless the install opted in.
-    try:
-        from condor import telemetry
-
-        telemetry.init(hosted=False)
-    except Exception:  # noqa: BLE001 - never block the server on telemetry
-        pass
-
     mcp.run()

@@ -320,15 +320,18 @@ async def _execute_routine(
     chat_id: int,
     active_server: str | None = None,
     owner_id: int | None = None,
-) -> tuple[str, float, str | None]:
-    """Execute a routine and return (result, duration, report_id).
+) -> tuple[str, float, str | None, bool]:
+    """Execute a routine and return (result, duration, report_id, silent).
+
+    ``silent`` is the routine's own ``RoutineResult.silent``: a schedule skips
+    its per-run chat message for it. A failed run is never silent.
 
     ``chat_id`` is where the result is delivered; ``owner_id`` is whose
     ``user_data`` (and therefore whose preferences) the routine runs against.
     """
     routine = get_routine(routine_name)
     if not routine:
-        return "Routine not found", 0, None
+        return "Routine not found", 0, None, False
 
     start = time.time()
 
@@ -413,7 +416,8 @@ async def _execute_routine(
             f"Post-execution hooks failed for {routine_name}[{instance_id}]: {e}"
         )
 
-    return result_text, duration, report_id
+    silent = bool(rich_result and rich_result.silent)
+    return result_text, duration, report_id, silent
 
 
 async def _run_continuous_routine(
@@ -513,7 +517,7 @@ async def _interval_job_callback(context: CallbackContext) -> None:
         logger.warning(f"Instance {instance_id} no longer exists, skipping execution")
         return
 
-    result, duration, report_id = await _execute_routine(
+    result, duration, report_id, silent = await _execute_routine(
         context,
         instance_id,
         routine_name,
@@ -539,6 +543,10 @@ async def _interval_job_callback(context: CallbackContext) -> None:
 
     # Sync to shared store
     _sync_instance_to_store(instance_id, instances[instance_id])
+
+    if silent:
+        logger.info(f"Routine {routine_name}[{instance_id}] run #{run_count} (silent)")
+        return
 
     # Send result message for scheduled one-shot routines
     schedule = instances[instance_id].get("schedule", {})
@@ -587,7 +595,7 @@ async def _oneshot_job_callback(context: CallbackContext) -> None:
     background = data.get("background", False)
     owner_id = data.get("user_id")
 
-    result, duration, report_id = await _execute_routine(
+    result, duration, report_id, silent = await _execute_routine(
         context,
         instance_id,
         routine_name,
@@ -660,7 +668,7 @@ async def _daily_job_callback(context: CallbackContext) -> None:
     chat_id = data["chat_id"]
     owner_id = data.get("user_id")
 
-    result, duration, report_id = await _execute_routine(
+    result, duration, report_id, silent = await _execute_routine(
         context,
         instance_id,
         routine_name,
@@ -683,6 +691,9 @@ async def _daily_job_callback(context: CallbackContext) -> None:
         )
         # Sync to shared store
         _sync_instance_to_store(instance_id, instances[instance_id])
+
+    if silent:
+        return
 
     # Send notification
     icon = "✅" if not result.startswith("Error") else "❌"

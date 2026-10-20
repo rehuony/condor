@@ -25,9 +25,19 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     // every existing caller reads exactly what it read before.
     throw Object.assign(new Error(err.detail || `Request failed: ${res.status}`), {
       status: res.status,
+      retryAfter: res.status === 429 ? retryAfterSeconds(res.headers.get("Retry-After")) : undefined,
     });
   }
   return res.json();
+}
+
+/** Retry-After accepts either a number of seconds or an HTTP date. */
+function retryAfterSeconds(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const numeric = Number(value);
+  if (value.trim() && Number.isFinite(numeric)) return Math.max(0, numeric);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, (date - Date.now()) / 1000) : undefined;
 }
 
 /** The HTTP status of a failed `apiFetch`, when the thrown value carries one. */
@@ -121,16 +131,21 @@ export interface BalanceItem {
 }
 
 export interface ConnectorBalance {
+  account_name?: string;
   connector: string;
   balances: BalanceItem[];
   total_usd: number;
   note?: string | null;
+  equity_usd?: number | null;
+  unrealized_pnl_usd?: number | null;
 }
 
 export interface PortfolioResponse {
   server: string;
   connectors: ConnectorBalance[];
   total_usd: number;
+  equity_usd?: number | null;
+  unrealized_pnl_usd?: number | null;
 }
 
 export interface PortfolioHistoryPoint {
@@ -144,6 +159,7 @@ export interface PortfolioHistoryResponse {
   points: PortfolioHistoryPoint[];
   interval: string;
   top_tokens?: string[];
+  valuation?: "wallet" | "equity";
 }
 
 export interface BotInfo {
@@ -1785,59 +1801,6 @@ export interface VoiceSettingsResponse {
   available_languages: Record<string, string>;
 }
 
-// ── Telemetry (FEAT-023) ──
-
-/** The two grantable levels offered in Settings → Privacy. */
-export type TelemetryLevel = "ping" | "usage";
-
-/**
- * What the level can actually be. `off` is not a level an admin grants — it is
- * a refusal, recorded explicitly ("Turn off", Settings → Privacy) or pinned by
- * the operator's `CONDOR_TELEMETRY` — which is why it is a separate type from
- * the two options the disclosure offers.
- */
-export type TelemetryEffectiveLevel = TelemetryLevel | "off";
-
-export interface TelemetryOption {
-  level: TelemetryLevel;
-  label: string;
-}
-
-/**
- * What the install is told, served by the backend so this copy and the
- * Telegram notice's cannot drift (`condor/telemetry/prompt.py`).
- */
-export interface TelemetryDisclosure {
-  headline: string;
-  summary: string;
-  opt_out: string;
-  never: string[];
-  doc: string;
-  acknowledge: string;
-  turn_off: string;
-  options: TelemetryOption[];
-}
-
-export type TelemetryConsentState = "unknown" | "granted" | "denied";
-
-export interface TelemetrySettingsResponse {
-  /** `unknown` until someone answers — the notice strip shows until then.
-   * `denied` is a recorded refusal: the level is `off` and stays off. */
-  consent: TelemetryConsentState;
-  level: TelemetryEffectiveLevel;
-  /** `CONDOR_TELEMETRY` is pinned in the environment; nothing here can change it. */
-  env_overridden: boolean;
-  endpoint_configured: boolean;
-  pending_events: number;
-  privacy_doc: string;
-  /** Consent is install-wide, so only the admin may answer. */
-  can_change: boolean;
-  /** The admin has been shown the notice. An unanswered install sends usage
-   * summaries only once this is true; before, only the install count. */
-  notice_shown: boolean;
-  disclosure: TelemetryDisclosure;
-}
-
 // ── Chat ──
 
 export interface ChatAgentOption {
@@ -1934,12 +1897,6 @@ export interface ConversationMeta {
   updated_at: string;
   turn_count: number;
   last_snippet: string;
-  /** Set once this conversation has been shared (FEAT-054); "" if never. The
-   *  delete token that revokes the share is deliberately not here — it never
-   *  crosses the API boundary. */
-  share_id?: string;
-  share_revision?: number;
-  shared_at?: string | null;
   /** Running token total (FEAT-120). `{}` or absent on a conversation older
    *  than the measurement, which reads as "not measured", not as zero. */
   usage?: Partial<TokenUsage>;
@@ -1994,7 +1951,7 @@ export interface ConversationTurn {
   /** Assistant turns: how the stream ended; "" or absent = never reported. */
   stop_reason?: string;
   /**
-   * User turns: what was handed over with the words (FEAT-098).
+   * Images attached to user, assistant or system notification turns (FEAT-098).
    *
    * The reference and never the payload — an id under this conversation's own
    * `attachments/` directory, its type and its size. The bytes come from the
@@ -2037,6 +1994,8 @@ export interface ConversationAttachment {
 }
 
 export interface ConversationDetail {
+  /** Any active or queued turn, including Telegram and other browser tabs. */
+  is_busy?: boolean;
   meta: ConversationMeta;
   turns: ConversationTurn[];
 }
@@ -2053,86 +2012,6 @@ export interface ConversationDetail {
 export interface ConversationDeployments {
   deployments: DeploymentRow[];
   predates_ledger: boolean;
-}
-
-// ── Sharing a conversation (FEAT-054) ──
-//
-// A separate surface from telemetry on purpose. Telemetry is anonymous counts
-// the admin consents to once, install-wide; this is content, and only the
-// person who said it can hand it over — every time, after seeing exactly what
-// would be sent.
-
-/** How many values each tier of the scrubber replaced. Every category is
- *  present, zeros included: an all-zero share is how a broken scrubber shows up,
- *  and that only reads as a signal if the zeros are reported. */
-export type RedactionCounts = Record<string, number>;
-
-export interface SharePreview {
-  conversation_id: string;
-  title: string;
-  surface: string;
-  agent_slug: string;
-  agent_key: string;
-  /** The scrubbed transcript, exactly as it would be sent. */
-  turns: ConversationTurn[];
-  counts: RedactionCounts;
-  truncated: boolean;
-  turns_omitted: number;
-  revision: number;
-  shared: boolean;
-  share_id: string;
-  shared_at: string | null;
-}
-
-export interface ShareReceipt {
-  conversation_id: string;
-  share_id: string;
-  revision: number;
-  shared_at: string;
-  queued: boolean;
-}
-
-export interface SharedConversation {
-  conversation_id: string;
-  title: string;
-  share_id: string;
-  revision: number;
-  shared_at: string | null;
-  turn_count: number;
-}
-
-export interface SharingSettingsResponse {
-  enabled: boolean;
-  env_overridden: boolean;
-  can_change: boolean;
-  endpoint_configured: boolean;
-  pending: number;
-}
-
-// ── Sharing every conversation, opt-in (FEAT-055) ──
-
-/** Off = nothing leaves. Ask = the share button only, which is what everyone
- *  has by default. Always = finished conversations go on their own. */
-export type SharingState = "off" | "explicit" | "always";
-
-export interface SharingPreferenceResponse {
-  state: SharingState;
-  /** When Always was chosen, as a Unix timestamp. Conversations older than it
-   *  are never swept — consent to a policy, not a licence over the archive. */
-  opted_in_at: number;
-  /** The install still permits sharing at all (no admin veto, no kill switch). */
-  allowed: boolean;
-  /** Always is on *and* the install permits it — the two can disagree. */
-  sweeping: boolean;
-}
-
-export interface ConversationSharingStatus {
-  conversation_id: string;
-  excluded: boolean;
-  /** The sweep would take this one, once it goes idle. What the chip renders. */
-  covered: boolean;
-  shared: boolean;
-  shared_at: string | null;
 }
 
 export interface SwitchSessionRequest {
@@ -2166,15 +2045,6 @@ export function parseCustomAgentKey(
 }
 
 // ── The running build ──
-
-export interface AppEnvResponse {
-  version: string;
-  branch: string;
-  python: string;
-  os: string;
-  arch: string;
-  in_docker: boolean;
-}
 
 /**
  * Whether the running process is older than the code on disk.
@@ -2512,9 +2382,6 @@ export interface PendingConfirmation {
 export const api = {
   getServers: () => apiFetch<ServerInfo[]>("/api/v1/servers"),
 
-  /** Build identity — shown to the user when they file an issue. */
-  getEnv: () => apiFetch<AppEnvResponse>("/api/v1/meta/env"),
-
   /** Whether an update has landed that this process is not running yet. */
   getRelaunch: () => apiFetch<RelaunchResponse>("/api/v1/meta/relaunch"),
 
@@ -2834,6 +2701,12 @@ export const api = {
       { method: "POST" },
     ),
 
+  deleteExecutor: (server: string, executorId: string) =>
+    apiFetch<{ deleted: boolean; executor_id: string }>(
+      `/api/v1/servers/${encodeURIComponent(server)}/executors/${encodeURIComponent(executorId)}`,
+      { method: "DELETE" },
+    ),
+
   getPositionsHeld: (server: string) =>
     apiFetch<PositionsResponse>(
       `/api/v1/servers/${encodeURIComponent(server)}/executors/positions`,
@@ -3036,7 +2909,7 @@ export const api = {
       `/api/v1/servers/${encodeURIComponent(server)}/market/order-book?connector=${encodeURIComponent(connector)}&trading_pair=${encodeURIComponent(pair)}&depth=${depth}`,
     ),
 
-  getCandles: (
+  getCandles: async (
     server: string,
     connector: string,
     pair: string,
@@ -3045,14 +2918,29 @@ export const api = {
     startTime?: number,
     endTime?: number,
     poolAddress?: string,
+    signal?: AbortSignal,
   ) => {
     let url = `/api/v1/servers/${encodeURIComponent(server)}/market/candles?connector=${encodeURIComponent(connector)}&trading_pair=${encodeURIComponent(pair)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
-    if (startTime) url += `&start_time=${startTime}`;
-    if (endTime) url += `&end_time=${endTime}`;
+    if (startTime !== undefined) url += `&start_time=${startTime}`;
+    if (endTime !== undefined) url += `&end_time=${endTime}`;
     // DEX/LP executors: the pool address routes the backend to GeckoTerminal,
     // since these connectors have no CEX candle feed.
     if (poolAddress) url += `&pool_address=${encodeURIComponent(poolAddress)}`;
-    return apiFetch<CandleData[]>(url);
+    signal?.throwIfAborted();
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    // Allow the upstream's 30-second deadline to report its error, then bound the
+    // browser request (including its body) so a stalled proxy cannot hold the chart.
+    const timeout = setTimeout(() => controller.abort(new DOMException(
+      "Candle history request timed out. Please retry.", "TimeoutError",
+    )), 40_000);
+    try {
+      return await apiFetch<CandleData[]>(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
+    }
   },
 
   // Resolve a token address → ticker (GeckoTerminal). Not server-scoped; used to
@@ -4024,27 +3912,6 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // ── Telemetry (FEAT-023) ──
-
-  getTelemetrySettings: () =>
-    apiFetch<TelemetrySettingsResponse>("/api/v1/settings/telemetry"),
-
-  /** The notice strip's delivery receipt. Admin only (403 otherwise). */
-  markTelemetryNoticeShown: () =>
-    apiFetch<{
-      level: TelemetryEffectiveLevel;
-      consent: TelemetryConsentState;
-      notice_shown: boolean;
-    }>("/api/v1/settings/telemetry/notice", { method: "POST" }),
-
-  /** Admin only (403 otherwise), and 409 when `CONDOR_TELEMETRY` is pinned.
-   * `off` records a refusal and purges whatever was collected. */
-  setTelemetryLevel: (level: TelemetryEffectiveLevel) =>
-    apiFetch<{
-      level: TelemetryEffectiveLevel;
-      consent: TelemetryConsentState;
-    }>(`/api/v1/settings/telemetry?level=${level}`, { method: "PUT" }),
-
   // ── Chat ──
 
   getOpenRouterModels: () =>
@@ -4140,82 +4007,13 @@ export const api = {
     `/api/v1/conversations/${encodeURIComponent(conversationId)}/attachments/` +
     encodeURIComponent(attachmentId),
 
-  /** The only way to lose a transcript. Killing a session no longer does.
-   *  A shared conversation is unshared on the way out — otherwise "delete"
-   *  would mean "delete here, keep there". */
+  /** Delete the stored transcript and its live sessions. Ending a session
+   *  alone preserves the transcript. */
   deleteConversation: (id: string) =>
     apiFetch<{
       deleted: boolean;
       sessions_destroyed: number;
-      unshared: boolean;
     }>(`/api/v1/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
-
-  // ── Sharing a conversation (FEAT-054) ──
-
-  /** What would be sent, scrubbed. Sends nothing — the dialog renders this and
-   *  the POST below runs the identical code path, so what the user approves is
-   *  what leaves. */
-  previewShare: (id: string) =>
-    apiFetch<SharePreview>(
-      `/api/v1/sharing/conversations/${encodeURIComponent(id)}/preview`,
-    ),
-
-  shareConversation: (id: string) =>
-    apiFetch<ShareReceipt>(
-      `/api/v1/sharing/conversations/${encodeURIComponent(id)}`,
-      {
-        method: "POST",
-      },
-    ),
-
-  unshareConversation: (id: string) =>
-    apiFetch<{ unshared: boolean; conversation_id: string }>(
-      `/api/v1/sharing/conversations/${encodeURIComponent(id)}`,
-      { method: "DELETE" },
-    ),
-
-  listSharedConversations: () =>
-    apiFetch<SharedConversation[]>("/api/v1/sharing/conversations"),
-
-  getSharingSettings: () =>
-    apiFetch<SharingSettingsResponse>("/api/v1/sharing/settings"),
-
-  setSharingEnabled: (enabled: boolean) =>
-    apiFetch<SharingSettingsResponse>("/api/v1/sharing/settings", {
-      method: "PUT",
-      body: JSON.stringify({ enabled }),
-    }),
-
-  // ── Sharing every conversation, opt-in (FEAT-055) ──
-
-  getSharingPreference: () =>
-    apiFetch<SharingPreferenceResponse>("/api/v1/sharing/preference"),
-
-  /** Leaving Always also destroys whatever the sweep queued but never sent.
-   *  The back catalogue is a separate decision — `unshareEverything` below. */
-  setSharingPreference: (state: SharingState) =>
-    apiFetch<SharingPreferenceResponse>("/api/v1/sharing/preference", {
-      method: "PUT",
-      body: JSON.stringify({ state }),
-    }),
-
-  unshareEverything: () =>
-    apiFetch<{ unshared: number }>("/api/v1/sharing/conversations", {
-      method: "DELETE",
-    }),
-
-  getConversationSharing: (id: string) =>
-    apiFetch<ConversationSharingStatus>(
-      `/api/v1/sharing/conversations/${encodeURIComponent(id)}/status`,
-    ),
-
-  /** Take one conversation out of the sweep, or put it back. Does not unshare
-   *  a copy already sent — that is Unshare, and it means something else. */
-  setConversationExcluded: (id: string, excluded: boolean) =>
-    apiFetch<ConversationSharingStatus>(
-      `/api/v1/sharing/conversations/${encodeURIComponent(id)}/exclusion`,
-      { method: "PUT", body: JSON.stringify({ excluded }) },
-    ),
 
   // ── Custom OpenAI-compatible LLM endpoints ──
 
@@ -4272,6 +4070,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ids: ids ?? null }),
     }),
+
+  /** Delete all of the caller's notifications. */
+  clearNotifications: () =>
+    apiFetch<{ removed: number; unread: number }>("/api/v1/notifications", { method: "DELETE" }),
 
   // ── Web Push (FEAT-083) ──
   //

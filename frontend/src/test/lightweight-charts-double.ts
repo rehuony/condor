@@ -154,6 +154,27 @@ export const createChart = vi.fn((container: unknown, initialOptions: Dict = {})
       record.removedSeries.push(removed);
     }),
     timeScale: vi.fn(() => timeScale),
+    paneSize: vi.fn(() => ({ width: 800, height: 400 })),
+    options: vi.fn(() => ({
+      ...initialOptions,
+      ...record.options,
+      layout: {
+        fontSize: 12,
+        fontFamily: "sans-serif",
+        ...(initialOptions.layout as Dict),
+        ...(record.options.layout as Dict),
+      },
+      crosshair: {
+        ...(initialOptions.crosshair as Dict),
+        ...(record.options.crosshair as Dict),
+        vertLine: {
+          visible: true,
+          labelBackgroundColor: "#131722",
+          ...((initialOptions.crosshair as Dict)?.vertLine as Dict),
+          ...((record.options.crosshair as Dict)?.vertLine as Dict),
+        },
+      },
+    })),
     applyOptions: vi.fn((options: Dict) => {
       Object.assign(record.options, options);
     }),

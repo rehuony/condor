@@ -124,7 +124,16 @@ def test_menu_is_derived_from_agent_options():
 def test_recommended_agent_is_option_one():
     """A fresh install should land on the recommended model by typing `1`."""
     options = setup_llm.menu_options()
-    assert list(options)[0] == RECOMMENDED_AGENT
+    assert RECOMMENDED_AGENT == "claude-code"
+    assert list(options)[:7] == [
+        "claude-code",
+        "claude-acp:opus",
+        "claude-acp:haiku",
+        "claude-acp:sonnet",
+        "gemini",
+        "codex",
+        "copilot",
+    ]
     # Everything else keeps its AGENT_OPTIONS order.
     rest = [k for k in selectable_agent_options() if k != RECOMMENDED_AGENT]
     assert list(options)[1:] == rest + ["openrouter:"]

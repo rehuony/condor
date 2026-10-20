@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import json
 import logging
 import os
 import time
 import uuid
+from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Iterator
 from urllib.parse import urlparse
 
@@ -32,6 +34,31 @@ from .client import (
 from .usage import TokenUsage
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class _ModelStreamState:
+    """Own one model request and its uncommitted, partially delivered response."""
+
+    response_count: int
+    queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=1))
+    task: asyncio.Task | None = None
+    transport_task: asyncio.Task | None = None
+    opened: bool = False
+    cancelled: bool = False
+    completed: bool = False
+    response: Any = None
+    usage: Any = None
+    text: list[str] = field(default_factory=list)
+
+    def cancel(self) -> None:
+        self.cancelled = True
+        # During stream setup the SDK waits on a separate transport task. Its
+        # setup wait is not cancellation-safe in 1.78: cancel the transport so
+        # that wait finishes normally, rather than orphaning it and its waiter.
+        task = self.task if self.opened else self.transport_task or self.task
+        if task is not None and not task.done() and not task.cancelling():
+            task.cancel()
 
 
 # Model prefix → pydantic-ai model string mapping
@@ -283,29 +310,46 @@ class PermissionGate:
         tool_name: str,
         allowed: bool,
         reason: str = "",
-    ) -> None:
+    ) -> tuple[bool, str]:
+        call_id = (tool_call_id or "").strip()
+        # A provider-controlled ID identifies exactly one call in this turn.
+        # Duplicate IDs also confuse pydantic-ai's own call dispatch, so no
+        # decision with that ID may be borrowed by either invocation. Keep used
+        # entries in the check: a later model response cannot replay an ID.
+        duplicates = [
+            entry
+            for entry in self._pending
+            if entry["id"] == call_id and (call_id or entry["name"] == tool_name)
+        ]
+        if duplicates:
+            allowed = False
+            reason = "ambiguous or reused tool call identity"
+            for entry in duplicates:
+                entry["allowed"] = False
+                entry["reason"] = reason
         self._pending.append(
             {
-                "id": (tool_call_id or "").strip(),
+                "id": call_id,
                 "name": tool_name,
                 "allowed": allowed,
                 "reason": reason,
                 "used": False,
             }
         )
+        return allowed, reason
 
     def consume(self, tool_call_id: str | None, tool_name: str) -> tuple[bool, str]:
         """Take the decision for this call. Unknown calls are refused."""
         call_id = (tool_call_id or "").strip()
-        if call_id:
-            for entry in self._pending:
-                if not entry["used"] and entry["id"] == call_id:
-                    entry["used"] = True
-                    return entry["allowed"], entry["reason"]
-        # Providers that omit tool_call_ids still need matching; fall back to
-        # the first undecided call of the same name, in emission order.
+        # Never fall back from an unknown nonempty ID to another call's name.
+        # Missing IDs only match missing-ID decisions; record() has already
+        # refused duplicates, so neither path can spend a stale authorization.
         for entry in self._pending:
-            if not entry["used"] and entry["name"] == tool_name:
+            if (
+                not entry["used"]
+                and entry["id"] == call_id
+                and entry["name"] == tool_name
+            ):
                 entry["used"] = True
                 return entry["allowed"], entry["reason"]
         return False, "no permission decision was recorded for this call"
@@ -399,6 +443,9 @@ class PydanticAIClient:
         for configs written before endpoints were nameable.
     """
 
+    # PermissionedToolset checks the recorded decision before invoking the sink.
+    enforces_tool_permissions = True
+
     def __init__(
         self,
         model: str,
@@ -462,10 +509,10 @@ class PydanticAIClient:
         # the model sees prior turns. A fresh client is created per session/tick,
         # so history is reset by recreating the client rather than in-place.
         self._message_history: list = []
-        # Set by abort_prompt(); the node loop reads it between graph steps.
-        # There is no protocol to notify here (the "agent" is a library call),
-        # so cancelling the run *is* the cancel.
+        # Stop interrupts the owned model stream, then prevents the graph from
+        # advancing. Already running tools keep their existing settle behavior.
         self._abort_requested = False
+        self._model_stream_state: _ModelStreamState | None = None
         # Everything this client's runs have read and written, for its whole
         # life (FEAT-120). The session takes per-turn deltas of it; nothing
         # here knows what a turn is.
@@ -1009,18 +1056,135 @@ class PydanticAIClient:
         return "".join(chunks)
 
     async def abort_prompt(self) -> None:
-        """Stop the in-flight run at the next graph step.
-
-        The ACP counterpart notifies the agent over the wire; here the run is a
-        library call, so the flag the node loop checks is the whole mechanism.
-        A step already in flight (a model call, a tool) still finishes — but the
-        partial turn is committed to the history either way, so the model's
-        context ends where the user's screen did.
-        """
+        """Interrupt model generation; let an already running tool batch settle."""
         self._abort_requested = True
+        state = self._model_stream_state
+        if state is not None:
+            state.cancel()
+            if state.task is not None:
+                await asyncio.shield(asyncio.gather(state.task, return_exceptions=True))
+
+    def _interruptible_model(self) -> Any:
+        """Observe the public model transport to cancel even before first text."""
+        from pydantic_ai.messages import ModelResponse
+        from pydantic_ai.models.wrapper import CompletedStreamedResponse, WrapperModel
+
+        client = self
+
+        class InterruptibleModel(WrapperModel):
+            @contextlib.asynccontextmanager
+            async def request_stream(
+                self,
+                messages,
+                model_settings,
+                model_request_parameters,
+                run_context=None,
+            ):
+                state = client._model_stream_state
+                assert state is not None
+                state.transport_task = asyncio.current_task()
+                try:
+                    if state.cancelled:
+                        # Stop can race the SDK scheduling this task, before
+                        # our transport reference exists. Wake its readiness
+                        # waiter without contacting the provider, then cancel
+                        # this task so neither SDK child remains orphaned.
+                        asyncio.get_running_loop().call_soon(
+                            state.transport_task.cancel
+                        )
+                        yield CompletedStreamedResponse(
+                            model_request_parameters, ModelResponse(parts=[])
+                        )
+                        return
+                    async with super().request_stream(
+                        messages,
+                        model_settings,
+                        model_request_parameters,
+                        run_context,
+                    ) as stream:
+                        yield stream
+                finally:
+                    state.transport_task = None
+
+        return InterruptibleModel(self._agent.model)
+
+    async def _stream_model_response(
+        self, node: Any, run: Any, state: _ModelStreamState
+    ) -> AsyncIterator[ACPEvent]:
+        """Stream in an owned task so Stop does not cancel the consumer's task."""
+        from pydantic_ai.messages import (
+            PartDeltaEvent,
+            PartStartEvent,
+            TextPart,
+            TextPartDelta,
+            ThinkingPart,
+            ThinkingPartDelta,
+        )
+
+        async def produce() -> None:
+            async with node.stream(run.ctx) as stream:
+                state.opened = True
+                try:
+                    if state.cancelled:
+                        raise asyncio.CancelledError
+                    async for event in stream:
+                        chunk = None
+                        if isinstance(event, PartStartEvent):
+                            if isinstance(event.part, TextPart):
+                                chunk = TextChunk(event.part.content)
+                            elif isinstance(event.part, ThinkingPart):
+                                chunk = ThoughtChunk(event.part.content)
+                        elif isinstance(event, PartDeltaEvent):
+                            if isinstance(event.delta, TextPartDelta):
+                                chunk = TextChunk(event.delta.content_delta)
+                            elif isinstance(event.delta, ThinkingPartDelta):
+                                chunk = ThoughtChunk(event.delta.content_delta or "")
+                        if chunk is not None and chunk.text:
+                            await state.queue.put(chunk)
+                finally:
+                    state.response = copy.deepcopy(stream.response)
+                    state.usage = copy.deepcopy(stream.usage())
+            state.completed = True
+
+        self._model_stream_state = state
+        state.task = asyncio.create_task(produce(), name="condor-model-stream")
+        try:
+            while not self._abort_requested:
+                if not state.queue.empty():
+                    event = state.queue.get_nowait()
+                elif state.task.done():
+                    state.task.result()
+                    break
+                else:
+                    receive = asyncio.create_task(state.queue.get())
+                    try:
+                        await asyncio.wait(
+                            (receive, state.task), return_when=asyncio.FIRST_COMPLETED
+                        )
+                        if not receive.done():
+                            continue
+                        event = receive.result()
+                    finally:
+                        if not receive.done():
+                            receive.cancel()
+                        await asyncio.gather(receive, return_exceptions=True)
+                if self._abort_requested:
+                    break
+                if isinstance(event, TextChunk):
+                    state.text.append(event.text)
+                yield event
+        finally:
+            if not state.task.done():
+                state.cancel()
+            await asyncio.gather(state.task, return_exceptions=True)
+            self._model_stream_state = None
 
     async def prompt_stream(
-        self, text: str, *, images: list | None = None
+        self,
+        text: str,
+        *,
+        images: list | None = None,
+        timeout_s: float | None = None,
     ) -> AsyncIterator[ACPEvent]:
         """Send a prompt and yield ACPEvents as they arrive.
 
@@ -1047,9 +1211,14 @@ class PydanticAIClient:
             start_time = time.monotonic()
             self._abort_requested = False
             aborted = False
+            closing = False
+            model_state: _ModelStreamState | None = None
+            pending_request = None
+            tools_started = False
 
             try:
                 from pydantic_ai.agent import CallToolsNode, ModelRequestNode
+                from pydantic_ai.messages import ModelResponse
                 from pydantic_graph import End
 
                 self._permission_gate.reset()
@@ -1059,73 +1228,194 @@ class PydanticAIClient:
                 blocked_ids: set[str] = set()
 
                 async with (
+                    asyncio.timeout(timeout_s),
                     self._agent.iter(
                         self._build_user_prompt(text, images),
                         message_history=self._message_history,
+                        model=self._interruptible_model(),
                     ) as run,
-                    self._usage_counted(run),
                 ):
-                    async for node in run:
-                        if self._abort_requested:
-                            aborted = True
-                            break
+                    try:
+                        async for node in run:
+                            # A tool batch's actual results exist before the
+                            # next request is submitted. Retain them on Stop.
+                            if isinstance(node, ModelRequestNode):
+                                pending_request = node.request
+                                tools_started = False
+                                for event in self._tool_return_events(
+                                    node, blocked_ids
+                                ):
+                                    yield event
+                            if self._abort_requested:
+                                aborted = True
+                                break
 
-                        if isinstance(node, End):
-                            # Final result -- extract text from the result
-                            if hasattr(node, "data") and node.data:
-                                result_data = node.data
-                                if hasattr(result_data, "data"):
-                                    yield TextChunk(text=str(result_data.data))
-                            break
+                            if isinstance(node, End):
+                                break
 
-                        if isinstance(node, ModelRequestNode):
-                            elapsed = time.monotonic() - start_time
-                            yield Heartbeat(elapsed_seconds=elapsed)
-                            for event in self._tool_return_events(node, blocked_ids):
-                                yield event
+                            if isinstance(node, ModelRequestNode):
+                                elapsed = time.monotonic() - start_time
+                                yield Heartbeat(elapsed_seconds=elapsed)
+                                if self._abort_requested:
+                                    aborted = True
+                                    break
+                                model_state = _ModelStreamState(
+                                    response_count=sum(
+                                        isinstance(m, ModelResponse)
+                                        for m in run.new_messages()
+                                    )
+                                )
+                                async with contextlib.aclosing(
+                                    self._stream_model_response(node, run, model_state)
+                                ) as stream:
+                                    async for event in stream:
+                                        yield event
+                                pending_request = None
+                                if self._abort_requested:
+                                    aborted = True
+                                    break
 
-                        elif isinstance(node, CallToolsNode):
-                            async for event in self._response_events(node, blocked_ids):
-                                yield event
+                            elif isinstance(node, CallToolsNode):
+                                async for event in self._response_events(
+                                    node, blocked_ids
+                                ):
+                                    if self._abort_requested:
+                                        break
+                                    yield event
+                                if self._abort_requested:
+                                    aborted = True
+                                    break
+                                tools_started = True
+                    except GeneratorExit:
+                        # Exit the SDK's task-group context normally on aclose.
+                        # Passing GeneratorExit through it can leave its cancel
+                        # scope and our per-server request slot held forever.
+                        aborted = True
+                        closing = True
+                    finally:
+                        self._save_run(run, model_state, pending_request, tools_started)
 
-                    # Accumulate messages so the next prompt_stream() call sees
-                    # this turn's context via message_history. An aborted run
-                    # has no result, but its partial turn must land here too:
-                    # skipping it is what makes the model answer the follow-up
-                    # as though it had finished a turn the user never saw.
-                    if run.result is not None:
-                        self._message_history.extend(run.result.new_messages())
-                    elif aborted:
-                        self._message_history.extend(run.new_messages())
-
+                if closing:
+                    return
                 yield PromptDone(stop_reason="cancelled" if aborted else "end_turn")
 
             except asyncio.TimeoutError:
+                if closing:
+                    raise
                 yield PromptDone(stop_reason="timeout")
             except Exception as e:
+                if closing:
+                    raise
                 log.exception("PydanticAI prompt error: %s", e)
                 self._mark_dead_if_transport_closed(e)
-                yield TextChunk(text=self._format_error(e))
+                yield TextChunk(text=self._format_error(e), is_error=True)
                 yield PromptDone(stop_reason="error")
 
-    @contextlib.asynccontextmanager
-    async def _usage_counted(self, run: Any) -> AsyncIterator[None]:
-        """Count the run's usage however its block is left.
+    def _save_run(
+        self,
+        run: Any,
+        state: _ModelStreamState | None,
+        pending_request: Any,
+        tools_started: bool,
+    ) -> None:
+        """Commit delivered history and known usage without changing SDK state."""
+        from pydantic_ai.messages import (
+            ModelRequest,
+            ModelResponse,
+            RetryPromptPart,
+            TextPart,
+            ToolCallPart,
+            ToolReturnPart,
+        )
 
-        On the way out of the run, not beside the history accumulation: a
-        finished run, a stopped one and one that raised all spent their
-        requests, and so does one whose consumer walked away mid-answer (a WS
-        drop, a page reload), which closes this generator at a ``yield`` and
-        never reaches the lines after the node loop. The run is still open
-        here, so ``PromptDone`` — yielded after this exits — already sees the
-        turn's tokens.
-        """
-        try:
-            yield
-        finally:
-            self._fold_usage(run)
+        messages = list(run.new_messages())
+        usage = run.usage()
+        partial = state is not None and not state.completed
+        if state is not None and state.response is not None:
+            if partial:
+                # AgentStream.usage includes earlier requests in this run.
+                # Adding it to run.usage would count those requests twice.
+                usage = state.usage
+            responses = [
+                i
+                for i, message in enumerate(messages)
+                if isinstance(message, ModelResponse)
+            ]
+            delivered = "".join(state.text)
+            generated = "".join(
+                part.content
+                for part in state.response.parts
+                if isinstance(part, TextPart)
+            )
+            if partial or delivered != generated:
+                # Partial tool JSON and unfinished signed thinking are not
+                # valid replay context. Thoughts remain in the UI transcript.
+                response = replace(
+                    state.response, parts=[TextPart(delivered)] if delivered else []
+                )
+                if len(responses) > state.response_count:
+                    messages[responses[-1]] = response
+                elif delivered:
+                    messages.append(response)
 
-    def _fold_usage(self, run: Any) -> None:
+        if (
+            pending_request is not None
+            and pending_request not in messages
+            and any(
+                isinstance(p, (ToolReturnPart, RetryPromptPart))
+                for p in pending_request.parts
+            )
+        ):
+            messages.append(pending_request)
+
+        returned = {
+            part.tool_call_id
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, (ToolReturnPart, RetryPromptPart))
+        }
+        unresolved = []
+        for index, message in enumerate(messages):
+            if not isinstance(message, ModelResponse):
+                continue
+            missing = [
+                p
+                for p in message.parts
+                if isinstance(p, ToolCallPart) and p.tool_call_id not in returned
+            ]
+            if tools_started:
+                unresolved.extend(missing)
+            elif missing:
+                messages[index] = replace(
+                    message, parts=[p for p in message.parts if p not in missing]
+                )
+        if unresolved:
+            messages.append(
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name=part.tool_name,
+                            tool_call_id=part.tool_call_id,
+                            content="Tool execution was interrupted; its outcome was not "
+                            "confirmed. Check current state before retrying.",
+                        )
+                        for part in unresolved
+                    ]
+                )
+            )
+
+        accounting = list(run.new_messages())
+        if partial and state.response is not None:
+            accounting.append(state.response)
+        self._fold_usage(usage, accounting, partial=partial)
+        self._message_history.extend(
+            m for m in messages if not isinstance(m, ModelResponse) or m.parts
+        )
+
+    def _fold_usage(
+        self, ru: Any, new_messages: list, *, partial: bool = False
+    ) -> None:
         """Add one run's tokens, price and context reading to :attr:`usage`.
 
         pydantic-ai's ``input_tokens`` is already inclusive of cache, which is
@@ -1141,15 +1431,9 @@ class PydanticAIClient:
         try:
             from pydantic_ai.messages import ModelResponse
 
-            ru = run.usage()
-            new_messages = (
-                run.result.new_messages()
-                if run.result is not None
-                else run.new_messages()
-            )
             responses = [m for m in new_messages if isinstance(m, ModelResponse)]
             cost = 0.0
-            priced = True
+            priced = not partial
             for response in responses:
                 try:
                     cost += float(response.cost().total_price)
@@ -1209,55 +1493,43 @@ class PydanticAIClient:
     def _tool_return_events(
         self, node: Any, blocked_ids: set[str]
     ) -> Iterator[ACPEvent]:
-        """Project a model request's tool results as ``completed`` updates.
+        """Project settled tool results and retry failures for the whole batch.
 
         A refused call still produces a (synthetic) refusal result on the next
         request; projecting it would paint "completed" over the "blocked" event
         the dashboard already has, so ``blocked_ids`` filters those out.
         """
-        from pydantic_ai.messages import ToolReturnPart
+        from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
 
         request = getattr(node, "request", None)
         if not request:
             return
 
         for part in request.parts:
-            if not isinstance(part, ToolReturnPart):
+            if not isinstance(part, (ToolReturnPart, RetryPromptPart)):
                 continue
             if (part.tool_call_id or "") in blocked_ids:
                 continue
             content = part.content
             yield ToolCallUpdate(
                 tool_call_id=part.tool_call_id or "",
-                status="completed",
+                status="failed" if isinstance(part, RetryPromptPart) else "completed",
                 output=content if isinstance(content, str) else str(content),
             )
 
     async def _response_events(
         self, node: Any, blocked_ids: set[str]
     ) -> AsyncIterator[ACPEvent]:
-        """Project one model response into text, thought and tool-call events.
+        """Authorize and project complete tool calls after response streaming.
 
         Tool calls are authorized here, one graph step before pydantic-graph
         executes them; ``blocked_ids`` collects the refused ones so their
         refusal result is not later reported as a completion.
         """
-        from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart
+        from pydantic_ai.messages import ToolCallPart
 
         for part in node.model_response.parts:
-            if isinstance(part, TextPart) and part.content:
-                yield TextChunk(text=part.content)
-
-            elif isinstance(part, ThinkingPart) and part.content:
-                # Reasoning models (deepseek-r1/qwq via ollama, gpt-oss via
-                # openrouter) return their thinking as a third part type. The
-                # ACP path already translates the same thing from
-                # ``agent_thought_chunk``; without this branch the thinking
-                # stream is silently dropped and the dashboard/Telegram thought
-                # panel stays empty for every pydantic-ai model (ARCH-333).
-                yield ThoughtChunk(text=part.content)
-
-            elif isinstance(part, ToolCallPart):
+            if isinstance(part, ToolCallPart):
                 approved = True
                 if self.permission_callback:
                     approved, _reason = await self._authorize(part)
@@ -1318,15 +1590,15 @@ class PydanticAIClient:
             approved = False
             reason = f"permission check failed ({exc})"
 
-        self._permission_gate.record(part.tool_call_id, tool_name, approved, reason)
-        return approved, reason
+        return self._permission_gate.record(
+            part.tool_call_id, tool_name, approved, reason
+        )
 
     def _tool_events(self, part: Any, approved: bool) -> list[ACPEvent]:
         """Project one tool call into the events the UI shows.
 
-        A refused call gets a single terminal ``blocked`` event; an approved one
-        opens ``in_progress`` and closes ``completed`` right away, with the real
-        output arriving later as the ``ToolReturnPart`` update for the same id.
+        A refused call gets a terminal ``blocked`` event. Approved calls remain
+        ``in_progress`` until the next request carries their actual results.
         """
         tool_id = part.tool_call_id or uuid.uuid4().hex[:12]
         args = _tool_args_to_dict(part.args)
@@ -1350,7 +1622,6 @@ class PydanticAIClient:
                 kind="mcp",
                 input=args,
             ),
-            ToolCallUpdate(tool_call_id=tool_id, status="completed"),
         ]
 
     def _format_error(self, e: Exception) -> str:

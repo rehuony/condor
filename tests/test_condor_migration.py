@@ -65,43 +65,22 @@ def test_conversations_land_under_their_owner(legacy, agents_root):
     assert not (legacy / "conversations" / "42" / "abc123").exists()
 
 
-def test_state_and_telemetry_move_too(legacy, agents_root):
+def test_state_moves_too(legacy, agents_root):
     (legacy / "state" / "condor.scalper").mkdir(parents=True)
     (legacy / "state" / "condor.scalper" / "state.json").write_text('{"entries": {}}')
-    (legacy / "telemetry").mkdir(parents=True)
-    (legacy / "telemetry" / "outbox.jsonl").write_text("{}\n")
 
     report = ensure_migrated(agents_root)
 
     assert report.state == 1
-    assert report.telemetry == 1
     assert (paths.state_dir("condor.scalper") / "state.json").is_file()
-    assert (paths.telemetry_dir() / "outbox.jsonl").is_file()
 
 
 def test_the_package_keeps_no_runtime_directory(legacy, agents_root):
     _seed_conversation(legacy, 42, "abc123")
-    (legacy / "telemetry").mkdir(parents=True)
-    (legacy / "telemetry" / "outbox.jsonl").write_text("{}\n")
 
     ensure_migrated(agents_root)
 
     assert not legacy.exists(), "condor/.runtime/ must be gone after a boot"
-
-
-def test_a_live_telemetry_spool_at_the_destination_is_not_clobbered(
-    legacy, agents_root
-):
-    """The destination can already exist: a process booted on the new build."""
-    (legacy / "telemetry").mkdir(parents=True)
-    (legacy / "telemetry" / "spool.1.jsonl").write_text("old\n")
-    paths.telemetry_dir().mkdir(parents=True)
-    (paths.telemetry_dir() / "spool.2.jsonl").write_text("live\n")
-
-    ensure_migrated(agents_root)
-
-    assert (paths.telemetry_dir() / "spool.1.jsonl").read_text() == "old\n"
-    assert (paths.telemetry_dir() / "spool.2.jsonl").read_text() == "live\n"
 
 
 # ── the deliberate drop ──

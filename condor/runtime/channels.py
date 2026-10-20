@@ -22,6 +22,9 @@ class TelegramChannel:
         self._chat_id = chat_id
 
     async def deliver(self, pending: PendingConfirmation) -> None:
+        from condor.telegram_output import note_approval
+
+        note_approval(self._chat_id, pending)
         keyboard = InlineKeyboardMarkup(
             [
                 [
@@ -48,4 +51,5 @@ class TelegramChannel:
                 f"{pending.summary}{detail}\n\nApprove this action?"
             ),
             reply_markup=keyboard,
+            disable_notification=False,
         )

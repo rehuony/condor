@@ -9,6 +9,13 @@
 
 import type { CandleData } from "./api";
 import type { CondorWebSocket } from "./websocket";
+import {
+  intervalSeconds,
+  MAX_HISTORY_PAGE_SECONDS,
+  mergeHistoryRanges,
+  missingHistoryRange,
+  type CandleHistoryRange,
+} from "@/lib/candle-history";
 
 // ── Types ──
 
@@ -18,11 +25,13 @@ interface CandleCollection {
   /** Lazily recomputed sorted array (null = dirty) */
   sorted: CandleData[] | null;
   maxSize: number;
+  historyRanges: CandleHistoryRange[];
   lastAccessed: number;
 }
 
 interface Subscription {
   refCount: number;
+  historyRefCount: number;
   teardownTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -78,7 +87,7 @@ function evictOldest(col: CandleCollection): void {
 
 // ── Singleton ──
 
-class CandleStore {
+export class CandleStore {
   collections = new Map<string, CandleCollection>();
   subscriptions = new Map<string, Subscription>();
   listeners = new Map<string, Set<Listener>>();
@@ -153,7 +162,7 @@ class CandleStore {
     // and a socket replacing a closed one has never seen these channels at all.
     for (const [key, sub] of this.subscriptions) {
       if (sub.refCount > 0) {
-        ws.subscribe(key);
+        ws.subscribe(key, { duration: this._liveDuration(key) });
       }
     }
   }
@@ -164,10 +173,10 @@ class CandleStore {
    * Subscribe to a candle channel. Returns cached candles instantly (may be empty).
    * Caller must call `unsubscribe` when done.
    */
-  subscribe(key: string): CandleData[] {
+  subscribe(key: string, retainHistory = false): CandleData[] {
     let sub = this.subscriptions.get(key);
     if (!sub) {
-      sub = { refCount: 0, teardownTimer: null };
+      sub = { refCount: 0, historyRefCount: 0, teardownTimer: null };
       this.subscriptions.set(key, sub);
     }
 
@@ -178,10 +187,15 @@ class CandleStore {
     }
 
     sub.refCount++;
+    if (retainHistory) {
+      sub.historyRefCount++;
+      const col = this.collections.get(key);
+      if (col) col.maxSize = Infinity;
+    }
 
     // Ensure WS subscription (idempotent on the WS side)
     if (sub.refCount === 1 && this.ws) {
-      this.ws.subscribe(key);
+      this.ws.subscribe(key, { duration: this._liveDuration(key) });
     }
 
     this._touchAccess(key);
@@ -192,10 +206,23 @@ class CandleStore {
    * Decrement refCount. At 0: start deferred teardown timer.
    * Collection stays in memory regardless.
    */
-  unsubscribe(key: string): void {
+  unsubscribe(key: string, retainHistory = false): void {
     const sub = this.subscriptions.get(key);
     if (!sub) return;
 
+    if (retainHistory) {
+      sub.historyRefCount = Math.max(0, sub.historyRefCount - 1);
+      if (sub.historyRefCount === 0) {
+        const col = this.collections.get(key);
+        if (col) {
+          col.maxSize = MAX_COLLECTION_SIZE;
+          evictOldest(col);
+          // Coverage cannot promise data that was discarded with this chart.
+          col.historyRanges = [];
+          this._notify(key);
+        }
+      }
+    }
     sub.refCount = Math.max(0, sub.refCount - 1);
     if (sub.refCount > 0) return;
 
@@ -215,11 +242,18 @@ class CandleStore {
     this._notify(key);
   }
 
-  /** Send a duration hint to the backend without re-subscribing the WS channel. */
-  setDuration(key: string, durationSeconds: number): void {
-    if (this.ws) {
-      this.ws.setCandleDuration(key, durationSeconds);
+  /** Merge one complete REST page and remember its requested bounds, even if empty. */
+  mergeHistory(key: string, candles: CandleData[], range: CandleHistoryRange): void {
+    this._upsertMany(key, candles);
+    const col = this._getOrCreateCollection(key);
+    if ((this.subscriptions.get(key)?.historyRefCount ?? 0) > 0) {
+      col.historyRanges = mergeHistoryRanges(col.historyRanges, range);
     }
+    this._notify(key);
+  }
+
+  missingHistory(key: string, range: CandleHistoryRange): CandleHistoryRange | null {
+    return missingHistoryRange(this.collections.get(key)?.historyRanges ?? [], range);
   }
 
   /** Get sorted candles for a channel. */
@@ -255,6 +289,10 @@ class CandleStore {
 
   // ── Internal ──
 
+  private _liveDuration(key: string): number {
+    return Math.min(200 * intervalSeconds(key.split(":")[4]), MAX_HISTORY_PAGE_SECONDS);
+  }
+
   private _getOrCreateCollection(key: string): CandleCollection {
     let col = this.collections.get(key);
     if (!col) {
@@ -262,7 +300,10 @@ class CandleStore {
       col = {
         map: new Map(),
         sorted: null,
-        maxSize: MAX_COLLECTION_SIZE,
+        maxSize: (this.subscriptions.get(key)?.historyRefCount ?? 0) > 0
+          ? Infinity
+          : MAX_COLLECTION_SIZE,
+        historyRanges: [],
         lastAccessed: Date.now(),
       };
       this.collections.set(key, col);

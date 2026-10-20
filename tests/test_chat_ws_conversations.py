@@ -12,7 +12,7 @@ import json
 import pytest
 
 from condor.acp.client import PromptDone, TextChunk
-from condor.runtime import PromptRequest, SessionKey
+from condor.runtime import EventType, PromptRequest, SessionKey
 from condor.runtime import client as runtime
 from condor.runtime import conversations
 from condor.runtime import sessions as session_module
@@ -201,7 +201,9 @@ def test_an_abandoned_prompt_still_records_its_partial_reply(runtime_env):
         stream = runtime.prompt(
             SessionKey.web(USER, slot_id), PromptRequest(text="explain the strategy")
         )
-        await stream.__anext__()
+        async for event in stream:
+            if event.type == EventType.TEXT:
+                break
         await stream.aclose()
         return slot_id
 

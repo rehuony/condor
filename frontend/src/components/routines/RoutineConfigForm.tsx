@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
+import { SelectField as MenuSelect } from "@/components/ui/select-field";
 import type { RoutineFieldInfo } from "@/lib/api";
 import { api } from "@/lib/api";
 import { useServer } from "@/hooks/useServer";
+import { formatSlug } from "@/lib/routineUtils";
 
 interface Props {
   fields: Record<string, RoutineFieldInfo>;
@@ -13,10 +14,16 @@ interface Props {
 }
 
 function SelectField({
+  id,
+  descriptionId,
+  label,
   field,
   value,
   onChange,
 }: {
+  id: string;
+  descriptionId?: string;
+  label: string;
   field: RoutineFieldInfo;
   value: unknown;
   onChange: (v: unknown) => void;
@@ -44,33 +51,37 @@ function SelectField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options, value]);
 
+  // A persisted value the server no longer lists stays visible and selected,
+  // so opening the form never silently swaps it for the first option.
+  const current = String(value ?? field.default ?? "");
+  const items = [
+    ...(current && !options.includes(current) ? [current] : []),
+    ...options,
+  ].map((opt) => ({ value: opt, label: opt }));
+
   return (
-    <div className="relative">
-      <select
-        value={String(value ?? field.default ?? "")}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 pr-8 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
-      >
-        {isLoading && <option value="">Loading...</option>}
-        {!isLoading && options.length === 0 && (
-          <option value="">No options available</option>
-        )}
-        {options.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
-    </div>
+    <MenuSelect
+      size="field"
+      id={id}
+      describedBy={descriptionId}
+      label={label}
+      value={current}
+      onChange={onChange}
+      options={items}
+      placeholder={isLoading ? "Loading..." : items.length === 0 ? "No options available" : undefined}
+    />
   );
 }
 
 function NumberField({
+  id,
+  descriptionId,
   fieldType,
   value,
   onChange,
 }: {
+  id: string;
+  descriptionId?: string;
   fieldType: string;
   value: unknown;
   onChange: (v: number) => void;
@@ -84,6 +95,8 @@ function NumberField({
 
   return (
     <input
+      id={id}
+      aria-describedby={descriptionId}
       type="number"
       step={fieldType === "float" ? "any" : "1"}
       value={draft}
@@ -93,53 +106,89 @@ function NumberField({
         if (!isNaN(v)) onChange(v);
         else setDraft(String(value ?? ""));
       }}
-      className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+      className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
     />
   );
 }
 
 export function RoutineConfigForm({ fields, values, onChange }: Props) {
+  const formId = useId();
+
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {Object.entries(fields).map(([key, field]) => (
-        <div key={key}>
-          <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
-            {field.description || key}
-          </label>
-          {field.widget === "select" && field.options_from ? (
-            <SelectField
-              field={field}
-              value={values[key]}
-              onChange={(v) => onChange(key, v)}
-            />
-          ) : field.type === "bool" ? (
-            <button
-              type="button"
-              onClick={() => onChange(key, !values[key])}
-              className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                values[key]
-                  ? "bg-[var(--color-primary)]/20 text-[var(--color-primary)]"
-                  : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]"
-              }`}
-            >
-              {values[key] ? "ON" : "OFF"}
-            </button>
-          ) : field.type === "int" || field.type === "float" ? (
-            <NumberField
-              fieldType={field.type}
-              value={values[key] ?? field.default ?? ""}
-              onChange={(v) => onChange(key, v)}
-            />
-          ) : (
-            <input
-              type="text"
-              value={String(values[key] ?? field.default ?? "")}
-              onChange={(e) => onChange(key, e.target.value)}
-              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
-            />
-          )}
-        </div>
-      ))}
+    <div className="@container min-w-0 text-left">
+      <div className="grid grid-cols-1 gap-x-5 gap-y-3.5 @min-[640px]:grid-cols-2">
+        {Object.entries(fields).map(([key, field]) => {
+          const id = `${formId}-${key}`;
+          const descriptionId = field.description ? `${id}-description` : undefined;
+          const isBoolean = field.type === "bool" && !(field.widget === "select" && field.options_from);
+          const label = (
+            <label htmlFor={id} className="mb-1 block text-xs font-medium text-[var(--color-text)]">
+              {formatSlug(key)}
+            </label>
+          );
+          const description = field.description ? (
+            <p id={descriptionId} className="mt-1 text-[11px] leading-snug text-[var(--color-text-muted)]">
+              {field.description}
+            </p>
+          ) : null;
+
+          return (
+            <div key={key} className={`min-w-0 break-words ${isBoolean ? "col-span-full flex items-center justify-between gap-4" : ""}`}>
+              {isBoolean ? (
+                <>
+                  <div className="min-w-0">{label}{description}</div>
+                  <button
+                    id={id}
+                    type="button"
+                    role="switch"
+                    aria-checked={!!values[key]}
+                    aria-describedby={descriptionId}
+                    onClick={() => onChange(key, !values[key])}
+                    className="flex h-9 shrink-0 items-center gap-2 rounded-md px-2 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+                  >
+                    <span aria-hidden="true" className={`relative h-5 w-9 rounded-full transition-colors ${values[key] ? "bg-[var(--color-primary)]" : "bg-[var(--color-border)]"}`}>
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-[var(--color-surface)] ${values[key] ? "right-0.5" : "left-0.5"}`} />
+                    </span>
+                    <span aria-hidden="true">{values[key] ? "On" : "Off"}</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {label}
+                  {field.widget === "select" && field.options_from ? (
+                    <SelectField
+                      id={id}
+                      descriptionId={descriptionId}
+                      label={formatSlug(key)}
+                      field={field}
+                      value={values[key]}
+                      onChange={(v) => onChange(key, v)}
+                    />
+                  ) : field.type === "int" || field.type === "float" ? (
+                    <NumberField
+                      id={id}
+                      descriptionId={descriptionId}
+                      fieldType={field.type}
+                      value={values[key] ?? field.default ?? ""}
+                      onChange={(v) => onChange(key, v)}
+                    />
+                  ) : (
+                    <input
+                      id={id}
+                      aria-describedby={descriptionId}
+                      type="text"
+                      value={String(values[key] ?? field.default ?? "")}
+                      onChange={(e) => onChange(key, e.target.value)}
+                      className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+                    />
+                  )}
+                  {description}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

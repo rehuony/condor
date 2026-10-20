@@ -17,7 +17,6 @@ instructions through it, so "one funnel" is only true while both doors redact.
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 
@@ -27,7 +26,6 @@ from condor.runtime import PromptRequest, SessionKey
 from condor.runtime import client as runtime
 from condor.runtime import conversations
 from condor.runtime import sessions as session_module
-from condor.telemetry import taps
 
 SEED = "legal winner thank year wave sausage worth useful legal winner thank yellow"
 TX_HASH = "0x" + "9f" * 32
@@ -192,16 +190,3 @@ def test_the_compact_templates_cross_prompt_once_byte_identical(registry):
     text = "Summarize this conversation so a fresh session can continue it."
     _turn_once(text)
     assert _CapturingClient.seen_once == [text]
-
-
-def test_telemetry_counts_findings_and_carries_no_value(registry, monkeypatch):
-    events: list[dict] = []
-    monkeypatch.setattr(
-        taps, "emit", lambda name, **props: events.append({"name": name, **props})
-    )
-
-    _turn(f"{SEED} and {TX_HASH}")
-
-    turn = next(event for event in events if event["name"] == "agent_turn")
-    assert turn["secrets"] == {"mnemonic": 1, "evm-hex64": 1}
-    assert "sausage" not in json.dumps(turn)

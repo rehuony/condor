@@ -93,7 +93,7 @@ function LocationProbe() {
 
 /**
  * @param split whether there is a workspace pane to sit beside — false is a
- *   narrow window or an agent's own page, where the sheet is full screen and
+ *   narrow window or an agent's own page, where the sheet floats and
  *   the dock, open or not, is behind it.
  */
 async function render({
@@ -141,8 +141,8 @@ async function render({
 const trigger = () =>
   document.querySelector<HTMLButtonElement>('button[aria-label="Routine"]');
 const scopeSelect = () =>
-  document.querySelector<HTMLSelectElement>(
-    'select[aria-label="Routine scope"]',
+  document.querySelector<HTMLButtonElement>(
+    'button[aria-label="Routine scope"]',
   );
 const arrow = (label: string) =>
   document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
@@ -198,6 +198,21 @@ describe("the library sheet's nav bar", () => {
     expect(picked).toEqual(["brigado/mm_regime_detector"]);
   });
 
+  it("walks the open picker without focusing the search input", async () => {
+    await render();
+    await click(trigger()!);
+    const options = [...document.querySelectorAll<HTMLButtonElement>('[data-routine-row]')];
+    expect(document.activeElement?.tagName).not.toBe("INPUT");
+    for (const option of options) {
+      await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "ArrowDown", bubbles: true, cancelable: true,
+      })));
+      expect(document.activeElement).toBe(option);
+    }
+    await click(document.activeElement as HTMLElement);
+    expect(picked).toEqual(["brigado/mm_regime_detector"]);
+  });
+
   it("has no arrow to walk past the end of the list", async () => {
     await render({ source: "brigado/bot_report" });
 
@@ -222,57 +237,39 @@ describe("the library sheet's nav bar", () => {
   });
 });
 
-/**
- * The pane's full-screen version is the page, not a taller sheet (FEAT-091).
- *
- * `/routines` is the same browser with the sidebar, the cards and the runs
- * strip the pane has no room for, so maximizing hands the reader over to it
- * rather than blanking the conversation with a viewport-sized sheet — and hands
- * over what they were reading with them.
- */
 describe("maximizing the library pane", () => {
-  const maximize = () =>
-    document.querySelector<HTMLButtonElement>(
-      'button[title="Full screen, on its own page (f)"]',
-    );
+  const maximize = () => document.querySelector<HTMLButtonElement>('button[title="Full screen (f)"]')!;
 
-  it("goes to the library's own page, on the routine that was open", async () => {
-    await render();
-
-    await click(maximize()!);
-
-    expect(here).toBe("/routines?agent=brigado&routine=brigado%2Fbot_report");
-    // What the pane held is on screen now; leaving it open behind the page
-    // would be two copies of one thing again.
-    expect(closes).toBe(1);
-  });
-
-  it("opens the page on the same report, not the routine's newest", async () => {
+  it("maximizes in place and restores the same reader to the pane", async () => {
     await render({ reportId: "r-42" });
-
-    await click(maximize()!);
-
-    expect(here).toContain("report=r-42");
+    const reader = document.querySelector('[data-testid="library"]');
+    await click(maximize());
+    expect(here).toBe("/");
+    expect(closes).toBe(0);
+    expect(document.querySelector('[data-testid="library"]')).toBe(reader);
+    expect(document.querySelector('aside')?.contains(reader)).toBe(false);
+    await click(document.querySelector<HTMLButtonElement>('button[title="Back beside the chat (f)"]')!);
+    expect(document.querySelector('aside')?.contains(reader)).toBe(true);
+    expect(here).toBe("/");
   });
 
-  it("answers `f` the same way", async () => {
+  it("toggles with f without navigation", async () => {
     await render();
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "f" }));
-    });
-
-    expect(here).toBe("/routines?agent=brigado&routine=brigado%2Fbot_report");
+    for (let i = 0; i < 2; i++) {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "f" })); });
+      expect(here).toBe("/");
+      expect(closes).toBe(0);
+    }
+    expect(maximize()).toBeTruthy();
   });
 
-  it("still zens where there is no pane, and keeps that reversible", async () => {
-    // Below `xl` the sheet opens full screen already, so the button is the way
-    // back rather than a second door out.
+  it("opens windowed on mobile despite a saved full-screen preference", async () => {
+    localStorage.setItem("condor_sheet_zen", "1");
     await render({ split: false });
-
-    expect(maximize()).toBeNull();
-    expect(
-      document.querySelector('button[title="Exit full screen (f)"]'),
-    ).toBeTruthy();
+    await click(maximize());
+    await click(document.querySelector<HTMLButtonElement>('button[title="Exit full screen (f)"]')!);
+    expect(maximize()).toBeTruthy();
+    expect(localStorage.getItem("condor_sheet_zen")).toBe("1");
+    expect(here).toBe("/");
   });
 });

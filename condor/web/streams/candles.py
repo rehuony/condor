@@ -348,6 +348,15 @@ class CandleStreamsMixin:
             )
 
             if dex_candles.uses_gecko_candles(connector):
+                from condor.pool_data import GECKO_OHLCV_MAX, GECKO_OHLCV_MAX_SPAN
+
+                # REST owns full historical windows. A live stream only needs
+                # one bounded page, even if an older client asks for months.
+                start_time = max(
+                    start_time,
+                    end_time - GECKO_OHLCV_MAX * interval_sec,
+                    end_time - GECKO_OHLCV_MAX_SPAN,
+                )
                 candles = await dex_candles.fetch_dex_candles(
                     connector, pool_address, pair, interval, start_time, end_time
                 )

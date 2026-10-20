@@ -40,6 +40,8 @@ export interface PriceLineDragParams {
   getTargets: () => readonly DragTarget[];
   getPricePrecision: () => number | undefined;
   onPriceSet: (slot: PickSlot, price: number) => void;
+  /** Hide any companion overlay when the gesture crosses the drag threshold. */
+  onDragStart?: () => void;
   /** How far the pointer must travel before the press stops being a click. */
   slopPx: number;
 }
@@ -103,13 +105,14 @@ export function usePriceLineDrag(params: PriceLineDragParams): PriceLineDragHand
    *
    * `applyOptions` deep-merges, so naming only the two lines leaves the
    * crosshair's mode and colours alone — and the restore puts back the
-   * library's defaults for exactly the four flags taken away.
+   * visible crosshair while keeping TradeChart's native time label disabled.
    */
   const setCrosshairVisible = useCallback((visible: boolean) => {
     paramsRef.current.getChart()?.applyOptions({
       crosshair: {
         horzLine: { visible, labelVisible: visible },
-        vertLine: { visible, labelVisible: visible },
+        // TradeChart draws a vertically centered DOM time label.
+        vertLine: { visible, labelVisible: false },
       },
     });
   }, []);
@@ -200,6 +203,7 @@ export function usePriceLineDrag(params: PriceLineDragParams): PriceLineDragHand
         // crosshair, and only a gesture that is really moving a line pays for
         // the label going away.
         setCrosshairVisible(false);
+        paramsRef.current.onDragStart?.();
       }
       const y = rowOf(e.clientY);
       if (y === null) return;

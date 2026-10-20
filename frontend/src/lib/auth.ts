@@ -7,7 +7,6 @@ import {
 } from "react";
 
 import { TOKEN_KEY, authHeaders } from "./auth-token";
-import { clearDiagnostics } from "./diagnostics";
 import { queryClient } from "./queryClient";
 import { clearSessionState } from "./sessionState";
 
@@ -34,29 +33,9 @@ const USER_KEY = "condor_user";
 export const SERVER_KEY = "condor_selected_server";
 
 /**
- * Drop the outgoing user's session state when a login replaces a live session.
- *
- * `logout` is the usual way a session ends, but it is not the only one:
- * `/login` stays reachable while authenticated, and a fresh `/web` link from
- * Telegram redeems its token straight into whatever tab is already open. That
- * is a session boundary with no `logout` in between, and everything `logout`
- * drops would otherwise cross it: the React Query cache (every cached response
- * belongs to the session that fetched it — portfolio, bots, API keys,
- * conversations), the console-error ring, the selected server, which the next
- * user may not even have access to, and the stored form state — order sizes,
- * leverage, routine configs — that would otherwise pre-fill the incoming user's
- * panels with the outgoing user's trading (see lib/sessionState.ts). One
- * function and one predicate for the four of them, so they cannot drift apart.
- *
- * Re-logging in as the same user is not a boundary — Telegram mints a new token
- * every time — and keeps its state: the errors are often exactly the session
- * someone is about to file a bug report about, and re-fetching an unchanged
- * cache would cost them a full reload for no security gain. Unreadable stored
- * user: clear, since the point of the check is to prove the two sessions belong
- * to one person.
- *
- * Runs before `setUser`, so `ServerProvider` — keyed by the user id in
- * `App.tsx` — remounts into the cleared `localStorage` rather than ahead of it.
+ * Clear cached responses, the selected server, and stored forms when login
+ * replaces another user's session. Re-login as the same user keeps its state.
+ * Run before setUser so ServerProvider remounts into cleared storage.
  */
 function resetForNewUser(incoming: User) {
   const raw = localStorage.getItem(USER_KEY);
@@ -68,7 +47,6 @@ function resetForNewUser(incoming: User) {
   }
   localStorage.removeItem(SERVER_KEY);
   queryClient.clear();
-  clearDiagnostics();
   clearSessionState();
 }
 
@@ -139,12 +117,6 @@ export function useAuthState(): AuthState {
     // next user to log in renders the previous user's portfolio, bots, API keys
     // and conversations straight from the cache.
     queryClient.clear();
-    // The console-error ring is session state for the same reason the cache is,
-    // and it leaves the machine: it is quoted verbatim into the "Report an
-    // issue" block and into the crash report ErrorBoundary files. Reached both
-    // from the Settings button and from the token check below, so an expired
-    // session drops its errors too.
-    clearDiagnostics();
     // Order sizes, leverage, saved routine configs and starred pairs: what the
     // outgoing user typed, not how this device renders. Device preferences —
     // theme, display currency, panel layout — deliberately survive.

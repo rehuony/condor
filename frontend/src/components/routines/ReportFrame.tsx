@@ -1,9 +1,38 @@
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/lib/api";
+
+/** Measure inside the opaque-origin sandbox without granting same-origin access. */
+function withContentHeight(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const script = doc.createElement("script");
+  script.textContent = `
+    (() => {
+      document.documentElement.style.height = 'auto';
+      document.documentElement.style.minHeight = '0';
+      document.body.style.minHeight = '0';
+      let last = 0;
+      const measure = () => {
+        const body = document.body;
+        const style = getComputedStyle(body);
+        const height = Math.ceil(Math.max(body.scrollHeight, body.getBoundingClientRect().height)
+          + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0));
+        if (height > 0 && height !== last) {
+          last = height;
+          parent.postMessage({type: 'condor-report-height', height}, '*');
+        }
+      };
+      new ResizeObserver(measure).observe(document.body);
+      window.addEventListener('load', measure);
+      measure();
+    })();
+  `;
+  doc.body.appendChild(script);
+  return "<!doctype html>" + doc.documentElement.outerHTML;
+}
 
 /**
  * A rendered report, as its author wrote it.
@@ -31,10 +60,13 @@ export function ReportFrame({
   reportId,
   title,
   className = "",
+  fitContent = false,
 }: {
   reportId: string;
   title: string;
   className?: string;
+  /** Let the containing page own vertical scrolling. */
+  fitContent?: boolean;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const { theme: appTheme } = useTheme();
@@ -47,6 +79,21 @@ export function ReportFrame({
     queryKey: ["report-html", reportId],
     queryFn: () => api.getReportHtml(reportId),
   });
+
+  const [measured, setMeasured] = useState<{ html: string; height: number } | null>(null);
+  const srcDoc = useMemo(() => html === undefined ? undefined : fitContent ? withContentHeight(html) : html, [html, fitContent]);
+  useEffect(() => {
+    if (!fitContent || html === undefined) return;
+    const receive = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow || event.data?.type !== "condor-report-height") return;
+      const height = event.data.height;
+      if (typeof height === "number" && Number.isFinite(height) && height > 0) {
+        setMeasured({ html, height: Math.ceil(height) });
+      }
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [fitContent, html]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -82,7 +129,8 @@ export function ReportFrame({
   return (
     <iframe
       ref={iframeRef}
-      srcDoc={html}
+      srcDoc={srcDoc}
+      style={fitContent ? { height: measured?.html === html ? measured.height : "60dvh" } : undefined}
       className={`h-full w-full border-0 ${className}`}
       title={title}
       sandbox="allow-scripts allow-popups allow-downloads"

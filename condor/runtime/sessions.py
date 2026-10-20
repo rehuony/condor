@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from telegram import Bot
 
-from condor.acp import ACPClient, PermissionCallback, PromptDone
+from condor.acp import ACPClient, Heartbeat, PermissionCallback, PromptDone
 from condor.acp.client import ToolCallEvent, ToolCallUpdate, fold_tool_call_event
 from condor.acp.pydantic_ai_client import PydanticAIClient
 from condor.acp.usage import TokenUsage
@@ -139,6 +139,7 @@ class AgentSession:
     conversation_id: str = ""
     is_busy: bool = False
     pending_context: str | None = None  # Lazy context: injected on first prompt
+    history_revision: int = 0
     created_at: datetime = field(default_factory=_utcnow)
     last_prompt_at: datetime | None = None
     # ── What this session was built from, so it can be rebuilt (FEAT-093) ──
@@ -235,12 +236,6 @@ class AgentSession:
         long answer would be failed as "not responding" for doing exactly what
         it was asked to do.
         """
-        # Consume pending context on first prompt (lazy injection)
-        if self.pending_context:
-            ctx = self.pending_context
-            self.pending_context = None
-            text = f"{ctx}\n\n---\n\nUser message:\n{text}"
-
         # Acquire lock with timeout -- prevents infinite wait when previous prompt is stuck
         lock_deadline = PROMPT_LOCK_TIMEOUT if lock_timeout is None else lock_timeout
         try:
@@ -257,6 +252,14 @@ class AgentSession:
         # Cleared *after* the lock, not before: a prompt waiting its turn used
         # to clear the flag out from under the turn ahead of it, so a Stop
         # landing on that turn was swallowed by the message queued behind it.
+        from condor.runtime import turns
+
+        if turns.is_cancelled(
+            self.user_id, self.conversation_id or str(self.key), str(self.key)
+        ):
+            self._lock.release()
+            yield PromptDone(stop_reason="cancelled")
+            return
         self._abort_event.clear()
 
         self.is_busy = True
@@ -265,70 +268,111 @@ class AgentSession:
         # deed belongs to the turn that made it, and a session that lives for a
         # day must not accumulate one map of everything it ever touched.
         tc_map: dict[str, dict] = {}
+        stream = None
+        terminal_reason = None
         try:
             loop = asyncio.get_event_loop()
             deadline = loop.time() + PROMPT_OVERALL_TIMEOUT
-            # Passed only when there is something to pass, so the text-only
-            # call is byte-for-byte the one this line has always made — and a
-            # client that never learned the keyword (a test double, a future
-            # backend) keeps working until the day it is handed a picture.
-            stream = (
-                self.client.prompt_stream(text, images=images)
-                if images
-                else self.client.prompt_stream(text)
-            )
-            async for event in stream:
-                # Check if abort was requested between events
-                if self._abort_event.is_set():
-                    yield PromptDone(stop_reason="cancelled")
-                    break
-                if isinstance(event, (ToolCallEvent, ToolCallUpdate)):
-                    # Folded as it passes, never stored anywhere else: this is
-                    # the same reduction the tick engine and the delegate worker
-                    # run, so a chat's record of what it did has exactly the
-                    # shape a loop's does (FEAT-105).
-                    fold_tool_call_event(tc_map, event)
-                yield event
-                if isinstance(event, PromptDone):
-                    break
-                if loop.time() > deadline:
-                    log.warning(
-                        "Prompt overall timeout (%ds) for session %s",
-                        PROMPT_OVERALL_TIMEOUT,
-                        self.key,
-                    )
-                    # Cancel at the agent before walking away, exactly as
-                    # abort() does. Breaking out only stops us *relaying*: the
-                    # turn would keep generating and keep running tools against
-                    # a permission callback nobody is watching, and the next
-                    # prompt would overlap it at the subprocess. Bounded by
-                    # TIMEOUTS.prompt_cancel with a local fallback, so this
-                    # cannot hang the caller.
-                    try:
-                        await self.client.abort_prompt()
-                    except Exception:  # noqa: BLE001 - never mask the timeout
+            # Session ownership is established even if the provider stays silent.
+            # Frontends can now show activity and expose Stop for this turn.
+            yield Heartbeat(elapsed_seconds=0)
+            if self._abort_event.is_set():
+                terminal_reason = "cancelled"
+            else:
+                if self.pending_context:
+                    ctx = self.pending_context
+                    self.pending_context = None
+                    text = f"{ctx}\n\n---\n\nUser message:\n{text}"
+                # Passed only when there is something to pass, so the text-only
+                # call is byte-for-byte the one this line has always made — and a
+                # client that never learned the keyword (a test double, a future
+                # backend) keeps working until the day it is handed a picture.
+                stream = (
+                    self.client.prompt_stream(text, images=images)
+                    if images
+                    else self.client.prompt_stream(text)
+                )
+                async for event in stream:
+                    # A tool already running when Stop arrived may still settle.
+                    # Keep its actual outcome without relaying further model text.
+                    if self._abort_event.is_set():
+                        terminal_reason = "cancelled"
+                        if isinstance(event, ToolCallUpdate) and event.status in {
+                            "completed",
+                            "failed",
+                            "blocked",
+                            "cancelled",
+                        }:
+                            fold_tool_call_event(tc_map, event)
+                            yield event
+                            continue
+                        break
+                    if isinstance(event, (ToolCallEvent, ToolCallUpdate)):
+                        # Folded as it passes, never stored anywhere else: this is
+                        # the same reduction the tick engine and the delegate worker
+                        # run, so a chat's record of what it did has exactly the
+                        # shape a loop's does (FEAT-105).
+                        fold_tool_call_event(tc_map, event)
+                    yield event
+                    if isinstance(event, PromptDone):
+                        break
+                    if loop.time() > deadline:
                         log.warning(
-                            "Could not cancel timed-out prompt for session %s",
+                            "Prompt overall timeout (%ds) for session %s",
+                            PROMPT_OVERALL_TIMEOUT,
                             self.key,
-                            exc_info=True,
                         )
-                    yield PromptDone(stop_reason="timeout")
-                    break
+                        # Cancel at the agent before walking away, exactly as
+                        # abort() does. Breaking out only stops us *relaying*: the
+                        # turn would keep generating and keep running tools against
+                        # a permission callback nobody is watching, and the next
+                        # prompt would overlap it at the subprocess. Bounded by
+                        # TIMEOUTS.prompt_cancel with a local fallback, so this
+                        # cannot hang the caller.
+                        try:
+                            await self.client.abort_prompt()
+                        except Exception:  # noqa: BLE001 - never mask the timeout
+                            log.warning(
+                                "Could not cancel timed-out prompt for session %s",
+                                self.key,
+                                exc_info=True,
+                            )
+                        terminal_reason = "timeout"
+                        break
         finally:
-            self.is_busy = False
-            self._lock.release()
-            # In ``finally`` rather than on ``PromptDone``: a turn that was
-            # cancelled or timed out still deployed whatever it deployed before
-            # it stopped, and a record that only survives the happy path is
-            # exactly the record you cannot trust. ``record_deeds`` writes
-            # nothing — and creates nothing — when the turn mutated nothing,
-            # which is the common case.
-            deeds.record_deeds(
-                deeds.for_conversation(
-                    self.user_id, self.conversation_id, self.agent_slug
-                ),
-                list(tc_map.values()),
-            )
+            try:
+                if stream is not None:
+                    # A break at PromptDone or a closed consumer does not close
+                    # the provider generator. Finish its cleanup in this same
+                    # task, while the turn still owns the session: ACP settles
+                    # abandoned requests here, and native clients release their
+                    # request slot and count final usage.
+                    try:
+                        await stream.aclose()
+                    except Exception:
+                        # Provider teardown must not replace a cancellation or
+                        # an already delivered terminal event with a new error.
+                        log.exception("Could not close prompt stream for %s", self.key)
+            finally:
+                self.is_busy = False
+                self._lock.release()
+                # In ``finally`` rather than on ``PromptDone``: a turn that was
+                # cancelled or timed out still deployed whatever it deployed before
+                # it stopped, and a record that only survives the happy path is
+                # exactly the record you cannot trust. ``record_deeds`` writes
+                # nothing — and creates nothing — when the turn mutated nothing,
+                # which is the common case.
+                deeds.record_deeds(
+                    deeds.for_conversation(
+                        self.user_id, self.conversation_id, self.agent_slug
+                    ),
+                    list(tc_map.values()),
+                )
+        if terminal_reason is not None:
+            # Closing a partially consumed model stream commits its history and
+            # usage. The runtime snapshots usage at DONE, so publish our own
+            # terminal event only after that cleanup has completed.
+            yield PromptDone(stop_reason=terminal_reason)
 
     async def abort(self) -> None:
         """Abort the current in-flight prompt, at the agent.
@@ -528,8 +572,14 @@ def _resolve_conversation(
             agent_slug=agent_slug,
             server_name=server_name,
         ):
+            from condor.runtime import turns
+
             return spec.conversation_id, conversations.replay_context(
-                spec.user_id, spec.conversation_id
+                spec.user_id,
+                spec.conversation_id,
+                exclude_request_ids=turns.pending_requests(
+                    spec.user_id, spec.conversation_id
+                ),
             )
 
         if spec.conversation_id:
@@ -545,15 +595,6 @@ def _resolve_conversation(
             agent_key=agent_key,
             agent_slug=agent_slug,
             server_name=server_name,
-            # Whether anyone but the owner can speak into this transcript. On
-            # Telegram the key's owner is the *chat*, so a chat id that is not
-            # the user's own id is a group: the session is one, its turns are
-            # recorded under whoever opened it, and nothing downstream could
-            # tell them apart afterwards. Recorded here so the sweep can refuse
-            # it rather than trusting a guard in another module (FEAT-055).
-            multi_author=bool(
-                spec.chat_id is not None and spec.chat_id != spec.user_id
-            ),
         )
         return meta.id, ""
     except Exception:  # noqa: BLE001 - a chat must start even if recording fails
@@ -835,6 +876,7 @@ async def _spawn_session(
             agent_slug=bound.specialist_slug,
             server_name=bound.server_name or resolved_server,
         )
+        history_revision = conversation_revision(spec.user_id, conversation_id)
 
         # What this conversation's positions are called (CORR-325). Appended
         # here rather than inside either context builder because this is the
@@ -876,6 +918,7 @@ async def _spawn_session(
             agent_slug=bound.specialist_slug,
             label=bound.label,
             conversation_id=conversation_id,
+            history_revision=history_revision,
             pending_context=initial_context or None,
             fingerprint=fingerprint,
             # Verbatim, minus the conversation: the id is minted above, and a
@@ -896,6 +939,20 @@ async def _spawn_session(
     _detached.pop(raw_key, None)
     log.info("Created agent session %s: %s (%s)", raw_key, agent_key, bound.label)
     return session
+
+
+def conversation_revision(user_id: int | None, conversation_id: str) -> int:
+    """Completed history revision, excluding accepted inputs still in the queue."""
+    from condor.runtime import turns
+
+    if user_id is None or not conversation_id:
+        return 0
+    meta = conversations.get_conversation(user_id, conversation_id)
+    return (
+        max(0, meta.turn_count - len(turns.pending_requests(user_id, conversation_id)))
+        if meta
+        else 0
+    )
 
 
 def get_session(key: SessionKey) -> AgentSession | None:

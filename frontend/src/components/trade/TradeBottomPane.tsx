@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronUp, ChevronDown, Loader2, Square, Trash2, Wallet, Clock, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api, type ExecutorInfo, type ConsolidatedPosition } from "@/lib/api";
 import { useServer } from "@/hooks/useServer";
 import { usePairBalances } from "@/hooks/usePairBalances";
@@ -476,9 +477,9 @@ export function TradeBottomPane({
           </div>
 
           {/* Content */}
-          <div className="overflow-y-auto flex-1">
+          <div className="overflow-auto min-h-0 flex-1" role="region" aria-label="Trade results, scroll horizontally for all columns" tabIndex={0}>
             {tab === "executors" && (
-              <table className="w-full text-[11px]">
+              <table className="w-full min-w-[48rem] whitespace-nowrap text-[11px]">
                 <thead className="sticky top-0 bg-[var(--color-surface)] z-[1]">
                   <tr className="border-b border-[var(--color-border)] text-left text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
                     <th className="px-3 py-1.5 font-medium">ID</th>
@@ -714,68 +715,35 @@ export function TradeBottomPane({
 
       {/* Stop confirmation */}
       {confirmStopId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-xl">
-            <p className="text-sm text-[var(--color-text)]">
-              Stop executor <span className="font-mono text-[var(--color-text-muted)]">{confirmStopId.slice(0, 8)}</span>?
-            </p>
-            <label className="mt-3 flex cursor-pointer select-none items-center gap-2">
-              <input
-                type="checkbox"
-                checked={keepPosition}
-                onChange={(e) => setKeepPosition(e.target.checked)}
-                className="h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-primary)]"
-              />
-              <span className="text-xs text-[var(--color-text)]">{stopCopy.label}</span>
-            </label>
-            <p className="mt-1 ml-6 text-[11px] text-[var(--color-text-muted)]">
-              {keepPosition ? stopCopy.checked : stopCopy.unchecked}
-            </p>
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                onClick={() => setConfirmStopId(null)}
-                className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => stopMutation.mutate({ id: confirmStopId, keep: keepPosition })}
-                className="rounded bg-[var(--color-red)] px-3 py-1.5 text-xs font-medium text-white hover:brightness-110"
-              >
-                Stop
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={`Stop executor ${confirmStopId.slice(0, 8)}?`}
+          confirmLabel="Stop"
+          onConfirm={() => stopMutation.mutate({ id: confirmStopId, keep: keepPosition })}
+          onCancel={() => setConfirmStopId(null)}
+        >
+          <label className="flex cursor-pointer select-none items-center gap-2">
+            <input
+              type="checkbox"
+              checked={keepPosition}
+              onChange={(e) => setKeepPosition(e.target.checked)}
+              className="h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-primary)]"
+            />
+            <span className="text-[var(--color-text)]">{stopCopy.label}</span>
+          </label>
+          <p className="ml-6 text-xs">{keepPosition ? stopCopy.checked : stopCopy.unchecked}</p>
+        </ConfirmDialog>
       )}
 
       {/* Clear position confirmation */}
       {confirmClearPos && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-xl">
-            <p className="text-sm text-[var(--color-text)]">
-              Clear <span className="font-medium">{confirmClearPos.position_side?.toUpperCase()}</span> position on{" "}
-              <span className="font-mono text-[var(--color-text-muted)]">{confirmClearPos.trading_pair}</span>?
-            </p>
-            <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-              This resets the tracked position state. It does not close the position on the exchange.
-            </p>
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                onClick={() => setConfirmClearPos(null)}
-                className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => clearPositionMutation.mutate(confirmClearPos)}
-                className="rounded bg-[var(--color-red)] px-3 py-1.5 text-xs font-medium text-white hover:brightness-110"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={`Clear ${confirmClearPos.position_side?.toUpperCase() ?? ""} ${confirmClearPos.trading_pair} position?`}
+          confirmLabel="Clear"
+          onConfirm={() => clearPositionMutation.mutate(confirmClearPos)}
+          onCancel={() => setConfirmClearPos(null)}
+        >
+          <p>Only the tracked state resets; the exchange position stays open.</p>
+        </ConfirmDialog>
       )}
     </div>
   );

@@ -1,9 +1,10 @@
-import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, Search, Square, X, Zap } from "lucide-react";
+import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, PanelLeftClose, PanelLeftOpen, Search, Square, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { SelectField } from "@/components/ui/select-field";
 import type { RoutineInfo, RoutineInstance } from "@/lib/api";
 import { formatRelativeTime, toMs } from "@/lib/formatters";
-import { formatInterval, formatSlug, routineAgent, routineAgents } from "@/lib/routineUtils";
+import { formatInterval, formatRoutineName, formatSlug, routineAgent, routineAgents } from "@/lib/routineUtils";
 
 /** What the latest report of a routine says about it, for the card's footer. */
 export interface RoutineReportInfo {
@@ -20,7 +21,7 @@ export interface RoutineReportInfo {
  * open (FEAT-091). The page was a grid of cards over a strip of runs, and
  * clicking a card threw both away for a full-screen browser whose own sidebar
  * was a flat list — two renderings of one list, one of them reachable only by
- * leaving the other. The cards, the agent bubbles, the search box and the runs
+ * leaving the other. The cards, the scope filters, the search box and the runs
  * strip live here now, beside the report they pick, so the page *is* the
  * browser and there is nothing to open.
  *
@@ -43,8 +44,10 @@ export function RoutineLibrarySidebar({
   stopping = false,
   listRef,
   reportInfo,
+  page = false,
+  headerAction,
 }: {
-  /** Every routine, for the bubbles' counts — not just the ones in scope. */
+  /** Every routine, for the scope counts — not just the ones in scope. */
   routines: RoutineInfo[];
   /** What the list renders: the picked scope, narrowed by the search box. */
   listed: RoutineInfo[];
@@ -62,10 +65,15 @@ export function RoutineLibrarySidebar({
   /** The browser scrolls the active card into view through this. */
   listRef: React.RefObject<HTMLDivElement | null>;
   reportInfo: Map<string, RoutineReportInfo>;
+  /** The page has room for a wider library and its own picker below md. */
+  page?: boolean;
+  /** A command over the listed routines, drawn in the header (Run All). */
+  headerAction?: React.ReactNode;
 }) {
   const agents = useMemo(() => routineAgents(routines), [routines]);
   const condorCount = routines.filter((r) => !routineAgent(r)).length;
   const agentCount = routines.length - condorCount;
+  const category = scope === "all" ? "all" : scope === "condor" || scope === "routine" ? "condor" : "agent";
 
   const live = (status: string) => status === "running" || status === "scheduled";
 
@@ -94,77 +102,80 @@ export function RoutineLibrarySidebar({
   }, [runs, showAllRuns]);
   const hiddenRuns = runs.length - shownRuns.length;
 
-  /** One scope bubble. `"routine"` is the older spelling of `"condor"`. */
-  const bubble = (
+  const categoryButton = (
     value: string,
     label: string,
     count: number,
-    Icon?: typeof Brain,
   ) => {
-    const on = scope === value || (value === "condor" && scope === "routine");
-    const agentish = value !== "all" && value !== "condor";
+    const on = category === value;
     return (
       <button
         key={value}
+        type="button"
         onClick={() => onScopeChange(value)}
         aria-pressed={on}
         data-scope={value}
         title={`Show ${label.toLowerCase()}`}
-        className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all ${
+        className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-1.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/40 ${
           on
-            ? agentish
-              ? "bg-purple-500 text-white"
-              : "bg-[var(--color-primary)] text-white"
-            : agentish
-              ? "bg-purple-500/10 text-purple-400 hover:bg-purple-500/20"
-              : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+            : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
         }`}
       >
-        {Icon && <Icon className="h-2.5 w-2.5" />}
         {label}
-        {count > 0 && <span className="opacity-70">{count}</span>}
+        <span className="text-[11px] opacity-70">{count}</span>
       </button>
     );
   };
 
   return (
     <div
-      className={`flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
-        compact ? "w-12" : "w-64"
+      role="region"
+      aria-label="Routine library"
+      className={`${page ? "hidden md:flex @max-[639px]/routine-browser:hidden" : "flex"} min-h-0 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] ${
+        compact
+          ? "w-full max-h-32 md:w-12 md:max-h-none"
+          : page
+            ? "w-full md:w-[300px]"
+            : "w-full max-h-[35%] md:w-64 md:max-h-none"
       }`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2.5">
+      <div className={`flex shrink-0 items-center border-b border-[var(--color-border)] py-3 ${compact ? "flex-col gap-2 px-1" : "justify-between gap-2 px-4"}`}>
         {!compact && (
-          <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <span className="mr-auto text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Routines
           </span>
         )}
+        {headerAction}
         <button
+          type="button"
           onClick={onToggleCompact}
-          className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+          className="shrink-0 rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/40"
           title={compact ? "Expand the library" : "Collapse to the rail"}
         >
-          {compact ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+          {compact ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
         </button>
       </div>
 
       {!compact && (
         <>
           {/* Search */}
-          <div className="relative border-b border-[var(--color-border)] px-2 py-2">
-            <Search className="absolute left-4 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--color-text-muted)]" />
+          <div className="relative shrink-0 px-3 py-3">
+            <Search className="absolute left-5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <input
               type="text"
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
+              aria-label="Search routines"
               placeholder="Search routines…"
-              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] py-1 pl-7 pr-6 text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]/70 focus:border-[var(--color-primary)] focus:outline-none"
+              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] py-2 pl-8 pr-8 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]/70 focus:border-[var(--color-primary)] focus:outline-none"
             />
             {search && (
               <button
+                type="button"
                 onClick={() => onSearchChange("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                className="absolute right-5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                 title="Clear search"
               >
                 <X className="h-3 w-3" />
@@ -172,15 +183,25 @@ export function RoutineLibrarySidebar({
             )}
           </div>
 
-          {/* Whose routines this list shows. The bubbles sit on the list they
-              filter; the header's select is what the collapsed rail falls back
-              to, where there is no list to put them beside. */}
-          <div className="flex flex-wrap gap-1 border-b border-[var(--color-border)] px-2 py-2">
-            {bubble("all", "All", routines.length)}
-            {condorCount > 0 && bubble("condor", "Condor", condorCount, Zap)}
-            {agentCount > 0 && bubble("agent", "Agents", agentCount, Brain)}
-            {agents.map((slug) =>
-              bubble(slug, formatSlug(slug), 0, Brain),
+          {/* The agent choice refines Agents without adding a second scope. */}
+          <div className="shrink-0 space-y-2 border-b border-[var(--color-border)] px-3 pb-3">
+            <div className="grid grid-cols-3 gap-1">
+              {categoryButton("all", "All", routines.length)}
+              {categoryButton("condor", "Condor", condorCount)}
+              {categoryButton("agent", "Agents", agentCount)}
+            </div>
+            {category === "agent" && (
+              <SelectField
+                size="compact"
+                label="Routine agent"
+                value={scope}
+                onChange={onScopeChange}
+                // "condor" is the Condor scope above, not an agent to pick here.
+                options={[
+                  { value: "agent", label: "All agents" },
+                  ...agents.filter((slug) => slug !== "condor").map((slug) => ({ value: slug, label: formatSlug(slug) })),
+                ]}
+              />
             )}
           </div>
         </>
@@ -189,10 +210,10 @@ export function RoutineLibrarySidebar({
       {/* The routines themselves */}
       <div
         ref={listRef}
-        className={`flex-1 overflow-y-auto scrollbar-thin ${compact ? "" : "space-y-1.5 p-2"}`}
+        className={`min-h-0 flex-1 overflow-y-auto scrollbar-thin ${compact ? "" : "space-y-1 p-2"}`}
       >
         {listed.length === 0 && !compact && (
-          <p className="px-1 py-6 text-center text-[11px] text-[var(--color-text-muted)]">
+          <p className="px-2 py-6 text-center text-xs text-[var(--color-text-muted)]">
             {routines.length === 0 ? "No routines available" : "No matches"}
           </p>
         )}
@@ -202,7 +223,8 @@ export function RoutineLibrarySidebar({
             (i) => i.routine_name === r.name && live(i.status),
           );
           const owner = routineAgent(r);
-          const displayName = r.name.replace(/_/g, " ");
+          const displayName = formatRoutineName(r.name);
+          const accessibleName = owner ? `${displayName} · ${formatSlug(owner)}` : displayName;
           const info = reportInfo.get(r.name);
           const reportCount = info?.count ?? r.report_count;
 
@@ -210,14 +232,17 @@ export function RoutineLibrarySidebar({
             return (
               <button
                 key={r.name}
+                type="button"
                 onClick={() => onSelect(r.name)}
+                aria-label={accessibleName}
+                aria-current={isActive ? "true" : undefined}
                 {...(isActive ? { "data-active-source": true } : {})}
-                className={`flex w-full items-center justify-center py-3 transition-colors ${
+                className={`flex w-full items-center justify-center py-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-primary)]/40 ${
                   isActive
                     ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
                     : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
                 }`}
-                title={displayName}
+                title={accessibleName}
               >
                 {owner ? (
                   <Brain className="h-4 w-4 text-purple-400" />
@@ -235,12 +260,15 @@ export function RoutineLibrarySidebar({
           return (
             <button
               key={r.name}
+              type="button"
               onClick={() => onSelect(r.name)}
+              aria-label={accessibleName}
+              aria-current={isActive ? "true" : undefined}
               {...(isActive ? { "data-active-source": true } : {})}
-              className={`block w-full rounded-lg border p-2.5 text-left transition-all ${
+              className={`block w-full rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/40 ${
                 isActive
                   ? "border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5"
-                  : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-primary)]/30 hover:bg-[var(--color-surface-hover)]"
+                  : "border-transparent hover:border-[var(--color-border)] hover:bg-[var(--color-surface-hover)]"
               }`}
             >
               <div className="flex items-start justify-between gap-2">
@@ -249,7 +277,7 @@ export function RoutineLibrarySidebar({
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_4px_theme(colors.emerald.400)]" />
                   )}
                   <span
-                    className={`truncate text-xs font-semibold ${
+                    className={`truncate text-[13px] font-semibold ${
                       isActive ? "text-[var(--color-text)]" : "text-[var(--color-text)]/90"
                     }`}
                   >
@@ -257,41 +285,35 @@ export function RoutineLibrarySidebar({
                   </span>
                 </div>
                 {reportCount > 0 && (
-                  <span className="shrink-0 rounded-full bg-[var(--color-surface-hover)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--color-text-muted)]">
+                  <span title={`${reportCount} reports`} className="shrink-0 rounded-full bg-[var(--color-surface-hover)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-muted)]">
                     {reportCount}
                   </span>
                 )}
               </div>
               {owner && (
-                <span className="mt-1 inline-flex items-center gap-0.5 rounded bg-purple-500/10 px-1 py-0.5 text-[8px] font-bold uppercase text-purple-400">
-                  <Brain className="h-2 w-2" />
-                  {owner}
+                <span className="mt-1 flex items-center gap-1 text-[11px] text-purple-400">
+                  <Brain className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{formatSlug(owner)}</span>
                 </span>
               )}
-              <p className="mt-1 truncate text-[10px] text-[var(--color-text-muted)]">
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--color-text-muted)]">
                 {info ? info.title : r.description}
               </p>
-              <div className="mt-1 flex items-center gap-1.5">
-                {info ? (
-                  <>
-                    <span className="text-[9px] text-[var(--color-text-muted)]/60">
-                      {formatRelativeTime(info.created_at)}
-                    </span>
-                    {info.tags.slice(0, 2).map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded bg-[var(--color-surface-hover)] px-1 py-0.5 text-[8px] text-[var(--color-text-muted)]/60"
-                      >
-                        #{tag}
-                      </span>
-                    ))}
-                  </>
-                ) : (
-                  <span className="text-[9px] italic text-[var(--color-text-muted)]/40">
-                    No reports yet
+              {info && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-[var(--color-text-muted)]/70">
+                    {formatRelativeTime(info.created_at)}
                   </span>
-                )}
-              </div>
+                  {info.tags.slice(0, 2).map((tag) => (
+                    <span
+                      key={tag}
+                      className="max-w-full truncate rounded bg-[var(--color-surface-hover)] px-1 py-0.5 text-[10px] text-[var(--color-text-muted)]/70"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </button>
           );
         })}
@@ -301,7 +323,7 @@ export function RoutineLibrarySidebar({
           was the only place a run that wrote no report could be found. */}
       {!compact && runs.length > 0 && (
         <div className="max-h-52 shrink-0 overflow-y-auto border-t border-[var(--color-border)] scrollbar-thin">
-          <h3 className="sticky top-0 bg-[var(--color-surface)] px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <h3 className="sticky top-0 bg-[var(--color-surface)] px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Runs <span className="font-medium opacity-60">{runs.length}</span>
           </h3>
           <div className="px-2 pb-2">
@@ -324,10 +346,10 @@ export function RoutineLibrarySidebar({
                     }`}
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[10px] font-medium text-[var(--color-text)]">
+                    <span className="block truncate text-xs font-medium text-[var(--color-text)]">
                       {inst.routine_name.replace(/_/g, " ")}
                     </span>
-                    <span className="flex items-center gap-1.5 text-[9px] text-[var(--color-text-muted)]">
+                    <span className="flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
                       <span className="capitalize">{inst.status}</span>
                       {!live(inst.status) && inst.last_run_at && (
                         <span>{formatRelativeTime(inst.last_run_at, "")}</span>
@@ -347,7 +369,7 @@ export function RoutineLibrarySidebar({
                   <button
                     onClick={() => onStopInstance(inst.instance_id)}
                     disabled={stopping}
-                    className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-all hover:bg-[var(--color-red)]/10 hover:text-[var(--color-red)] group-hover:opacity-100"
+                    className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-colors hover:bg-[var(--color-red)]/10 hover:text-[var(--color-red)] group-hover:opacity-100 focus-visible:opacity-100"
                     title="Stop"
                   >
                     <Square className="h-2.5 w-2.5" />
@@ -358,7 +380,7 @@ export function RoutineLibrarySidebar({
             {hiddenRuns > 0 && (
               <button
                 onClick={() => setShowAllRuns(true)}
-                className="mt-1 w-full rounded border border-dashed border-[var(--color-border)] py-1 text-[10px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                className="mt-1 w-full rounded border border-dashed border-[var(--color-border)] py-1 text-[11px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               >
                 +{hiddenRuns} more
               </button>
@@ -366,7 +388,7 @@ export function RoutineLibrarySidebar({
             {showAllRuns && runs.length > RUNS_COLLAPSED_LIMIT && (
               <button
                 onClick={() => setShowAllRuns(false)}
-                className="mt-1 w-full rounded border border-dashed border-[var(--color-border)] py-1 text-[10px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                className="mt-1 w-full rounded border border-dashed border-[var(--color-border)] py-1 text-[11px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               >
                 Show less
               </button>
@@ -382,7 +404,7 @@ export function RoutineLibrarySidebar({
             <span className="flex items-center gap-0.5">
               <Kbd><ChevronUp className="h-2.5 w-2.5" /></Kbd>
               <Kbd><ChevronDown className="h-2.5 w-2.5" /></Kbd>
-              <span className="ml-0.5">source</span>
+              <span className="ml-0.5">routine</span>
             </span>
             <span className="flex items-center gap-0.5">
               <Kbd><ChevronLeft className="h-2.5 w-2.5" /></Kbd>

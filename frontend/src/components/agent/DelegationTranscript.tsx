@@ -1,12 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ToolCallStatusIcon } from "@/components/chat/ToolCallStatus";
 import { type DelegationEvent, api } from "@/lib/api";
 import { formatToolName } from "@/lib/formatters";
+
+// Commands and paths wrap at the reading width instead of widening the pane.
+const TRANSCRIPT =
+  "min-w-0 [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere] [&_pre]:[word-break:normal] [&_pre_code]:whitespace-pre-wrap [&_button]:max-w-full [&_button]:text-left [&_button_svg]:shrink-0 [&_table]:[overflow-wrap:normal]";
+
+// Tables keep their columns without making the transcript itself scroll sideways.
+const markdownComponents: Components = {
+  table: ({ children }) => (
+    <div className="max-w-full overflow-x-auto"><table>{children}</table></div>
+  ),
+};
 
 /** Reasoning, collapsed by default — it is context, not the answer. */
 function ThoughtRow({ text }: { text: string }) {
@@ -131,8 +142,8 @@ export function DelegationTranscript({ taskId }: { taskId: string }) {
   // far better than telling the user the transcript is gone.
   if (events.length === 0 && data?.markdown) {
     return (
-      <div className="chat-markdown text-xs text-[var(--color-text)]">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.markdown}</ReactMarkdown>
+      <div className={`${TRANSCRIPT} chat-markdown text-xs text-[var(--color-text)]`}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{data.markdown}</ReactMarkdown>
       </div>
     );
   }
@@ -148,7 +159,7 @@ export function DelegationTranscript({ taskId }: { taskId: string }) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className={`${TRANSCRIPT} space-y-2`}>
       {events.map((ev, i) => {
         if (ev.type === "thought") {
           return <ThoughtRow key={`thought-${i}`} text={ev.text} />;
@@ -160,9 +171,9 @@ export function DelegationTranscript({ taskId }: { taskId: string }) {
         return (
           <div
             key={`text-${i}`}
-            className="chat-markdown text-xs text-[var(--color-text)]"
+            className={`${TRANSCRIPT} chat-markdown text-xs text-[var(--color-text)]`}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{ev.text}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{ev.text}</ReactMarkdown>
           </div>
         );
       })}

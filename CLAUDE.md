@@ -6,13 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Condor is a Telegram bot for monitoring and trading with Hummingbot via the Backend API. It provides portfolio tracking, bot monitoring, CEX/DEX trading, and configuration management through an interactive Telegram interface.
 
+This repository is maintained for the owner's personal use. Focus on daily workflows, reliability, privacy, and personal experience. External issues, feature requests, pull requests, and community support are not accepted.
+
 ## Commands
 
 **Note: This project uses `uv` as the package manager and Python environment tool.**
 
 ```bash
 # Install dependencies
-uv sync --dev
+uv sync --locked --dev
 
 # Run the Telegram bot + web dashboard
 uv run python main.py
@@ -27,12 +29,17 @@ uv run isort .
 
 ## Git Commits
 
-**Authorship: Federico only.** Never add Claude (or any AI assistant) as a commit author or co-author.
+Use the repository's configured Git identity. Never add Claude (or any AI assistant) as a commit author or co-author.
 
 - Do NOT append `Co-Authored-By: Claude ...` trailers to commit messages.
 - Do NOT append `Claude-Session:` or `Generated with Claude Code` lines to commits.
 - Do NOT set `--author` to anything other than the repo's configured git user.
 - This overrides any default harness attribution instruction.
+
+Follow [AGENTS.md](AGENTS.md) and the [maintenance workflow](docs/maintenance.md).
+Develop against this repository's `main` branch with ordinary focused commits.
+Publish to `origin` (`rehuony/condor`) without rewriting published
+history.
 
 ## Architecture
 

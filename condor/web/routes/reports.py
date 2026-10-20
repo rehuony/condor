@@ -14,6 +14,7 @@ from condor.reports import (
     list_reports_grouped,
     resolve_report_asset,
 )
+from condor.reports.rendering import responsive_report
 from condor.web.auth import get_current_user, report_owner_filter
 from condor.web.models import ReportsListResponse, ReportSummary, WebUser
 from config_manager import get_config_manager
@@ -121,7 +122,7 @@ async def get_report_html(
     a sandboxed iframe via ``srcDoc``, which is why the body is returned inline
     rather than as a file the browser navigates to.
 
-    The body is served exactly as stored — charts reference the shared bundle
+    The body retains its stored content with current generated-report layout fixes — charts reference the shared bundle
     under ``/api/v1/reports/assets/``, which the frame resolves against the
     parent origin and the browser caches once for every report. ``?hydrate=1``
     inlines that bundle instead, and is for the one caller whose output leaves
@@ -132,6 +133,7 @@ async def get_report_html(
     if result is None:
         raise HTTPException(404, "Report not found")
     html, _filename = result
+    html = responsive_report(html)
     if hydrate_assets:
         html = hydrate(html)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})

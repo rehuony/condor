@@ -61,20 +61,20 @@ let root: Root;
 let setTheme: (t: "dark" | "light" | "colorblind") => void;
 
 /** Exposes the shell's theme control to the test, beside the frame it drives. */
-function Harness() {
+function Harness({ fitContent = false }: { fitContent?: boolean }) {
   const { setTheme: set } = useTheme();
   useEffect(() => {
     setTheme = set;
   }, [set]);
-  return <ReportFrame reportId="r1" title="A report" />;
+  return <ReportFrame reportId="r1" title="A report" fitContent={fitContent} />;
 }
 
-async function render() {
+async function render(fitContent = false) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => {
     root.render(
       <QueryClientProvider client={qc}>
-        <Harness />
+        <Harness fitContent={fitContent} />
       </QueryClientProvider>,
     );
   });
@@ -119,4 +119,25 @@ describe("ReportFrame's theme", () => {
     await act(async () => setTheme("light"));
     expect(posted.at(-1)).toBe("light");
   });
+});
+
+
+it("sizes the page report only from its own sandbox and supports shrinking", async () => {
+  await render(true);
+  const frame = container.querySelector("iframe")!;
+  const send = async (height: unknown, source: MessageEventSource | null) => {
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", { source, data: { type: "condor-report-height", height } }));
+    });
+  };
+  const initial = frame.style.height;
+  await send(2000, window);
+  expect(frame.style.height).toBe(initial);
+  await send(2000, fakeWindow as unknown as Window);
+  expect(frame.style.height).toBe("2000px");
+  await send(400, fakeWindow as unknown as Window);
+  expect(frame.style.height).toBe("400px");
+  for (const invalid of [-1, NaN, Infinity, "3000"]) await send(invalid, fakeWindow as unknown as Window);
+  expect(frame.style.height).toBe("400px");
+  expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
 });

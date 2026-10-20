@@ -198,6 +198,7 @@ afterEach(() => {
 describe("a turn whose prompt_done never arrives", () => {
   it("stops presenting as running once the wire has gone quiet", async () => {
     await arrive();
+    deliver({ event: "conversation_changed", conversation_id: "c1", phase: "accepted", is_busy: true });
     streamWithPendingCall("s1", "t1");
     expect(chat().isSlotStreaming("s1")).toBe(true);
     expect(stripIsLive("s1")).toBe(true);
@@ -209,6 +210,29 @@ describe("a turn whose prompt_done never arrives", () => {
     expect(chat().isStreaming).toBe(false);
     // The symptom the item names: the strip is no longer held open.
     expect(stripIsLive("s1")).toBe(false);
+  });
+
+  it("keeps remote activity busy when this tab has no stalled stream", async () => {
+    await arrive();
+    deliver({ event: "conversation_changed", conversation_id: "c1", phase: "accepted", is_busy: true });
+    await settle();
+    advance(PAST_THE_TIMEOUT);
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+    deliver({ event: "conversation_changed", conversation_id: "c1", phase: "completed", is_busy: false });
+    await settle();
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+  });
+
+  it("does not apply an old stream's stall to a newly accepted remote turn", async () => {
+    await arrive();
+    streamWithPendingCall("s1", "t1");
+    advance(PAST_THE_TIMEOUT);
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+
+    deliver({ event: "conversation_changed", conversation_id: "c1", phase: "accepted", is_busy: true });
+    await settle();
+    advance(PAST_THE_TIMEOUT);
+    expect(chat().isSlotStreaming("s1")).toBe(true);
   });
 
   it("settles a turn the socket dropped out from under", async () => {
@@ -285,6 +309,7 @@ describe("a turn whose prompt_done never arrives", () => {
 describe("a slow but healthy turn", () => {
   it("never trips the watchdog while heartbeats keep arriving", async () => {
     await arrive();
+    deliver({ event: "conversation_changed", conversation_id: "c1", phase: "accepted", is_busy: true });
     streamWithPendingCall("s1", "t1");
 
     // Ten minutes of one long tool call: no text, no tool update, nothing but

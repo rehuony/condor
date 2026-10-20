@@ -1,32 +1,19 @@
-"""Rendering a server-initiated turn in Telegram (FEAT-034).
+"""Telegram delivery for server-initiated turns and independent transcript notes.
 
-A woken turn has no message to reply to and no ``context.bot`` handed down from
-an update — it starts in a background task when a delegation finishes. So this
-sink does what the message handler does, from the other side: send a placeholder,
-wrap it in :class:`~handlers.agents.stream.TelegramStreamer`, and finalize it when
-the turn ends. The chat then shows the agent's continuation exactly the way it
-shows an answer to something the user typed.
-
-The sink is registered with :mod:`condor.runtime.wake` at import time rather than
-imported by it: ``condor.runtime`` must not depend on handler code (see
-``client._local()``).
+Wake turns use the same presenter and acknowledgement protocol as human input.
+Opening a sink performs no Telegram I/O, so a failed progress message cannot
+prevent the recorded answer from receiving a final delivery attempt.
 """
 
 from __future__ import annotations
-
-import logging
 
 from condor.runtime import TELEGRAM
 from condor.runtime.events import RuntimeEvent
 from condor.runtime.keys import SessionKey
 from condor.runtime.wake import register_note_sink, register_sink_factory
-from utils.telegram_formatters import escape_markdown_v2
+from condor.telegram_text import send_markdown
 
 from .stream import TelegramStreamer
-
-log = logging.getLogger(__name__)
-
-PLACEHOLDER = "Thinking..."
 
 # What a note is *about*, in one glyph. The web client separates a note from
 # the agent's own words with an inset border; Telegram has no such affordance,
@@ -41,22 +28,6 @@ NOTE_MARKERS = {
 DEFAULT_NOTE_MARKER = "ℹ️"
 
 
-def _message_id_of(sent) -> int | None:
-    """The id of a just-sent message, whichever sender produced it.
-
-    ``Bot.send_message`` returns a ``Message``; the ``_HttpBot`` fallback returns
-    the raw Telegram API envelope. The streamer needs the id either way.
-    """
-    message_id = getattr(sent, "message_id", None)
-    if message_id is not None:
-        return int(message_id)
-    if isinstance(sent, dict):
-        result = sent.get("result") or {}
-        if isinstance(result, dict) and result.get("message_id") is not None:
-            return int(result["message_id"])
-    return None
-
-
 class TelegramWakeSink:
     """Streams a server-initiated turn into a Telegram chat."""
 
@@ -65,24 +36,11 @@ class TelegramWakeSink:
         self._streamer: TelegramStreamer | None = None
 
     async def open(self) -> None:
-        """Send the placeholder the turn will be written into.
-
-        A chat this process cannot reach (no live bot and no token) leaves the
-        sink inert instead of failing the turn: the answer is still recorded,
-        and the user has already had the completion notice.
-        """
+        """Prepare output without making acceptance depend on Telegram delivery."""
         from condor.agents.delegate import resolve_bot
 
-        bot = resolve_bot()
-        sent = await bot.send_message(chat_id=self._chat_id, text=PLACEHOLDER)
-        message_id = _message_id_of(sent)
-        if message_id is None:
-            log.debug(
-                "No Telegram placeholder for chat %s; wake runs unseen", self._chat_id
-            )
-            return
         self._streamer = TelegramStreamer(
-            bot=bot, chat_id=self._chat_id, message_id=message_id
+            bot=resolve_bot(), chat_id=self._chat_id, user_id=self._chat_id
         )
         self._streamer.start_edit_loop()
 
@@ -92,7 +50,10 @@ class TelegramWakeSink:
 
     async def close(self) -> None:
         if self._streamer is not None:
-            await self._streamer.finalize()
+            try:
+                await self._streamer.finalize()
+            finally:
+                await self._streamer.stop_edit_loop()
 
 
 def _telegram_wake_sink(
@@ -103,9 +64,9 @@ def _telegram_wake_sink(
 
 
 def note_text(text: str, kind: str) -> str:
-    """The note as one MarkdownV2 message: a kind marker, then the note."""
+    """Keep the note's Markdown intact for the shared Telegram renderer."""
     marker = NOTE_MARKERS.get(kind, DEFAULT_NOTE_MARKER)
-    return f"{marker} {escape_markdown_v2(text)}"
+    return f"{marker} {text}"
 
 
 async def _deliver_note(
@@ -134,13 +95,7 @@ async def _deliver_note(
 
     bot = resolve_bot()
     body = note_text(text, kind)
-    try:
-        await bot.send_message(chat_id=chat_id, text=body, parse_mode="MarkdownV2")
-    except Exception:  # noqa: BLE001 - bad markup is retried as plain text
-        # Same rule as ``notifications._send``: the user must get the note,
-        # ugly, rather than not get it at all.
-        log.debug("Note rejected as MarkdownV2 for chat %s; retrying plain", chat_id)
-        await bot.send_message(chat_id=chat_id, text=text)
+    await send_markdown(bot, chat_id, body)
 
 
 # Both halves of the channel, registered here rather than imported by the

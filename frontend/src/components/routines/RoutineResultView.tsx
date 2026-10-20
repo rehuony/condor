@@ -50,7 +50,7 @@ function KpiBar({ kpis }: { kpis: KpiSection[] }) {
           <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
             {k.label}
           </div>
-          <div className="text-lg font-bold text-[var(--color-text)] mt-0.5">
+          <div className="text-lg font-bold break-words text-[var(--color-text)] mt-0.5">
             {k.value}
           </div>
           {k.delta && (
@@ -147,13 +147,13 @@ export function RoutineResultView({ instance }: Props) {
               Raw Output
             </button>
             {rawOpen && (
-              <pre className="max-h-60 overflow-auto border-t border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text)] font-mono whitespace-pre-wrap">
+              <pre className="max-h-60 overflow-auto border-t border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text)] font-mono whitespace-pre-wrap break-words">
                 {instance.result_text}
               </pre>
             )}
           </div>
         ) : (
-          <pre className="max-h-80 overflow-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text)] font-mono whitespace-pre-wrap">
+          <pre className="max-h-80 overflow-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text)] font-mono whitespace-pre-wrap break-words">
             {instance.result_text}
           </pre>
         )

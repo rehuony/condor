@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -46,7 +49,7 @@ def _candle_cache_put(key: tuple, value: list) -> None:
 _candle_inflight = SingleFlight()
 
 
-from condor.fetchers.market_data import fetch_historical_candles
+from condor.fetchers.market_data import _is_rate_limit_error, fetch_historical_candles
 from condor.web.auth import get_current_user, require_server_access
 from condor.web.models import (
     CandleData,
@@ -79,12 +82,49 @@ async def _fetch_dex_candles(
     interval: str,
     start_time: float | None,
     end_time: float | None,
+    *,
+    strict: bool = False,
 ) -> list[CandleData]:
     """GeckoTerminal candles for a DEX/LP/XRPL pair, as the response model."""
     rows = await dex_candles.fetch_dex_candles(
-        connector, pool_address, trading_pair, interval, start_time, end_time
+        connector,
+        pool_address,
+        trading_pair,
+        interval,
+        start_time,
+        end_time,
+        strict=strict,
     )
     return [CandleData(**row) for row in rows]
+
+
+def _candle_upstream_error(exc: Exception) -> HTTPException:
+    """Keep retryable candle throttles distinct without changing other routes."""
+    from condor import pool_data
+
+    if not (_is_rate_limit_error(exc) or pool_data._is_rate_limited(exc)):
+        return upstream_error("Failed to fetch candles", exc)
+    response = getattr(exc, "response", None)
+    headers = getattr(exc, "headers", None) or getattr(response, "headers", None) or {}
+    value = headers.get("Retry-After")
+    delay = 0.0
+    if value is not None:
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            try:
+                delay = (
+                    parsedate_to_datetime(value) - datetime.now(timezone.utc)
+                ).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                pass
+    if not math.isfinite(delay) or delay <= 0:
+        delay = pool_data.gecko_health()["cooldown_remaining"] or 60.0
+    return HTTPException(
+        status_code=429,
+        detail="Candle history is rate limited. Please retry shortly.",
+        headers={"Retry-After": str(max(1, math.ceil(delay)))},
+    )
 
 
 @router.get("/servers/{name}/market/connectors")
@@ -461,13 +501,19 @@ async def _fetch_candles_upstream(
     # Pairs with no CandlesFactory feed never reach the client below — that path
     # 502s for them. A GeckoTerminal-backed connector (a DEX network, or an
     # on-chain venue like xrpl) or an explicit pool_address routes there instead.
-    if pool_address or dex_candles.uses_gecko_candles(connector):
-        return await _fetch_dex_candles(
-            connector, pool_address, trading_pair, interval, start_time, end_time
-        )
-
-    client = await cm.get_client(name)
     try:
+        if pool_address or dex_candles.uses_gecko_candles(connector):
+            return await _fetch_dex_candles(
+                connector,
+                pool_address,
+                trading_pair,
+                interval,
+                start_time,
+                end_time,
+                strict=start_time is not None,
+            )
+
+        client = await cm.get_client(name)
         rows = await fetch_historical_candles(
             client,
             connector,
@@ -476,9 +522,11 @@ async def _fetch_candles_upstream(
             # No start_time means no time range to ask for: go straight to the
             # plain `limit`-sized window.
             start_time=int(start_time) if start_time is not None else None,
-            end_time=int(end_time) if end_time else int(time.time()),
-            limit=limit,
-            fallback_on_error=True,
+            end_time=int(end_time) if end_time is not None else int(time.time()),
+            # A page with explicit bounds must never be replaced by the latest
+            # live-feed window, including when it is successfully empty.
+            limit=limit if start_time is None else None,
+            fallback_on_error=False,
             # CORR-168: one malformed row costs one candle, not the whole
             # chart. The fetcher logs what it dropped at warning, so a payload
             # bug is still diagnosable without 500ing every request for the
@@ -487,13 +535,19 @@ async def _fetch_candles_upstream(
             strict=False,
         )
     except Exception as e:
+        if (
+            start_time is not None
+            and getattr(e, "status", None) == 404
+            and getattr(e, "message", None) == "No historical data available"
+        ):
+            return []
         logger.exception(
             "Failed to fetch candles for %s on %s of '%s'",
             trading_pair,
             connector,
             name,
         )
-        raise upstream_error("Failed to fetch candles", e)
+        raise _candle_upstream_error(e) from e
 
     return [CandleData(**row) for row in rows]
 
@@ -520,17 +574,18 @@ async def get_candles(
     if pool_address and not _POOL_ADDRESS_RE.match(pool_address):
         raise HTTPException(status_code=400, detail="Invalid pool_address")
 
-    # Bucket start_time to 60s intervals so near-identical requests share cache
-    bucketed_start = int(start_time // 60) * 60 if start_time is not None else None
-    bucketed_end = int(end_time // 60) * 60 if end_time is not None else None
+    # History pages have inclusive, exact boundaries. Minute bucketing can
+    # reuse a neighbouring page while dropping or adding its boundary candle.
+    bounded_start = int(start_time) if start_time is not None else None
+    bounded_end = int(end_time) if end_time is not None else None
     cache_key = (
         name,
         connector,
         trading_pair,
         interval,
         limit,
-        bucketed_start,
-        bucketed_end,
+        bounded_start,
+        bounded_end,
         pool_address,
     )
     now = time.monotonic()

@@ -1,7 +1,13 @@
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { Delegation } from "@/lib/api";
+
+const markdownComponents: Components = {
+  table: ({ children }) => (
+    <div className="max-w-full overflow-x-auto [overflow-wrap:normal]"><table>{children}</table></div>
+  ),
+};
 
 /**
  * A delegation's outcome and nothing else: its result as the narrative markdown
@@ -27,7 +33,7 @@ export function DelegationDetail({ delegation: d }: { delegation: Delegation }) 
       ) : body ? (
         // A delegation result is the agent's narrative final answer — render markdown.
         <div className="chat-markdown text-xs text-[var(--color-text)]">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{body}</ReactMarkdown>
         </div>
       ) : (
         <p className="text-xs text-[var(--color-text-muted)]">

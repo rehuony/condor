@@ -6,7 +6,15 @@ import {
   type SortDir,
   type SortKey,
 } from "@/components/perf/ExecutorTable";
-import { exportExecutorsCsv, type ExecutorStop } from "@/components/perf/executorActions";
+import { exportExecutorsCsv, type ExecutorDelete, type ExecutorStop } from "@/components/perf/executorActions";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  DIALOG_BACKDROP,
+  DIALOG_CANCEL,
+  DIALOG_DANGER,
+  DIALOG_FOOTER,
+  DIALOG_PANEL,
+} from "@/components/ui/dialog";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { type ExecutorInfo } from "@/lib/api";
 import { stopKeepCopy } from "@/lib/executorStopCopy";
@@ -50,22 +58,19 @@ export function StopConfirmDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onCancel}>
       <div
-        className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stop-executor-title"
+        className={`${DIALOG_PANEL} max-h-[85dvh] max-w-sm bg-[var(--color-surface)] p-5`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-sm font-semibold">
-          Stop {count === 1 ? "Executor" : `${count} Executors`}?
-        </h3>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          {count === 1
-            ? "This will stop the executor."
-            : `This will stop ${count} active executors.`}
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <label className="flex items-center gap-2 cursor-pointer select-none">
+        <form onSubmit={handleSubmit}>
+          <h3 id="stop-executor-title" className="text-base font-semibold">
+            {count === 1 ? "Stop executor?" : `Stop ${count} executors?`}
+          </h3>
+          <label className="mt-3 flex cursor-pointer select-none items-center gap-2">
             <input
               type="checkbox"
               checked={keepPosition}
@@ -74,28 +79,45 @@ export function StopConfirmDialog({
             />
             <span className="text-sm">{copy.label}</span>
           </label>
-          <p className="text-[10px] text-[var(--color-text-muted)] -mt-2 ml-6">
+          <p className="mt-1 ml-6 text-xs text-[var(--color-text-muted)]">
             {keepPosition ? copy.checked : copy.unchecked}
           </p>
 
-          <div className="flex items-center gap-2 justify-end">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
-            >
+          <div className={`${DIALOG_FOOTER} mt-5`}>
+            <button type="button" onClick={onCancel} autoFocus className={DIALOG_CANCEL}>
               Cancel
             </button>
-            <button
-              type="submit"
-              className="rounded-md bg-[var(--color-red)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 transition-colors"
-            >
-              Confirm Stop
+            <button type="submit" className={DIALOG_DANGER}>
+              Stop
             </button>
           </div>
         </form>
       </div>
     </div>
+  );
+}
+
+export function DeleteConfirmDialog({ ids, onConfirm, onCancel, label, pending = false, error }: {
+  label?: string | null;
+  pending?: boolean;
+  error?: string | null;
+  ids: string[];
+  onConfirm: (ids: string[]) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <ConfirmDialog
+      titleId="delete-executor-title"
+      title={`Delete ${ids.length} terminated ${ids.length === 1 ? "record" : "records"}${label ? ` from ${label}` : ""}?`}
+      confirmLabel={error ? "Retry failed" : "Delete"}
+      pending={pending}
+      error={error}
+      onConfirm={() => onConfirm(ids)}
+      onCancel={onCancel}
+    >
+      {/* The one thing a reader could get wrong: what this does not touch. */}
+      <p>Orders and open positions are not affected.</p>
+    </ConfirmDialog>
   );
 }
 
@@ -106,12 +128,14 @@ function BulkActionBar({
   onExport,
   onClear,
   stopping,
+  activeCount,
 }: {
   count: number;
   onStop: () => void;
   onExport: () => void;
   onClear: () => void;
   stopping: boolean;
+  activeCount: number;
 }) {
   if (count === 0) return null;
   return (
@@ -125,14 +149,14 @@ function BulkActionBar({
         <Download className="h-3 w-3" />
         Export CSV
       </button>
-      <button
+      {activeCount > 0 && <button
         onClick={onStop}
         disabled={stopping}
         className="flex items-center gap-1.5 rounded-md bg-[var(--color-red)] px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90 transition-colors disabled:opacity-50"
       >
         <Square className="h-3 w-3" />
         {stopping ? "Stopping…" : "Stop Selected"}
-      </button>
+      </button>}
       <button
         onClick={onClear}
         className="rounded p-1 hover:bg-[var(--color-surface-hover)] transition-colors"
@@ -162,6 +186,7 @@ function BulkActionBar({
 export function ExecutorRows({
   executors,
   stop,
+  deletion,
   selectedId,
   onSelect,
   rateFormatPnl,
@@ -170,6 +195,7 @@ export function ExecutorRows({
 }: {
   executors: ExecutorInfo[];
   stop: ExecutorStop;
+  deletion?: ExecutorDelete;
   selectedId: string | null;
   onSelect: (ex: ExecutorInfo) => void;
   rateFormatPnl?: (val: number, quote: string) => string;
@@ -236,6 +262,7 @@ export function ExecutorRows({
         onExport={() => exportExecutorsCsv(selected.length > 0 ? selected : executors)}
         onClear={() => setSelectedIds(new Set())}
         stopping={stop.pending}
+        activeCount={selected.filter((ex) => isExecutorActive(ex.status)).length}
       />
       {stop.error && (
         <p className="px-3 py-1.5 text-[11px] text-[var(--color-red)] bg-[var(--color-red)]/5">
@@ -256,6 +283,8 @@ export function ExecutorRows({
           selectedExecutorId={selectedId}
           onStop={handleStopOne}
           stoppingIds={stop.stoppingIds}
+          onDelete={deletion ? (id) => deletion.request([id]) : undefined}
+          deletingIds={deletion?.deletingIds}
           rateFormatPnl={rateFormatPnl}
           rateFormatValue={rateFormatValue}
           rateFormatDetailed={rateFormatDetailed}

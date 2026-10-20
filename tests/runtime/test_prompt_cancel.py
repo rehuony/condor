@@ -14,11 +14,15 @@ import json
 from contextlib import asynccontextmanager
 from dataclasses import replace
 
+from pydantic_ai.models.test import TestModel as PydanticTestModel
+from pydantic_ai.usage import RunUsage
+
 from condor.acp.client import ACPClient, PromptDone, TextChunk
 from condor.acp.pydantic_ai_client import PydanticAIClient
-from condor.runtime import SessionKey
+from condor.runtime import PromptRequest, SessionKey
+from condor.runtime import client as runtime
 from condor.runtime import sessions as session_module
-from condor.runtime import timeouts
+from condor.runtime import timeouts, turns
 
 
 class _FakeStdin:
@@ -89,6 +93,52 @@ def _session(client: ACPClient, slot: str):
     return session_module.AgentSession(
         key=SessionKey.web(7, slot), agent_key="claude-code", client=client
     )
+
+
+def test_stop_at_initial_activity_never_starts_the_acp_request(monkeypatch):
+    """Stop is available before ACP emits anything, including before its request."""
+    client = _client(answers_cancel=True)
+    session = session_module.AgentSession(
+        SessionKey.telegram(7),
+        "claude-code",
+        client,
+        user_id=7,
+        pending_context="Initial instructions",
+    )
+    monkeypatch.setattr(session_module, "_sessions", {str(session.key): session})
+    monkeypatch.setattr(turns, "_turns", {})
+    monkeypatch.setattr(turns, "_sinks", [])
+
+    async def scenario():
+        stream = runtime.prompt(
+            session.key, PromptRequest(text="start", request_id="start")
+        )
+        try:
+            async with session._lock:
+                assert (await anext(stream)).type.value == "accepted"
+                activity = asyncio.create_task(anext(stream))
+                ready, _ = await asyncio.wait({activity}, timeout=0.01)
+                assert not ready
+                assert not session.is_busy
+                assert client._process.stdin.sent == []
+            assert (await asyncio.wait_for(activity, 1)).type.value == "heartbeat"
+            assert session.is_busy
+            assert session._lock.locked()
+            assert client._process.stdin.sent == []
+
+            assert await runtime.abort_turn(7, str(session.key), "start")
+            events = [event async for event in stream]
+            assert len(events) == 1
+            assert events[0].stop_reason == "cancelled"
+            assert client._process.stdin.sent == []
+            assert session.pending_context == "Initial instructions"
+            assert not session.is_busy
+            assert not session._lock.locked()
+            assert not turns._turns
+        finally:
+            await stream.aclose()
+
+    asyncio.run(scenario())
 
 
 # ── ACP: the agent answers session/cancel ──
@@ -398,14 +448,18 @@ class _FakeRun:
     def new_messages(self):
         return list(self._partial[: self.consumed])
 
+    def usage(self):
+        return RunUsage()
+
 
 class _FakeAgent:
     def __init__(self, run: _FakeRun):
         self._run = run
         self.history_seen = None
+        self.model = PydanticTestModel()
 
     @asynccontextmanager
-    async def iter(self, text, message_history=None):
+    async def iter(self, text, message_history=None, model=None):
         self.history_seen = message_history
         yield self._run
 

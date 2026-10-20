@@ -3,10 +3,10 @@
 The sequence "ask for a time range → unwrap a list-or-``{"data": [...]}`` payload →
 fall back to ``get_candles`` → normalize dict-or-tuple rows to float OHLCV" used to
 be inlined three times (the REST candles route, the WS backfill, the WS REST poll)
-with subtly different edges. It now lives in ``condor.fetchers.market_data``, with
-the three differences the call sites actually relied on expressed as arguments:
-``limit=None`` (no fallback), ``fallback_on_error`` (swallow a failing historical
-call) and ``strict`` (surface a malformed row instead of dropping it).
+with subtly different edges. It now lives in ``condor.fetchers.market_data``.
+The REST route's bounded pages and the WS tail poll disable fallback; the WS
+backfill retains its recent-window fallback. Other consumers can explicitly
+opt into ``fallback_on_error`` or strict row normalization.
 
 These tests pin the unified ladder — both payload shapes, both row shapes, the
 fallback branch — and that each call site still gets its own edge behaviour.
@@ -169,6 +169,51 @@ def test_fallback_on_error_swallows_the_range_failure():
     assert client.market_data.candles_calls == [("binance", "BTC-USDT", "1m", 5)]
 
 
+@pytest.mark.parametrize("status", [418, 429])
+def test_rate_limit_never_starts_a_fallback_feed(status):
+    from aiohttp import ClientResponseError, RequestInfo
+    from multidict import CIMultiDict, CIMultiDictProxy
+    from yarl import URL
+
+    url = URL("http://api/market-data/historical-candles")
+    error = ClientResponseError(
+        RequestInfo(url, "POST", CIMultiDictProxy(CIMultiDict()), url),
+        (),
+        status=status,
+        headers={"Retry-After": "120"},
+    )
+    client = FakeClient(historical_exc=error, candles=DICT_ROWS)
+    with pytest.raises(ClientResponseError) as caught:
+        _fetch(client, start_time=100, limit=500, fallback_on_error=True)
+    assert caught.value is error
+    assert caught.value.headers["Retry-After"] == "120"
+    assert client.market_data.candles_calls == []
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        'HTTP status is 418. Error: {"code":-1003,"msg":"IP banned"}',
+        "HTTP status is 429. Error: Too many requests",
+        'Internal error fetching historical candles: {"code": -1003}',
+    ],
+)
+def test_legacy_wrapped_binance_rate_limits_do_not_trigger_fallback(detail):
+    error = RuntimeError(detail)
+    client = FakeClient(historical_exc=error, candles=DICT_ROWS)
+    with pytest.raises(RuntimeError) as caught:
+        _fetch(client, start_time=100, limit=500, fallback_on_error=True)
+    assert caught.value is error
+    assert client.market_data.candles_calls == []
+
+
+def test_an_unrelated_number_does_not_disable_fallback():
+    client = FakeClient(
+        historical_exc=RuntimeError("failed request for 429 candles"), candles=DICT_ROWS
+    )
+    assert _fetch(client, start_time=100, limit=500, fallback_on_error=True) == EXPECTED
+
+
 def test_a_failing_fallback_always_propagates():
     client = FakeClient(historical=[])
 
@@ -280,10 +325,68 @@ def test_the_route_returns_the_same_payload_with_and_without_a_start_time(monkey
     assert [c.model_dump() for c in windowed] == EXPECTED
 
 
-def test_the_route_still_falls_back_when_the_range_call_fails(monkeypatch):
+def test_the_route_preserves_history_failure_instead_of_returning_recent_candles(
+    monkeypatch,
+):
+    from fastapi import HTTPException
+
     client = FakeClient(historical_exc=RuntimeError("boom"), candles=DICT_ROWS)
-    got = _route(client, monkeypatch, start_time=100.0, end_time=200.0)
-    assert [c.model_dump() for c in got] == EXPECTED
+    with pytest.raises(HTTPException) as caught:
+        _route(client, monkeypatch, start_time=100.0, end_time=200.0)
+    assert caught.value.status_code == 502
+    assert client.market_data.candles_calls == []
+
+
+def test_an_empty_history_page_does_not_fetch_the_live_window(monkeypatch):
+    client = FakeClient(historical=[], candles=DICT_ROWS)
+    assert _route(client, monkeypatch, start_time=100, end_time=200) == []
+    assert client.market_data.candles_calls == []
+
+
+@pytest.mark.parametrize(
+    "message,empty",
+    [
+        ("No historical data available", True),
+        ("Not Found", False),
+    ],
+)
+def test_only_the_known_no_history_404_is_an_empty_page(monkeypatch, message, empty):
+    from fastapi import HTTPException
+
+    error = RuntimeError(message)
+    error.status, error.message = 404, message
+    client = FakeClient(historical_exc=error, candles=DICT_ROWS)
+    if empty:
+        assert _route(client, monkeypatch, start_time=100, end_time=200) == []
+    else:
+        with pytest.raises(HTTPException):
+            _route(client, monkeypatch, start_time=100, end_time=200)
+    assert client.market_data.candles_calls == []
+
+
+def test_history_rate_limit_keeps_retry_after_and_never_caches_the_error(monkeypatch):
+    from fastapi import HTTPException
+
+    error = RuntimeError("throttled")
+    error.status, error.headers = 429, {"Retry-After": "17"}
+    client = FakeClient(historical_exc=error, candles=DICT_ROWS)
+    with pytest.raises(HTTPException) as caught:
+        _route(client, monkeypatch, start_time=100, end_time=200)
+    assert caught.value.status_code == 429
+    assert caught.value.headers == {"Retry-After": "17"}
+    assert market._candle_cache == {}
+    client.market_data._historical_exc = None
+    client.market_data._historical = DICT_ROWS
+    assert len(_route(client, monkeypatch, start_time=100, end_time=200)) == 2
+    assert len(client.market_data.historical_calls) == 2
+    assert client.market_data.candles_calls == []
+
+
+def test_history_cache_keeps_exact_inclusive_boundaries(monkeypatch):
+    client = FakeClient(historical=DICT_ROWS)
+    _route(client, monkeypatch, start_time=100, end_time=199)
+    _route(client, monkeypatch, start_time=100, end_time=200)
+    assert [call[-1] for call in client.market_data.historical_calls] == [199, 200]
 
 
 def test_ws_backfill_fills_the_buffer_through_the_fallback(monkeypatch):

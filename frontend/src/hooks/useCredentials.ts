@@ -7,7 +7,7 @@ import { credentialsQuery, gatewayWalletsQuery } from "@/lib/queryClient";
 export function useCredentials() {
   const { server } = useServer();
 
-  const { data, isLoading: credsLoading } = useQuery({
+  const { data, error: credsError, isLoading: credsLoading } = useQuery({
     ...credentialsQuery(server),
     queryFn: () => api.getCredentials(server!),
     enabled: !!server,
@@ -26,7 +26,11 @@ export function useCredentials() {
   const hasWallets = (walletsData?.wallets ?? []).some(
     (g) => (g.walletAddresses ?? []).length > 0,
   );
-  const hasKeys = credentials.length > 0 || hasWallets;
+  // A failed request cannot establish that keys are missing. Keep known keys
+  // available through refetch failures, and leave an unavailable list unknown.
+  const hasKeys = credentials.length > 0 || hasWallets
+    ? true
+    : data !== undefined && !credsError ? false : undefined;
   const isLoading = credsLoading || walletsLoading;
 
   return { hasKeys, isLoading, credentials };

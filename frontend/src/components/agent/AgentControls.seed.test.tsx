@@ -83,8 +83,9 @@ function checkbox(): HTMLInputElement {
   return box!;
 }
 
-function select(): HTMLSelectElement {
-  return container.querySelector("select")!;
+/** The server menu's trigger; it reads the chosen server's name. */
+function select(): HTMLButtonElement {
+  return container.querySelector<HTMLButtonElement>('button[aria-label="Server"]')!;
 }
 
 beforeEach(() => {
@@ -112,7 +113,7 @@ describe("StartSessionDialog seeding", () => {
     await settle();
 
     expect(checkbox().checked).toBe(true);
-    expect(select().value).toBe("brigado_2");
+    expect(select().textContent).toBe("brigado_2");
 
     await click(button("Start Session"));
     await settle();
@@ -139,6 +140,6 @@ describe("StartSessionDialog seeding", () => {
     await settle();
 
     expect(checkbox().checked).toBe(false);
-    expect(select().value).toBe("brigado_2");
+    expect(select().textContent).toBe("brigado_2");
   });
 });

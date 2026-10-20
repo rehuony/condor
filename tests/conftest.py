@@ -90,8 +90,11 @@ def _isolated_runtime_root(tmp_path, monkeypatch):
     ``tmp_path`` stands in for the repo root in the agent tests, so the registry
     and the stores stay one tree.
     """
-    from condor import paths
+    from condor import paths, telegram_ingress, telegram_input
 
+    monkeypatch.setattr(telegram_ingress, "_instance", None)
+    monkeypatch.setattr(telegram_input, "_resolver", None)
+    monkeypatch.setattr(telegram_input, "_resolver_closed", False)
     monkeypatch.setenv(paths.RUNTIME_ROOT_ENV, str(tmp_path / "condor-runtime"))
     monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path / "condor-data"))
     monkeypatch.setenv(paths.AGENTS_ROOT_ENV, str(tmp_path / "agents"))

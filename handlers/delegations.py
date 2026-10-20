@@ -16,11 +16,13 @@ Callbacks reference tasks by their index in the last rendered snapshot
 """
 
 import logging
+from html import escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from condor.agents.delegate import get_all_delegations, get_delegation, stop_delegation
+from condor.telegram_text import render_markdown
 from handlers import clear_all_input_states
 from utils.auth import restricted
 from utils.telegram_formatters import escape_markdown_v2
@@ -82,27 +84,17 @@ def _list_text_and_keyboard(context: ContextTypes.DEFAULT_TYPE):
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
 
 
-def _detail_text_and_keyboard(dt, idx: int):
+def _detail_text_and_keyboard(dt, idx: int, page: int = 0):
     """Render one delegation's full status + result/error."""
     emoji = _STATUS_EMOJI.get(dt.status, "•")
     body = dt.error if dt.status == "error" else dt.result
     body = (body or "").strip() or "no output yet"
-    if len(body) > 3000:
-        body = body[:3000] + "…"
-
-    lines = [
-        f"{emoji} *Delegation* — {escape_markdown_v2(dt.status)}",
-        "",
-        f"*Agent:* {escape_markdown_v2(dt.agent_slug)}",
-        f"*Server:* {escape_markdown_v2(dt.server_name or '-')}",
-        f"*ID:* `{escape_markdown_v2(dt.task_id)}`",
-        "",
-        "*Task*",
-        escape_markdown_v2(dt.task),
-        "",
-        f"*{'Error' if dt.status == 'error' else 'Result'}*",
-        escape_markdown_v2(body),
-    ]
+    if dt.status == "error" and dt.result:
+        body += f"\n\nPartial progress (task incomplete):\n{dt.result}"
+    pages = render_markdown(body, max_len=3400) or render_markdown("no output yet")
+    page = max(0, min(page, len(pages) - 1))
+    heading = f"{emoji} {escape(dt.agent_slug.replace('_', ' '))} · {escape(dt.status)}"
+    text = f"<b>{heading}</b>\n\n{pages[page].html}"
 
     buttons = []
     if dt.status == "running":
@@ -110,7 +102,25 @@ def _detail_text_and_keyboard(dt, idx: int):
             InlineKeyboardButton("⏹ Stop", callback_data=f"deleg:stop:{idx}")
         )
     buttons.append(InlineKeyboardButton("↩ Back", callback_data="deleg:list"))
-    return "\n".join(lines), InlineKeyboardMarkup([buttons])
+    keyboard = []
+    if len(pages) > 1:
+        navigation = []
+        if page:
+            navigation.append(
+                InlineKeyboardButton("←", callback_data=f"deleg:view:{idx}:{page - 1}")
+            )
+        navigation.append(
+            InlineKeyboardButton(
+                f"{page + 1}/{len(pages)}", callback_data=f"deleg:view:{idx}:{page}"
+            )
+        )
+        if page + 1 < len(pages):
+            navigation.append(
+                InlineKeyboardButton("→", callback_data=f"deleg:view:{idx}:{page + 1}")
+            )
+        keyboard.append(navigation)
+    keyboard.append(buttons)
+    return text, InlineKeyboardMarkup(keyboard)
 
 
 def _resolve_task_id(context: ContextTypes.DEFAULT_TYPE, idx_str: str) -> str | None:
@@ -155,7 +165,12 @@ async def delegations_callback_handler(
 
     if action.startswith("view:"):
         await query.answer()
-        idx_str = action.split(":", 1)[1]
+        parts = action.split(":")
+        idx_str = parts[1]
+        try:
+            page = int(parts[2]) if len(parts) > 2 else 0
+        except ValueError:
+            page = 0
         task_id = _resolve_task_id(context, idx_str)
         dt = get_delegation(task_id) if task_id else None
         if dt is None:
@@ -164,9 +179,12 @@ async def delegations_callback_handler(
                 text, reply_markup=keyboard, parse_mode="MarkdownV2"
             )
             return
-        text, keyboard = _detail_text_and_keyboard(dt, int(idx_str))
+        text, keyboard = _detail_text_and_keyboard(dt, int(idx_str), page)
         await query.message.edit_text(
-            text, reply_markup=keyboard, parse_mode="MarkdownV2"
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
         )
         return
 

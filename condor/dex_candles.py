@@ -56,8 +56,11 @@ async def _pool_ohlcv(
     before_timestamp: int | None,
     token: str = "base",
     use_cache: bool = True,
+    *,
+    strict: bool = False,
+    requested_start: float | None = None,
 ) -> list:
-    """Raw OHLCV rows for one pool, or [] on any miss. Never raises."""
+    """Raw OHLCV rows, with opt-in error propagation for historical pages."""
     from condor.pool_data import fetch_ohlcv
 
     try:
@@ -75,8 +78,12 @@ async def _pool_ohlcv(
             limit=limit,
             before_timestamp=before_timestamp,
             token=token,
+            strict=strict,
+            requested_start=requested_start,
         )
     except Exception as e:
+        if strict:
+            raise
         logger.warning(
             "GeckoTerminal OHLCV failed pool=%s connector=%s tf=%s: %s",
             pool_address,
@@ -88,7 +95,9 @@ async def _pool_ohlcv(
     return [] if err or not rows else rows
 
 
-async def _resolve_pool(connector: str, trading_pair: str) -> tuple[str, str]:
+async def _resolve_pool(
+    connector: str, trading_pair: str, *, strict: bool = False
+) -> tuple[str, str]:
     """Find the pool a trading pair trades in. Returns ``(address, token_side)``.
 
     ``("", "base")`` when the pair names nothing GeckoTerminal can resolve — a
@@ -104,10 +113,12 @@ async def _resolve_pool(connector: str, trading_pair: str) -> tuple[str, str]:
     base, quote = split_pair(trading_pair)
 
     if ADDRESS_RE.match(base):
-        return await fetch_token_top_pool(base, connector, quote), "base"
+        return await fetch_token_top_pool(base, connector, quote, strict=strict), "base"
 
     if uses_symbol_pairs(connector):
-        address, inverted = await fetch_pair_top_pool(base, quote, connector)
+        address, inverted = await fetch_pair_top_pool(
+            base, quote, connector, strict=strict
+        )
         return address, ("quote" if inverted else "base")
 
     return "", "base"
@@ -121,6 +132,8 @@ async def fetch_dex_candles(
     start_time: float | None,
     end_time: float | None,
     use_cache: bool = True,
+    *,
+    strict: bool = False,
 ) -> list[dict]:
     """Candles for a DEX/LP/XRPL pair from GeckoTerminal.
 
@@ -137,6 +150,10 @@ async def fetch_dex_candles(
 
     Returns candle dicts (``timestamp``/``open``/``high``/``low``/``close``/
     ``volume``), ascending.
+
+    ``strict=True`` is for bounded historical pages: it preserves inclusive
+    request boundaries, raises upstream failures, and never substitutes a
+    different pool when an explicit pool has no trades in that window.
     """
     from condor.pool_data import candles_needed, normalize_timeframe, timeframe_seconds
 
@@ -149,24 +166,41 @@ async def fetch_dex_candles(
     # one growing series and buys a full page whenever it has to go upstream.
     count = candles_needed(start_time, end_time, timeframe)
 
-    # Only pin before_timestamp for a window that has already closed — which also
+    # Strict pages pin their exact inclusive end via Gecko's exclusive ceiling.
+    # Other callers only pin windows that have already closed — which also
     # makes it immutable, and so servable from the stored series forever. A live
     # chart pinning its drifting end instead would re-ask upstream for a window it
     # already holds; "latest candles" is both correct and cacheable for it.
     before = (
-        int(end_time)
-        if end_time is not None and end_time < time.time() - tf_seconds
-        else None
+        int(end_time) + 1
+        if strict and end_time is not None
+        else (
+            int(end_time)
+            if end_time is not None and end_time < time.time() - tf_seconds
+            else None
+        )
     )
+    history_options = {
+        "strict": strict,
+        "requested_start": start_time if strict else None,
+    }
 
     rows = []
     if pool_address:
         rows = await _pool_ohlcv(
-            pool_address, connector, timeframe, count, before, use_cache=use_cache
+            pool_address,
+            connector,
+            timeframe,
+            count,
+            before,
+            use_cache=use_cache,
+            **history_options,
         )
 
-    if not rows:
-        resolved, token = await _resolve_pool(connector, trading_pair)
+    # A historical hole in a specified pool is not a reason to stitch in a
+    # different pool's candles. Legacy executor previews keep their fallback.
+    if not rows and not (strict and pool_address):
+        resolved, token = await _resolve_pool(connector, trading_pair, strict=strict)
         if resolved and resolved != pool_address:
             rows = await _pool_ohlcv(
                 resolved,
@@ -176,12 +210,14 @@ async def fetch_dex_candles(
                 before,
                 token=token,
                 use_cache=use_cache,
+                **history_options,
             )
 
     # Rows are [timestamp, open, high, low, close, volume_usd, (datetime)], ascending.
     candles: list[dict] = []
-    # Keep the candle that contains `start`, not just those starting after it.
-    lower = start_time - tf_seconds if start_time is not None else None
+    # Legacy previews keep the candle containing their (possibly mid-bar) start;
+    # paged history has exact bounds and must not add a row from the prior page.
+    lower = start_time if strict or start_time is None else start_time - tf_seconds
     for row in rows:
         if not isinstance(row, (list, tuple)) or len(row) < 6:
             continue

@@ -244,7 +244,7 @@ def test_a_deleted_conversation_takes_its_reaped_slot_with_it(ws_env):
     assert asyncio.run(scenario()) == []
 
 
-def test_the_roster_only_gained_a_key(ws_env):
+def test_the_roster_only_gained_keys(ws_env):
     """An older bundle still reads every field it knows, unchanged in meaning."""
 
     async def scenario():
@@ -255,7 +255,7 @@ def test_the_roster_only_gained_a_key(ws_env):
     entry = asyncio.run(scenario())[0]
 
     assert SHIPPED_KEYS <= set(entry), "a key the dashboard reads went missing"
-    assert set(entry) - SHIPPED_KEYS == {"alive"}
+    assert set(entry) - SHIPPED_KEYS == {"alive", "web_pending_turns"}
 
 
 def test_only_so_many_reaped_slots_are_remembered(ws_env):

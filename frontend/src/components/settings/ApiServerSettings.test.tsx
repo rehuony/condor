@@ -132,10 +132,19 @@ async function mount() {
   }
 }
 
-function field(label: string): HTMLInputElement | HTMLSelectElement {
+function field(label: string): HTMLInputElement | HTMLButtonElement {
   const el = container.querySelector(`[aria-label="${label}"]`);
   if (!el) throw new Error(`no field labelled ${label}`);
-  return el as HTMLInputElement | HTMLSelectElement;
+  return el as HTMLInputElement | HTMLButtonElement;
+}
+
+/** The values a themed menu offers, read by opening it. */
+async function menuValues(label: string): Promise<string[]> {
+  await act(async () => (field(label) as HTMLButtonElement).click());
+  const values = [...document.querySelectorAll(`[role="listbox"][aria-label="${label}"] [role="option"]`)]
+    .map((option) => option.getAttribute("data-value") ?? "");
+  await act(async () => (field(label) as HTMLButtonElement).click());
+  return values;
 }
 
 function buttonSaying(text: string): HTMLButtonElement {
@@ -171,11 +180,14 @@ function saveButton(): HTMLButtonElement {
 
 async function setValue(label: string, value: string) {
   const el = field(label);
-  const proto =
-    el instanceof HTMLSelectElement
-      ? HTMLSelectElement.prototype
-      : HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, "value")!.set!;
+  if (el instanceof HTMLButtonElement) {
+    await act(async () => el.click());
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(`[role="listbox"][aria-label="${label}"] [data-value="${value}"]`)!.click();
+    });
+    return;
+  }
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
   await act(async () => {
     setter.call(el, value);
     el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -267,7 +279,7 @@ describe("ApiServerSettings", () => {
     ownerHolder.current = false;
     await mount();
 
-    expect((field("Rate oracle source") as HTMLSelectElement).value).toBe("gate_io");
+    expect(field("Rate oracle source").textContent).toBe("gate_io");
     expect(field("Rate oracle source").disabled).toBe(true);
     expect(field("Global token").disabled).toBe(true);
     expect(field("Rate limit share (%)").disabled).toBe(true);
@@ -277,9 +289,7 @@ describe("ApiServerSettings", () => {
 
   it("offers the sources the server reported, not a list of its own", async () => {
     await mount();
-    const options = [...field("Rate oracle source").querySelectorAll("option")].map(
-      (o) => o.getAttribute("value"),
-    );
+    const options = await menuValues("Rate oracle source");
 
     expect(options).toEqual(["binance", "gate_io", "kucoin"]);
   });
@@ -292,9 +302,7 @@ describe("ApiServerSettings", () => {
     });
     await mount();
 
-    expect((field("Rate oracle source") as HTMLSelectElement).value).toBe(
-      "retired_source",
-    );
+    expect(field("Rate oracle source").textContent).toBe("retired_source");
   });
 
   it("cannot save until something has changed", async () => {

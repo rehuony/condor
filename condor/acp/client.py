@@ -11,6 +11,7 @@ import base64
 import hashlib
 import logging
 import os
+import re
 import signal
 import subprocess
 import time
@@ -322,7 +323,7 @@ _CLAUDE_SESSION_ENV_VARS = (
 # The suffix is selected at runtime via session/set_model against the agent's
 # advertised models (see ACPClient._select_model), which resolves aliases
 # ("opus", "sonnet", "haiku") and full ids alike — so no hardcoded ids age here.
-# NOTE: claude-agent-acp ignores ANTHROPIC_MODEL; the protocol is the real lever.
+# Verify explicit choices over ACP; bridge versions differ in env handling.
 _CLAUDE_ACP_BASES = {"claude-code", "claude-acp"}
 
 
@@ -334,12 +335,10 @@ def resolve_acp(agent_key: str) -> tuple[str, dict[str, str], str]:
     no preference, so the agent keeps its own default. Non-Claude bases ignore any
     suffix.
 
-    The suffix is returned as ``model-pref`` so the caller can select it over the
-    ACP protocol (``session/set_model``) — the ``claude-agent-acp`` bridge does NOT
-    read ``ANTHROPIC_MODEL`` (it picks from Claude Code ``settings.model`` or the
-    first advertised model), so env is not a reliable channel. We still set
-    ``ANTHROPIC_MODEL`` for any non-bridge consumer, but ACPClient drives the model
-    via the protocol.
+    The suffix sets ``ANTHROPIC_MODEL`` for bridges that honor it and is also
+    returned as ``model-pref``. ACPClient verifies it against the advertised
+    model and switches through ACP when needed. Bare keys leave the bridge's
+    environment, Claude settings and account default in control.
     """
     base, _, model = agent_key.partition(":")
     command = ACP_COMMANDS.get(base, ACP_COMMANDS["claude-code"])
@@ -356,9 +355,9 @@ def resolve_model_id(preference: str, available_models: list[dict]) -> str | Non
     advertised ``modelId`` from the ACP agent's ``availableModels``.
 
     The ``session/set_model`` request needs an EXACT id — the bridge does not
-    fuzzy-match there (unlike its own settings.model handling). We mirror its
-    matching: exact id/name, then substring, so a short alias like "sonnet" still
-    resolves. Returns ``None`` if nothing matches (caller keeps the default).
+    fuzzy-match there. Match exact ids/names first, then unversioned family
+    aliases such as "sonnet". A versioned preference must never silently match
+    a family alias that could resolve to a different version.
     """
     if not preference or not available_models:
         return None
@@ -372,11 +371,11 @@ def resolve_model_id(preference: str, available_models: list[dict]) -> str | Non
         mid, name = fields(m)
         if pref in (mid, name):
             return m.get("modelId")
-    # Substring match either direction (handles "sonnet" ⊂ "claude-sonnet-4-6").
-    for m in available_models:
-        mid, name = fields(m)
-        if (mid and (pref in mid or mid in pref)) or (name and pref in name):
-            return m.get("modelId")
+    if pref.isalpha():
+        family = re.compile(rf"(?:^|[-\s]){re.escape(pref)}(?:$|[-\s\[])")
+        for m in available_models:
+            if any(family.search(value) for value in fields(m)):
+                return m.get("modelId")
     return None
 
 
@@ -409,6 +408,8 @@ def advertised_models(session: dict) -> tuple[list[dict], str | None, str | None
 @dataclass
 class TextChunk:
     text: str
+    # Adapter diagnostics are not assistant prose; old consumers still get text.
+    is_error: bool = False
 
 
 @dataclass
@@ -516,6 +517,10 @@ PermissionCallback = Callable[[dict, list[dict]], Awaitable[dict]]
 class ACPClient:
     """Manages the lifecycle of an ACP subprocess agent."""
 
+    # An ACP peer chooses when to request permission. Receiving tool-update
+    # events does not prove a callback ran before an MCP invocation.
+    enforces_tool_permissions = False
+
     def __init__(
         self,
         command: str,
@@ -536,7 +541,7 @@ class ACPClient:
         # sends arrives as a user turn and loses the argument (FEAT-025).
         self.system_prompt = system_prompt
         # Requested model preference (e.g. "sonnet"); selected over the ACP
-        # protocol after session/new since the bridge ignores ANTHROPIC_MODEL.
+        # protocol after session/new, independently of bridge env handling.
         self.model = model
         self.active_model_id: str | None = None  # resolved id actually in effect
         self._process: asyncio.subprocess.Process | None = None
@@ -632,8 +637,8 @@ class ACPClient:
         # runtime package at module scope closes an import cycle.
         from condor.runtime.timeouts import TIMEOUTS
 
-        # ONE deadline across both steps, not one each: what the caller is
-        # owed is a bounded ``start()``. A child that spawns but never answers
+        # ONE deadline across initialization and model selection bounds
+        # ``start()``. A child that spawns but never answers
         # -- an npx fetch that stalls, a CLI waiting on an interactive prompt,
         # a bridge blocked on auth -- used to park it forever, and every call
         # site opens its own budget only after we return (CORR-333).
@@ -655,6 +660,11 @@ class ACPClient:
                 self._process.stdin,
                 timeout=max(0.0, deadline - time.monotonic()),
             )
+            self._session_id = result["sessionId"]
+            # A session is ready only after its explicit model choice succeeds.
+            await self._select_model(
+                result, timeout=max(0.0, deadline - time.monotonic())
+            )
         except asyncio.TimeoutError:
             detail = await self._stderr_detail()
             await self.stop()
@@ -663,6 +673,9 @@ class ACPClient:
                 f"{TIMEOUTS.agent_handshake}s and was killed (cmd={self.command}). "
                 f"Check that the command runs and speaks ACP on stdio.{detail}"
             ) from None
+        except asyncio.CancelledError:
+            await self.stop()
+            raise
         except Exception as exc:
             # Handshake failed -- kill the subprocess to prevent orphan
             detail = await self._stderr_detail()
@@ -676,7 +689,6 @@ class ACPClient:
                 exc.args = (f"{exc}{detail}", *exc.args[1:])
             raise
 
-        self._session_id = result["sessionId"]
         log.info("ACP session started: %s (cmd=%s)", self._session_id, self.command)
 
         # The agent's own statement of whether it will take a picture. This
@@ -690,20 +702,15 @@ class ACPClient:
             .get("image")
         )
 
-        # Select the requested model over the ACP protocol. The claude-agent-acp
-        # bridge does NOT honor ANTHROPIC_MODEL — it defaults to Claude Code's
-        # settings.model or the first advertised model — so the only reliable way
-        # to pin (e.g.) Sonnet is to select an exact advertised id over ACP.
-        await self._select_model(result)
-
-    async def _select_model(self, session: dict) -> None:
+    async def _select_model(
+        self, session: dict, *, timeout: float | None = None
+    ) -> None:
         """Resolve ``self.model`` against advertised models and set it via ACP.
 
         ``session`` is the ``session/new`` response. Bridges advertise models in
         one of two shapes (:func:`advertised_models`), and each is set through
-        its own request. No-op when no model was requested or it can't be
-        matched — we log either way so the effective model is verifiable from
-        the bot logs rather than the model's self-report.
+        its own request. Bare keys keep the bridge default. An unavailable or
+        rejected explicit choice fails startup rather than running another model.
         """
         available, current, config_id = advertised_models(session)
         self.active_model_id = current
@@ -712,13 +719,11 @@ class ACPClient:
             return
         target = resolve_model_id(self.model, available)
         if not target:
-            log.warning(
-                "ACP model %r not found in advertised models %s; keeping default %s",
-                self.model,
-                [m.get("modelId") for m in available],
-                current,
+            raise RuntimeError(
+                f"Requested model {self.model!r} is not available from the agent. "
+                f"Available models: {', '.join(str(m.get('modelId')) for m in available) or 'none advertised'}. "
+                "Choose an available model or the default-model option."
             )
-            return
         if target == current:
             log.info(
                 "ACP session %s already on requested model %s", self._session_id, target
@@ -735,18 +740,27 @@ class ACPClient:
             method = "session/set_model"
             params = {"sessionId": self._session_id, "modelId": target}
         try:
-            await self._peer.send_request(method, params, self._process.stdin)
-            self.active_model_id = target
-            log.info(
-                "ACP session %s model set to %s (requested %r)",
-                self._session_id,
-                target,
-                self.model,
+            result = await self._peer.send_request(
+                method, params, self._process.stdin, timeout=timeout
             )
-        except Exception:
-            log.exception(
-                "ACP %s failed for %r; staying on %s", method, self.model, current
+        except asyncio.TimeoutError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not select requested model {self.model!r}: {exc}"
+            ) from exc
+        _, confirmed, _ = advertised_models(result or {})
+        if confirmed and confirmed != target:
+            raise RuntimeError(
+                f"Requested model {self.model!r}, but the agent selected {confirmed!r}."
             )
+        self.active_model_id = target
+        log.info(
+            "ACP session %s model set to %s (requested %r)",
+            self._session_id,
+            target,
+            self.model,
+        )
 
     async def stop(self) -> None:
         """Terminate the subprocess and ALL descendants (claude + MCP servers).
@@ -1079,13 +1093,19 @@ class ACPClient:
         return "".join(chunks)
 
     async def prompt_stream(
-        self, text: str, *, images: list | None = None
+        self,
+        text: str,
+        *,
+        images: list | None = None,
+        timeout_s: float | None = None,
     ) -> AsyncIterator[ACPEvent]:
         """Send a prompt and yield ACP events as they arrive.
 
         ``images`` become ``image`` content blocks *before* the text block,
         which is the order providers document for a prompt that asks about a
         picture — the question reads against something already in view.
+        ``timeout_s`` overrides the stream ceiling for a budgeted background
+        task; ordinary chat turns continue to use the runtime policy.
         """
         assert self._process and self._session_id
 
@@ -1156,7 +1176,7 @@ class ACPClient:
         # Hard ceiling for this stream, kept slightly above the session-level
         # budget by the policy itself so a deployment that raises
         # CONDOR_TIMEOUT_PROMPT_OVERALL is not silently cut short here.
-        max_duration = TIMEOUTS.prompt_hard_stop
+        max_duration = TIMEOUTS.prompt_hard_stop if timeout_s is None else timeout_s
 
         async def _hard_stop(elapsed: float) -> None:
             """End the turn at the agent, not merely here.
@@ -1177,13 +1197,16 @@ class ACPClient:
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(self._event_queue.get(), timeout=30)
+                    remaining = max_duration - (loop.time() - start_time)
+                    event = await asyncio.wait_for(
+                        self._event_queue.get(), timeout=max(0, min(30, remaining))
+                    )
                 except asyncio.TimeoutError:
                     elapsed = loop.time() - start_time
                     if not self.alive:
                         yield PromptDone(stop_reason="disconnected")
                         break
-                    if elapsed > max_duration:
+                    if elapsed >= max_duration:
                         await _hard_stop(elapsed)
                         yield PromptDone(stop_reason="timeout")
                         break

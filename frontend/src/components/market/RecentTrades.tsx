@@ -83,23 +83,23 @@ export function RecentTrades({ server, connector, pair }: RecentTradesProps) {
   }
 
   return (
-    <div className="flex flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-[var(--color-border)] px-3 py-2">
+      <div className="shrink-0 border-b border-[var(--color-border)] px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
           Recent Trades
         </h3>
       </div>
 
       {/* Column headers */}
-      <div className="grid grid-cols-3 gap-1 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
         <span>Time</span>
         <span className="text-right">Price</span>
         <span className="text-right">Amount</span>
       </div>
 
       {/* Trades list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {trades.length === 0 ? (
           <div className="flex items-center justify-center py-6 text-xs text-[var(--color-text-muted)]">
             Waiting for trades...

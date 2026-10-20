@@ -222,6 +222,28 @@ def mark_read(user_id: int, ids: list[str] | None = None) -> int:
     return sum(1 for raw in items if isinstance(raw, dict) and not raw.get("read"))
 
 
+def clear(user_id: int) -> int:
+    """Delete every one of this user's notifications. Returns how many went.
+
+    Scoped like :func:`mark_read`: only ``user_id``'s own bucket is touched.
+    Persistence errors propagate so callers do not report a deletion that failed.
+    """
+    if not user_id:
+        return 0
+    key = str(int(user_id))
+    data = _read_all()
+    removed = len(data.pop(key, None) or [])
+    if removed:
+        try:
+            _write_all(data)
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "Could not persist cleared notifications for %s", user_id, exc_info=True
+            )
+            raise
+    return removed
+
+
 def user_for_chat(chat_id: Any) -> int | None:
     """The dashboard user behind a Telegram chat id, or None if there is none.
 
@@ -340,6 +362,9 @@ class Delivery(NamedTuple):
 
     sent: bool
     recorded: bool
+    error: str | None = None
+    image_sent: bool = False
+    text_sent: bool = False
 
 
 def _reached_telegram(result: Any) -> bool:
@@ -358,30 +383,6 @@ def _reached_telegram(result: Any) -> bool:
     return True
 
 
-async def _send(target: Any, chat_id: Any, text: str, parse_mode: str) -> Any:
-    """Push ``text`` at ``chat_id``, retrying once without ``parse_mode``.
-
-    The overwhelmingly common failure is an unescaped ``_`` or ``*`` in text a
-    model wrote: the user must get the message, ugly, rather than not get it at
-    all. The retry is skipped when the first attempt reached the bell — that
-    rung cannot fail on markup, and calling it twice would file it twice.
-    """
-    if parse_mode:
-        try:
-            result = await target.send_message(
-                chat_id=chat_id, text=text, parse_mode=parse_mode
-            )
-            if isinstance(result, Notification) or _reached_telegram(result):
-                return result
-        except Exception:  # noqa: BLE001 - bad markup is retried as plain text
-            log.debug("Notification rejected with parse_mode=%s", parse_mode)
-    try:
-        return await target.send_message(chat_id=chat_id, text=text)
-    except Exception:  # noqa: BLE001 - an undeliverable push still rings the bell
-        log.warning("Could not deliver notification to chat %s", chat_id)
-        return None
-
-
 async def announce(
     user_id: int | None,
     chat_id: Any,
@@ -393,6 +394,7 @@ async def announce(
     title: str | None = None,
     link: str | None = None,
     bell_text: str | None = None,
+    photo: tuple[bytes, str] | None = None,
 ) -> Delivery:
     """Tell ``user_id`` something, on Telegram *and* on the bell, once each.
 
@@ -415,12 +417,25 @@ async def announce(
     a link the reader clicks, so a producer that ends its message with "use
     /something" would be telling a dashboard reader to type into a Telegram it
     may not even have. Left unset, both surfaces get ``text``.
+
+    All Telegram deliveries are split into complete, formatted pages. The bell
+    records one full notification. ``parse_mode`` selects standard Markdown,
+    Telegram HTML or literal text.
+
+    Images are sent separately from the paginated text, so photo captions never
+    truncate the answer. Component receipts distinguish partial delivery; only
+    Telegram rate-limit rejections may retry a photo, never an ambiguous failure.
+    The caller owns durable image storage; the bell stores text and a link only.
     """
-    if not text:
+    if not text and photo is None:
         return Delivery(False, False)
 
     filed: Notification | None = None
     sent = False
+    image_sent = False
+    text_sent = False
+    error = None
+    notice = bell_text or text or "Image"
     if chat_id:
         from condor.agents.delegate import resolve_bot
 
@@ -434,15 +449,51 @@ async def announce(
             # *only* entry the producer gets, so dropping the link here would
             # lose it on exactly the surface that renders it (CORR-262).
             target = NotifyBot(kind, title=title, link=link)
-            body = bell_text or text
-        result = await _send(target, chat_id, body, parse_mode)
-        if isinstance(result, Notification):
-            filed = result
-        else:
-            sent = _reached_telegram(result)
+            body = notice
+        try:
+            if isinstance(target, NotifyBot):
+                filed = await target.send_message(chat_id=chat_id, text=body)
+                if photo is not None:
+                    error = (
+                        "Telegram is not configured; the image was not sent to Telegram"
+                    )
+            else:
+                if photo is not None:
+                    from condor.telegram_media import send_photo
+
+                    try:
+                        await send_photo(target, chat_id, *photo)
+                        image_sent = True
+                    except Exception as exc:
+                        error = str(exc)
+                        log.warning(
+                            "Could not deliver notification image", exc_info=True
+                        )
+                from condor.telegram_text import send_text
+
+                if text:
+                    results = await send_text(
+                        target,
+                        chat_id,
+                        body,
+                        parse_mode=parse_mode,
+                    )
+                    text_sent = bool(results) and all(
+                        _reached_telegram(r) for r in results
+                    )
+                sent = (image_sent if photo is not None else True) and (
+                    text_sent if text else True
+                )
+        except Exception as exc:
+            error = "; ".join(part for part in (error, str(exc)) if part)
+            log.warning(
+                "Could not deliver complete notification to chat %s",
+                chat_id,
+                exc_info=True,
+            )
 
     if filed is not None and (not user_id or filed.user_id == int(user_id)):
-        return Delivery(sent, True)
+        return Delivery(sent, True, error, image_sent, text_sent)
 
-    entry = await record(user_id, bell_text or text, kind=kind, title=title, link=link)
-    return Delivery(sent, entry is not None)
+    entry = await record(user_id, notice, kind=kind, title=title, link=link)
+    return Delivery(sent, entry is not None, error, image_sent, text_sent)

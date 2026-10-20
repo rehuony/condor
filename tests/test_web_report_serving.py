@@ -144,3 +144,20 @@ def test_report_html_rejects_ids_that_do_not_resolve_to_a_contained_html_file(
     assert OUTSIDE_BODY not in response.text
     assert NON_REPORT_BODY not in response.text
     assert BODY not in response.text
+
+
+def test_old_generated_report_gets_current_layout_without_rewriting_file(reports_dir):
+    from condor.reports.rendering import responsive_report
+
+    stored = '<html><head></head><body><div class="report-header"><h1>Long title</h1></div></body></html>'
+    path = reports_dir / "sample.html"
+    path.write_text(stored, encoding="utf-8")
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: USER
+    with TestClient(app) as client:
+        response = client.get("/api/v1/reports/abc123/html")
+    assert response.status_code == 200
+    assert 'id="condor-report-responsive"' in response.text
+    assert "<h1>Long title</h1>" in response.text
+    assert responsive_report(response.text) == response.text
+    assert path.read_text(encoding="utf-8") == stored

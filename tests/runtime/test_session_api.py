@@ -65,6 +65,44 @@ def registry(monkeypatch):
 # ── Event mapping ──
 
 
+@pytest.mark.parametrize("finish", [True, False], ids=["done", "consumer-closed"])
+def test_session_closes_model_stream_before_releasing_its_lock(finish):
+    """A retained provider generator must not outlive the turn that owns it."""
+
+    class Client:
+        alive = True
+        closed = False
+
+        def prompt_stream(self, text):
+            async def events():
+                try:
+                    yield TextChunk(text="partial")
+                    yield PromptDone(stop_reason="end_turn")
+                finally:
+                    assert session._lock.locked()
+                    self.closed = True
+
+            self.stream = events()  # Retain it so garbage collection cannot help.
+            return self.stream
+
+    client = Client()
+    session = session_module.AgentSession(SessionKey.telegram(7), "test", client)
+
+    async def run():
+        stream = session.prompt_stream("hello")
+        assert await anext(stream) == Heartbeat(elapsed_seconds=0)
+        assert isinstance(await anext(stream), TextChunk)
+        if finish:
+            assert [event async for event in stream] == [PromptDone("end_turn")]
+        else:
+            await stream.aclose()
+        assert client.closed
+        assert not session.is_busy
+        assert not session._lock.locked()
+
+    asyncio.run(run())
+
+
 def test_event_mapping():
     """Every ACP dataclass maps to a typed RuntimeEvent."""
     cases = [
@@ -266,7 +304,12 @@ def test_prompt_streams_runtime_events(registry):
         return [e async for e in runtime.prompt(key, PromptRequest(text="hi"))]
 
     events = asyncio.run(scenario())
-    assert [e.type for e in events] == [EventType.TEXT, EventType.DONE]
+    assert [e.type for e in events] == [
+        EventType.ACCEPTED,
+        EventType.HEARTBEAT,
+        EventType.TEXT,
+        EventType.DONE,
+    ]
     assert all(isinstance(e, RuntimeEvent) for e in events)
     assert events[0].session_key == str(key)
 

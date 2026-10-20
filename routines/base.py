@@ -95,6 +95,12 @@ class RoutineResult:
     Routines can return this instead of a plain string to provide
     structured data for the web dashboard (tables, charts, sections).
     Telegram still uses the `text` field.
+
+    ``silent`` suppresses the default per-run result message a Telegram schedule
+    (interval or daily) posts to the chat — for routines that deliver what matters
+    themselves (e.g. send an alert only when something triggers). The text is
+    still recorded as the instance's last result; a failed run is never silent.
+    One-shot replies, hooks, and web notifications are unaffected.
     """
 
     text: str
@@ -102,6 +108,7 @@ class RoutineResult:
     table_columns: list[str] | None = None
     chart_image: bytes | None = None
     sections: list[dict] | None = field(default=None)
+    silent: bool = False
 
 
 def normalize_result(result) -> RoutineResult:

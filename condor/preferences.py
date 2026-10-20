@@ -16,7 +16,7 @@ Storage:
 
 When a user_data dict contains '_user_id', setters sync the whole affected
 preference section to ConfigManager (via the _mutate context manager) so the
-web dashboard, the MCP subprocess and the sharing scrubber can also read them.
+web dashboard and the MCP subprocess can also read them.
 """
 
 import logging
@@ -107,20 +107,38 @@ def _clear_sections_in_cm(user_data: Dict) -> None:
         logger.debug("Failed to clear preferences in config: %s", e)
 
 
+def _refresh_active_agent_key(user_data: Dict) -> None:
+    """Keep the model shared by Web and Telegram authoritative over PTB caches.
+
+    Agent-section writes also call this so changing a chat binding or endpoint
+    cannot overwrite a model selected since this dict was hydrated.
+    """
+    user_id = _get_user_id(user_data)
+    if user_id is None:
+        return
+    try:
+        from config_manager import get_config_manager
+
+        saved = get_config_manager().get_user_preferences(user_id).get("agent", {})
+        if "active_agent_key" in saved:
+            _ensure_preferences(user_data)["agent"]["active_agent_key"] = saved[
+                "active_agent_key"
+            ]
+    except Exception:
+        logger.debug("Could not refresh the shared model choice", exc_info=True)
+
+
 @contextmanager
 def _mutate(user_data: Dict, section: str) -> Iterator[Any]:
     """Edit one preference section, then persist it to config.yml.
 
-    The sync used to be opt-in per setter, and six of the eighteen forgot to
-    call it — so the wallets, pools and executor defaults a user picked in
-    Telegram never reached config.yml. That is the copy the sharing scrubber
-    reads to learn which wallets are the user's own (condor/sharing/scrub.py),
-    and the durable one that survives a reset of the pickle. Routing every
-    write through here makes the sync structural: a new setter cannot omit
-    what it does not have to call.
+    Every setter uses this context manager so wallet, pool and executor
+    preferences survive a pickle reset and remain available across surfaces.
     """
     _load_from_cm(user_data)
     prefs = _ensure_preferences(user_data)
+    if section == "agent":
+        _refresh_active_agent_key(user_data)
     yield prefs[section]
     _sync_section_to_cm(user_data, section)
 
@@ -300,9 +318,8 @@ class AgentPrefs(TypedDict, total=False):
     show_tool_calls: bool  # Show tool call indicators (default True)
     custom_providers: List[CustomProviderPrefs]  # OpenAI-compatible endpoints
     chat_binding: ChatBindingPrefs  # who this chat talks to across respawns
-    # Mirror of the live chat selection (user_data["agent_llm"]). Kept here so
-    # code outside a PTB context — the MCP subprocess, web, background agent
-    # runs — can see which model the user is actually on.
+    # Shared preferred model for new chats. Live conversations can keep their
+    # own model; Telegram's agent_llm is only a cache/legacy migration source.
     active_agent_key: str
     # Whether to say anything when a message carries a value shaped like key
     # material but ambiguous enough to pass through (FEAT-056). Default True;
@@ -1023,6 +1040,7 @@ def set_executor_last_config(
 def get_agent_prefs(user_data: Dict) -> "AgentPrefs":
     """Get agent preferences"""
     _migrate_legacy_data(user_data)
+    _refresh_active_agent_key(user_data)
     return deepcopy(
         user_data[USER_PREFERENCES_KEY].get(
             "agent",
@@ -1279,13 +1297,7 @@ def resolve_custom_endpoint(
 
 
 def get_active_agent_key(user_id: int) -> Optional[str]:
-    """The model this user last selected, readable outside a PTB context.
-
-    Mirrors ``user_data["agent_llm"]`` into config.yml (see
-    :func:`set_active_agent_key`) so the MCP subprocess and the web dashboard
-    can answer "what model is this user actually on?" — which is what lets a
-    newly created agent inherit it instead of guessing.
-    """
+    """The shared preferred model for this user's new chats and new agents."""
     try:
         prefs = load_user_data_for(user_id)
     except Exception:

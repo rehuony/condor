@@ -98,6 +98,7 @@ describe("BrainPicker panel placement", () => {
 
     const p = panel();
     expect(p).toBeTruthy();
+    expect(document.activeElement).not.toBe(p!.querySelector("input"));
     // Portalled: nothing in the trigger's ancestry can clip it.
     expect(p!.parentElement).toBe(document.body);
     expect(container.contains(p!)).toBe(false);

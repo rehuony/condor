@@ -26,7 +26,7 @@ from condor import paths
 from condor.agents.attribution import DeploymentRow, build_deployments
 from condor.runtime import attachments
 from condor.runtime import client as runtime
-from condor.runtime import conversations
+from condor.runtime import conversations, turns
 from condor.runtime.conversations import ConversationIdError, ConversationMeta
 from condor.web.auth import get_current_user
 from condor.web.models import WebUser
@@ -91,10 +91,11 @@ async def get_conversation(
     """One conversation's meta plus the tail of its transcript."""
     owner_id = _owner(user, user_id)
     meta = _meta_or_404(owner_id, conversation_id)
-    turns = conversations.read_transcript(owner_id, conversation_id, limit=limit)
+    transcript = conversations.read_transcript(owner_id, conversation_id, limit=limit)
     return {
         "meta": meta.model_dump(mode="json"),
-        "turns": [t.model_dump(mode="json") for t in turns],
+        "turns": [t.model_dump(mode="json") for t in transcript],
+        "is_busy": turns.is_busy(owner_id, conversation_id),
     }
 
 
@@ -121,28 +122,9 @@ async def delete_conversation(
 
     This is now the *only* way to lose a transcript. Destroying a session, or
     the health monitor reaping a dead one, no longer costs the user anything.
-
-    A conversation that was shared (FEAT-054) is unshared *first*. Deleting it
-    locally would otherwise destroy the delete token, and with it the only thing
-    that could ever remove the copy on the collector — "delete" would then mean
-    "delete here, keep there", which is not what anybody pressing it believes.
-    The revocation is queued, so a network failure does not block the local
-    delete; the queue carries the token and finishes the job later.
     """
     owner_id = _owner(user, user_id)
     _meta_or_404(owner_id, conversation_id)
-
-    unshared = False
-    try:
-        from condor.sharing import share as sharing
-
-        unshared = sharing.unshare(owner_id, conversation_id)
-    except Exception:  # noqa: BLE001 - a local delete must not need the network
-        log.warning(
-            "Could not queue an unshare for %s before deleting it",
-            conversation_id,
-            exc_info=True,
-        )
 
     detached = 0
     for info in await runtime.list_sessions(user_id=owner_id):
@@ -155,7 +137,6 @@ async def delete_conversation(
     return {
         "deleted": conversations.delete_conversation(owner_id, conversation_id),
         "sessions_destroyed": detached,
-        "unshared": unshared,
     }
 
 

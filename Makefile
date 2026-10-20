@@ -60,11 +60,11 @@ refresh-codex:
 	echo "Start a new Codex session in Condor to use the updated bridge."
 
 install: setup
-	uv sync --dev
+	uv sync --locked --dev
 	@bash -c ' \
 		export NVM_DIR="$$HOME/.nvm"; \
 		[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
-		cd frontend && npm install \
+		cd frontend && npm ci \
 	'
 	@$(MAKE) setup-chrome
 	@-$(MAKE) doctor

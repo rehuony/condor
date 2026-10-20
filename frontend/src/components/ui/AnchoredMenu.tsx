@@ -23,6 +23,10 @@ interface Props {
    * to stay compact even when the viewport could fit more.
    */
   maxHeight?: number;
+  /** Readable width floor, clamped to the visual viewport. */
+  minWidth?: number;
+  /** Keep a wider menu inside its pane without clipping it vertically. */
+  horizontalBoundary?: HTMLElement | null;
   /**
    * Distance between the trigger and the panel, in px. Defaults to a floating
    * 6; a menu drawn as a continuation of its trigger passes ~1.
@@ -43,6 +47,16 @@ const EDGE = 8;
  * in a config panel, which sits just above the launch footer.
  */
 const MIN_ROOM = 160;
+
+/** A responsive ancestor can hide the trigger while its portal stays mounted. */
+function isVisibleAnchor(anchor: HTMLElement): boolean {
+  if (!anchor.isConnected) return false;
+  for (let node: HTMLElement | null = anchor; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+  }
+  return true;
+}
 
 /**
  * A dropdown panel that no ancestor can clip.
@@ -74,12 +88,16 @@ export function AnchoredMenu({
   align = "left",
   matchAnchorWidth,
   maxHeight,
+  minWidth = 0,
+  horizontalBoundary,
   gap = DEFAULT_GAP,
   className = "",
   role,
   children,
 }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => { onCloseRef.current = onClose; });
   const [pos, setPos] = useState<{
     top?: number;
     bottom?: number;
@@ -96,9 +114,20 @@ export function AnchoredMenu({
   useLayoutEffect(() => {
     if (!open || !anchor) return;
     const place = () => {
+      if (!isVisibleAnchor(anchor)) {
+        setPos(null);
+        onCloseRef.current();
+        return;
+      }
       const r = anchor.getBoundingClientRect();
-      const below = window.innerHeight - r.bottom - gap - EDGE;
-      const above = r.top - gap - EDGE;
+      const viewport = window.visualViewport;
+      const boundary = horizontalBoundary?.getBoundingClientRect();
+      const leftEdge = Math.max((viewport?.offsetLeft ?? 0) + EDGE, boundary ? boundary.left + EDGE : -Infinity);
+      const topEdge = (viewport?.offsetTop ?? 0) + EDGE;
+      const rightEdge = Math.min((viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth) - EDGE, boundary ? boundary.right - EDGE : Infinity);
+      const bottomEdge = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight) - EDGE;
+      const below = bottomEdge - r.bottom - gap;
+      const above = r.top - gap - topEdge;
       // Open upward only when downward is cramped *and* upward is roomier —
       // otherwise the familiar direction wins.
       const cap = (room: number) =>
@@ -107,36 +136,37 @@ export function AnchoredMenu({
         below < Math.min(MIN_ROOM, above)
           ? { bottom: window.innerHeight - r.top + gap, maxHeight: cap(above) }
           : { top: r.bottom + gap, maxHeight: cap(below) };
-      const horizontal =
-        align === "right"
-          ? { right: Math.max(EDGE, window.innerWidth - r.right) }
-          : { left: Math.max(EDGE, r.left) };
+      const availableWidth = Math.max(0, rightEdge - leftEdge);
+      const panelWidth = Math.min(availableWidth, Math.max(minWidth, matchAnchorWidth === "exact"
+        ? r.width : Math.max(matchAnchorWidth === "min" ? r.width : 0, menuRef.current?.getBoundingClientRect().width ?? r.width)));
+      const left = Math.max(leftEdge, Math.min(align === "right" ? r.right - panelWidth : r.left, rightEdge - panelWidth));
       setPos({
         ...vertical,
-        ...horizontal,
-        // The horizontal mirror of maxHeight: never wider than the room left
-        // on the side the panel is pinned to. A fixed-width panel (`w-64`) on
-        // a trigger near the far edge would otherwise run off the window,
-        // where — unlike vertical overflow — nothing scrolls it back.
-        maxWidth: Math.max(
-          window.innerWidth -
-            (horizontal.right ?? horizontal.left ?? EDGE) -
-            EDGE,
-          0,
-        ),
-        width: matchAnchorWidth === "exact" ? r.width : undefined,
-        minWidth: matchAnchorWidth === "min" ? r.width : undefined,
+        left,
+        maxWidth: availableWidth,
+        width: matchAnchorWidth === "exact" ? panelWidth : undefined,
+        minWidth: Math.min(availableWidth, Math.max(minWidth, matchAnchorWidth === "min" ? r.width : 0)) || undefined,
       });
     };
     place();
+    const frame = requestAnimationFrame(place);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    observer?.observe(anchor);
+    if (horizontalBoundary) observer?.observe(horizontalBoundary);
+    window.visualViewport?.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("scroll", place);
     // Capture phase: the page's own scroll containers do not bubble scroll.
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
     return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.visualViewport?.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("scroll", place);
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
     };
-  }, [open, anchor, align, matchAnchorWidth, maxHeight, gap]);
+  }, [open, anchor, align, matchAnchorWidth, maxHeight, minWidth, horizontalBoundary, gap]);
 
   // Tab order follows the DOM, and the DOM now says the panel is a sibling of
   // the whole app rather than a child of its trigger. Without this, Tab from an
@@ -148,9 +178,8 @@ export function AnchoredMenu({
     if (!open || !placed) return;
     const panel = menuRef.current;
     if (!panel) return;
-    // A panel that autofocuses something of its own — PairSelector's search
-    // box, the venue filter — has already claimed focus by now, and stealing it
-    // back to the wrapper would eat the first keystroke.
+    // Preserve an option already focused by a select. Search inputs do not
+    // claim focus on open, so touch devices keep their keyboard closed.
     if (!panel.contains(document.activeElement)) {
       // The layout effect just positioned it; scrolling it into view would
       // only fight that.
@@ -163,7 +192,7 @@ export function AnchoredMenu({
       // back to the trigger would undo the user's own click.
       const active = document.activeElement;
       if (active && active !== document.body) return;
-      if (anchor?.isConnected) anchor.focus({ preventScroll: true });
+      if (anchor && isVisibleAnchor(anchor)) anchor.focus({ preventScroll: true });
     };
   }, [open, placed, anchor]);
 
@@ -176,6 +205,23 @@ export function AnchoredMenu({
     <div
       ref={menuRef}
       role={role}
+      onKeyDown={(event) => {
+        if (role === "menu" && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+          const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+          const current = items.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+            : event.key === "ArrowDown" ? (current + 1) % items.length
+              : (current <= 0 ? items.length : current) - 1;
+          event.preventDefault();
+          event.stopPropagation();
+          items[next]?.focus({ preventScroll: true });
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+      }}
       // Focusable on open without joining the tab order itself, so Tab from the
       // panel steps into the options rather than skipping the menu entirely.
       tabIndex={-1}
@@ -192,7 +238,7 @@ export function AnchoredMenu({
         width: pos.width,
         minWidth: pos.minWidth,
       }}
-      className={`z-50 overflow-y-auto rounded-lg border border-[var(--color-border)] focus:outline-none bg-[var(--color-surface)] shadow-xl ${className}`}
+      className={`z-[60] overflow-y-auto rounded-lg border border-[var(--color-border)] focus:outline-none bg-[var(--color-surface)] shadow-xl ${className}`}
     >
       {children}
     </div>,

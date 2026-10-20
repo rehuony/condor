@@ -55,10 +55,10 @@ export function ServerSelector() {
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-sm hover:bg-[var(--color-surface-hover)] transition-colors"
+        className="flex h-8 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 text-sm hover:bg-[var(--color-surface-hover)] transition-colors"
       >
         <Server className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
-        <span className="truncate max-w-[120px]">{current?.name || "No server"}</span>
+        <span className="truncate max-w-[72px] sm:max-w-[120px]">{current?.name || "No server"}</span>
         {current?.online && (
           <Circle className="h-1.5 w-1.5 shrink-0 fill-current text-[var(--color-green)]" />
         )}

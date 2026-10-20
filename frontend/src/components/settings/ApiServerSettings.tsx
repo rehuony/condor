@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUpCircle, Loader2, Lock, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { SelectField } from "@/components/ui/select-field";
 import { useServer } from "@/hooks/useServer";
 import { OWNER_ONLY_HINT, useServerPermission } from "@/hooks/useServerPermission";
 import {
@@ -213,26 +214,21 @@ function BotDefaultsCard({ server }: { server: string }) {
       <div className="space-y-3">
         <label className="block">
           <span className="text-xs text-[var(--color-text-muted)]">Rate oracle source</span>
-          <select
+          {/* The server's own list: which sources exist is whatever its bundled
+              hummingbot knows. A source already persisted but absent from that list
+              still appears, so the form never silently changes it on save. */}
+          <SelectField
+            size="field"
+            label="Rate oracle source"
             value={source}
-            onChange={(e) => edit({ source: e.target.value })}
+            onChange={(value) => edit({ source: value })}
             disabled={!isOwner}
             title={isOwner ? undefined : OWNER_ONLY_HINT}
-            aria-label="Rate oracle source"
-            className={field}
-          >
-            {/* The server's own list: which sources exist is whatever its bundled
-                hummingbot knows. A source already persisted but absent from that list
-                still appears, so the form never silently changes it on save. */}
-            {!data.available_sources.includes(source) && source !== "" && (
-              <option value={source}>{source}</option>
-            )}
-            {data.available_sources.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+            options={[
+              ...(!data.available_sources.includes(source) && source !== "" ? [source] : []),
+              ...data.available_sources,
+            ].map((name) => ({ value: name, label: name }))}
+          />
         </label>
 
         <div className="grid grid-cols-2 gap-3">

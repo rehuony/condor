@@ -1,6 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { EXECUTION_PATH } from "@/components/chat/accountPanels";
 import { AppShell } from "@/components/layout/AppShell";
@@ -20,12 +20,14 @@ import { Dex } from "@/pages/Dex";
 import { DexPool } from "@/pages/DexPool";
 import { Login } from "@/pages/Login";
 import { Portfolio } from "@/pages/Portfolio";
+import { ResearchFilePage } from "@/pages/research-file-page";
 import { Routines } from "@/pages/Routines";
 import { Settings } from "@/pages/Settings";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  if (!isAuthenticated) return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />;
   return <>{children}</>;
 }
 
@@ -126,6 +128,7 @@ export default function App() {
                 />
                 <Route path="/routines" element={<Routines />} />
                 <Route path="/reports" element={<Navigate to="/routines?tab=reports" replace />} />
+                <Route path="/research/*" element={<ResearchFilePage />} />
                 {/* `/agents` has pointed at the home since the fleet grid
                     was deleted, and the home is the conversation with every
                     agent one message away — which is what somebody typing this

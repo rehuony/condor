@@ -28,13 +28,13 @@ def _chat_agent():
 
 
 AGENT_OPTIONS: dict[str, dict[str, Any]] = {
-    "claude-code": {"label": "Claude Code"},
+    "claude-code": {"label": "Claude Code — Default"},
     "claude-acp:opus": {"label": "Claude (ACP) — Opus"},
-    "claude-acp:sonnet": {"label": "Claude (ACP) — Sonnet"},
     "claude-acp:haiku": {"label": "Claude (ACP) — Haiku"},
+    "claude-acp:sonnet": {"label": "Claude (ACP) — Sonnet"},
     "gemini": {"label": "Gemini CLI"},
-    "copilot": {"label": "GitHub Copilot CLI"},
     "codex": {"label": "ChatGPT Codex"},
+    "copilot": {"label": "GitHub Copilot CLI"},
     "ollama:": {"label": "Ollama — Default Model"},
     "lmstudio:": {"label": "LM Studio — Default Model"},
     # Sentinels — these open a picker instead of being a selectable model, so
@@ -51,12 +51,8 @@ AGENT_OPTIONS: dict[str, dict[str, Any]] = {
 }
 
 
-# What a fresh install should pick unless it has a reason not to: the ACP bridge
-# is the best-supported path, and Sonnet is the balance of capability and cost
-# most users want. Surfaces that rank the catalog (the `make pick-model` wizard)
-# float this key to the top and mark it; it is deliberately NOT part of the
-# `label`, which is reused as a plain display name all over the bot.
-RECOMMENDED_AGENT = "claude-acp:sonnet"
+# The setup wizard lists this model first and marks it without changing its label.
+RECOMMENDED_AGENT = "claude-code"
 
 
 def selectable_agent_options() -> dict[str, dict[str, Any]]:

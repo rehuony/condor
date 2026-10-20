@@ -90,7 +90,7 @@ async function render(panelSlug: string, tick?: number) {
 }
 
 function back(): HTMLButtonElement {
-  const el = container.querySelector<HTMLButtonElement>("[data-strategy-back]");
+  const el = document.querySelector<HTMLButtonElement>("[data-strategy-back]");
   expect(el).not.toBeNull();
   return el!;
 }
@@ -112,7 +112,7 @@ describe("StrategySheet back control", () => {
   it("names the agent in the arrow's tooltip", async () => {
     await render("brigado");
     expect(back().title).toBe("Back to Brigado");
-    expect(container.textContent).toContain("SOL grid");
+    expect(document.body.textContent).toContain("SOL grid");
   });
 
   it("the arrow puts the agent panel back in the pane", async () => {

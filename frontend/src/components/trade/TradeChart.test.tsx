@@ -29,12 +29,16 @@ function priceAtY(y: number): number {
   return PRICE_AT_Y_200 - (y - 200) * 10;
 }
 
-vi.mock("@/hooks/useCandleStore", () => ({
-  useCandleStore: () => ({
-    candles: [],
-    isStale: false,
-    mergeCandles: vi.fn(),
-    setDuration: vi.fn(),
+vi.mock("@/hooks/useCandleStore", () => {
+  // Interactions operate on a displayed chart, after its first range is ready.
+  const candles = [{ timestamp: 1_700_000_000, open: 700, high: 800, low: 600, close: 750, volume: 1 }];
+  return { useCandleStore: () => ({ candles, isStale: false }) };
+});
+
+vi.mock("@/hooks/useCandleHistory", () => ({
+  useCandleHistory: () => ({
+    loadedFrom: 0, loadedTo: 1_700_000_000, status: "ready", initialComplete: true,
+    loadEarlier: vi.fn(), retry: vi.fn(),
   }),
 }));
 
@@ -88,6 +92,10 @@ async function render(
         {...extra}
       />,
     );
+  });
+  // Presentation is released after the chart applies its initial viewport.
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
 }
 

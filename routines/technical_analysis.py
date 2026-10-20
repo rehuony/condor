@@ -4,7 +4,6 @@ CATEGORY = "Analysis"
 
 import io
 import logging
-from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -672,12 +671,18 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     df = pd.DataFrame(records)
     for col in ("open", "high", "low", "close", "volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["datetime"] = pd.to_datetime(
-        df["timestamp"],
-        unit="s" if df["timestamp"].iloc[0] > 1e12 / 1000 else "ms",
-        utc=True,
-    )
+    timestamps = pd.to_numeric(df["timestamp"], errors="raise")
+    timestamps = timestamps.where(timestamps < 1e12, timestamps / 1000)
+    df["datetime"] = pd.to_datetime(timestamps, unit="s", utc=True)
     df = df.sort_values("datetime").reset_index(drop=True)
+    # Historical requests round up to whole days. Analyze only the requested
+    # horizon ending at the latest available candle, including on fallback.
+    cutoff = df["datetime"].iloc[-1] - pd.Timedelta(hours=lookback_hours)
+    df = df.loc[df["datetime"] > cutoff].tail(max_records).reset_index(drop=True)
+    if len(df) < config.ema_slow + 10:
+        return (
+            f"Not enough candles: got {len(df)}, need at least {config.ema_slow + 10}"
+        )
 
     # Compute indicators
     df["ema_fast"] = compute_ema(df["close"], config.ema_fast)

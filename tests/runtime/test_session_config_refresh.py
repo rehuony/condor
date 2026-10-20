@@ -335,10 +335,9 @@ def test_a_change_reverted_before_the_next_message_costs_nothing(registry):
 def test_a_stale_session_that_is_answering_is_not_replaced(registry):
     """A background change must not SIGTERM the turn in flight.
 
-    Deferred, never queued: nothing remembers that a reload is owed, because the
-    digest is still stale at the next turn and the next turn does it. So the
-    message sent mid-answer is answered by the old session, and the one after it
-    is not.
+    Configuration is refreshed after the conversation queue is acquired, so a
+    waiting message uses the new configuration without interrupting the turn
+    that was already executing.
     """
 
     async def scenario():
@@ -349,8 +348,7 @@ def test_a_stale_session_that_is_answering_is_not_replaced(registry):
         await _until_busy()
 
         set_muted("condor", "tool", "manage_clmm", True)
-        # Queued behind the turn in flight: the refresh runs before it blocks
-        # on the session lock, sees a busy session, and skips.
+        # Queued behind the turn in flight: refresh waits for its turn.
         second = asyncio.create_task(_turn("sent mid-answer", on_busy="queue"))
         await asyncio.sleep(0.05)
         spawns_during = _FakeClient.spawns
@@ -363,12 +361,11 @@ def test_a_stale_session_that_is_answering_is_not_replaced(registry):
 
     queued, spawns_during, after = asyncio.run(scenario())
 
-    # The turn in flight was left alone, and so was the one queued behind it.
+    # Reload is safe once the running turn finishes, before the queued turn.
     assert spawns_during == 1
-    assert EventType.RELOADED not in _types(queued)
-    # The turn after it pays the reload instead.
+    assert EventType.RELOADED in _types(queued)
     assert _FakeClient.spawns == 2
-    assert EventType.RELOADED in _types(after)
+    assert EventType.RELOADED not in _types(after)
 
 
 def test_the_reload_is_recorded_in_the_transcript(registry):
@@ -388,9 +385,9 @@ def test_the_reload_is_recorded_in_the_transcript(registry):
     notes = [t for t in turns if t.role == "system" and t.kind == "reload"]
     assert len(notes) == 1
     assert notes[0].text == "Reloaded to apply configuration changes (tools)"
-    # In front of the turn it explains, and only ever written once the respawn
-    # has actually happened — a reload that failed leaves no note claiming it did.
-    assert turns[0] is notes[0]
+    # Input is durable before reload; the note is written only after respawn.
+    assert turns[0].role == "user"
+    assert turns[1] is notes[0]
     assert any(turn.role != "system" for turn in turns[1:])
 
 

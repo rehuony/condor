@@ -28,7 +28,7 @@ ORCA_API_BASE = "https://api.orca.so/v2/solana"
 
 # `Python-urllib/x` is 403'd by Cloudflare outright. Identifying the caller is the
 # courteous thing to do against a free public API in any case.
-_USER_AGENT = "condor-dex-browser/1.0 (+https://github.com/hummingbot)"
+_USER_AGENT = "condor-dex-browser/1.0 (+https://github.com/rehuony/condor)"
 
 # The browser is waiting on this: a slow listing is better abandoned and served
 # from the stale cache than held open.

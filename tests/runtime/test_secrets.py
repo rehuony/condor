@@ -106,35 +106,6 @@ def test_an_array_of_something_else_is_not_a_keypair():
         assert kinds(raw) == []
 
 
-def test_a_keypair_is_the_same_shape_as_a_list_and_as_text():
-    """One definition, two spellings (SEC-336). The list predicate answers by
-    rendering and asking the text question, so a change to either the pattern
-    or the 0–255 bound moves both at once."""
-    key = [(i * 7) % 256 for i in range(secrets.KEYPAIR_LEN)]
-    assert secrets.is_keypair_array(key)
-    assert secrets.is_keypair_array(tuple(key))
-    assert kinds(secrets.keypair_array_text(key)) == [secrets.SOLANA_KEYPAIR]
-    assert kinds(KEYPAIR) == [secrets.SOLANA_KEYPAIR]
-
-
-@pytest.mark.parametrize(
-    "survivor",
-    [
-        [300 + i for i in range(64)],
-        [i % 256 for i in range(63)],
-        [i % 256 for i in range(65)],
-        [float(i % 256) for i in range(64)],
-        [str(i % 256) for i in range(64)],
-        KEYPAIR,
-        None,
-    ],
-)
-def test_only_a_list_of_sixty_four_real_bytes_is_a_keypair(survivor):
-    """The bound and the count are the whole guard, and the text spelling is
-    not a list: ``keypair_array_spans`` owns that one."""
-    assert not secrets.is_keypair_array(survivor)
-
-
 def test_the_marker_names_the_kind():
     """Readable to the model on purpose: it can say something useful about a
     hole it can name, and is only confused by one it cannot."""
@@ -212,7 +183,7 @@ def test_a_44_char_address_never_reaches_the_base58_key_shape():
 
 
 def test_a_finding_carries_offsets_and_not_the_secret():
-    """It exists to be logged, counted and put in telemetry. A finding that
+    """A finding can be logged or displayed safely. A finding that
     carried the value would be the leak it is there to prevent."""
     raw = f"my phrase is {SEED}"
     (finding,) = secrets.scan(raw)
@@ -233,13 +204,6 @@ def test_findings_are_returned_in_order_with_the_ambiguous_ones():
     assert [f.start for f in findings] == sorted(f.start for f in findings)
     clean, _ = secrets.redact(raw)
     assert clean == f"{TX_HASH} | [redacted: mnemonic] | [redacted: solana-keypair]"
-
-
-def test_counts_are_categories_only():
-    assert secrets.counts(secrets.scan(f"{SEED} {TX_HASH} {TX_HASH}")) == {
-        secrets.MNEMONIC: 1,
-        secrets.EVM_HEX64: 2,
-    }
 
 
 def test_the_vendored_wordlist_is_the_canonical_one():

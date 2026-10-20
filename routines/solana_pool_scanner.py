@@ -15,9 +15,9 @@ NETWORK = "solana"
 PAGES_PER_DEX = 3
 
 DEX_IDS = {
-    "orca": ["orca-whirlpool"],
-    "raydium": ["raydium-clmm", "raydium"],
-    "meteora": ["meteora-dlmm", "meteora"],
+    "orca": ["orca"],
+    "raydium": ["raydium-clmm"],
+    "meteora": ["meteora"],
 }
 
 DEX_COLORS = {
@@ -36,7 +36,7 @@ class Config(BaseModel):
         default="fee_tvl_ratio",
         description="Ranking: fee_tvl_ratio, volume, tvl, vol_tvl_ratio",
     )
-    top_n: int = Field(default=15, description="Number of pools to show")
+    top_n: int = Field(default=15, ge=1, description="Number of pools to show")
     dex_filter: Optional[str] = Field(
         default=None, description="Filter single DEX: orca, raydium, meteora"
     )
@@ -44,7 +44,10 @@ class Config(BaseModel):
         default=None, description="Filter pools containing this token symbol"
     )
     pages: int = Field(
-        default=PAGES_PER_DEX, description="Pages to fetch per DEX (20 pools/page)"
+        default=PAGES_PER_DEX,
+        ge=1,
+        le=10,
+        description="Pages to fetch per DEX (20 pools/page)",
     )
 
 
@@ -57,29 +60,42 @@ async def _fetch_pools_page(dex_id: str, page: int) -> list[dict]:
     """
     from condor.pool_data import gecko_request
 
-    try:
-        body = await gecko_request(
-            "GET",
-            f"networks/{NETWORK}/dexes/{dex_id}/pools",
-            params={"page": str(page)},
-        )
-        return body.get("data", [])
-    except Exception as e:
-        logger.warning(f"GeckoTerminal {dex_id} p{page} failed: {e}")
-        return []
+    body = await gecko_request(
+        "GET",
+        f"networks/{NETWORK}/dexes/{dex_id}/pools",
+        params={"page": str(page)},
+    )
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise ValueError("GeckoTerminal returned an invalid pool list")
+    return body["data"]
 
 
-async def _fetch_all_pools(dex_ids: list[str], pages: int) -> list[dict]:
-    tasks = [
-        _fetch_pools_page(dex_id, page)
-        for dex_id in dex_ids
-        for page in range(1, pages + 1)
-    ]
-    results = await asyncio.gather(*tasks)
+async def _fetch_all_pools(
+    dex_ids: list[str], pages: int
+) -> tuple[list[dict], int, dict[str, str]]:
+    sources = [(dex_id, page) for dex_id in dex_ids for page in range(1, pages + 1)]
+    results = await asyncio.gather(
+        *[_fetch_pools_page(dex_id, page) for dex_id, page in sources],
+        return_exceptions=True,
+    )
     pools = []
-    for batch in results:
-        pools.extend(batch)
-    return pools
+    failures = {}
+    for (dex_id, page), batch in zip(sources, results):
+        if isinstance(batch, Exception):
+            source = f"{dex_id} page {page}"
+            failures[source] = (
+                f"{type(batch).__name__}: {str(batch) or 'request failed'}"
+            )
+            logger.warning("GeckoTerminal %s failed: %s", source, batch)
+        else:
+            pools.extend(batch)
+    succeeded = len(sources) - len(failures)
+    if not succeeded:
+        details = "; ".join(f"{source}: {error}" for source, error in failures.items())
+        raise RuntimeError(
+            f"GeckoTerminal unavailable: all {len(sources)} pool pages failed. {details}"
+        )
+    return pools, succeeded, failures
 
 
 def _extract_fee_pct(name: str) -> float:
@@ -130,8 +146,7 @@ def _dex_family(dex_id: str) -> str:
 
 DEX_POOL_URLS = {
     "raydium-clmm": "https://raydium.io/clmm/create-position/?pool_id={addr}",
-    "raydium": "https://raydium.io/liquidity/increase/?pool_id={addr}",
-    "orca-whirlpool": "https://www.orca.so/pools/{addr}",
+    "orca": "https://www.orca.so/pools/{addr}",
 }
 
 
@@ -306,22 +321,49 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     else:
         dex_ids = [did for ids in DEX_IDS.values() for did in ids]
 
-    raw_pools = await _fetch_all_pools(dex_ids, config.pages)
+    raw_pools, succeeded_pages, failed_pages = await _fetch_all_pools(
+        dex_ids, config.pages
+    )
+    coverage = f"Coverage: {succeeded_pages}/{succeeded_pages + len(failed_pages)} GeckoTerminal pages succeeded."
+    warning = (
+        f"Warning: incomplete scan. {coverage} Failed pages: "
+        + "; ".join(f"{source}: {error}" for source, error in failed_pages.items())
+        if failed_pages
+        else ""
+    )
 
-    all_pools = [p for raw in raw_pools if (p := _parse_pool(raw))]
+    all_pools = []
+    invalid_rows = 0
+    for raw in raw_pools:
+        try:
+            pool = _parse_pool(raw)
+        except (AttributeError, TypeError, ValueError):
+            pool = None
+        if pool and pool["address"] and pool["dex_id"] in dex_ids:
+            all_pools.append(pool)
+        else:
+            invalid_rows += 1
 
-    filtered = [
-        p
-        for p in all_pools
-        if p["volume_24h"] >= config.min_volume_24h and p["tvl"] >= config.min_tvl
-    ]
+    volume_pools = [p for p in all_pools if p["volume_24h"] >= config.min_volume_24h]
+    tvl_pools = [p for p in volume_pools if p["tvl"] >= config.min_tvl]
+    filtered = tvl_pools
 
     if config.search_token:
         token = config.search_token.upper()
         filtered = [p for p in filtered if token in p["name"].upper()]
 
     if not filtered:
-        return "No pools match the filters. Try lowering min_volume or min_tvl."
+        outcome = (
+            "No pools returned by the successful source pages."
+            if not raw_pools
+            else (
+                "No valid CLMM pool rows returned by the successful source pages."
+                if not all_pools
+                else "No pools match the volume, TVL and token filters."
+            )
+        )
+        stages = f"Stages: {len(raw_pools)} source rows, {len(all_pools)} valid CLMM pools, {len(volume_pools)} volume, {len(tvl_pools)} TVL, 0 token matches ({invalid_rows} invalid or unsupported rows)."
+        return "\n".join(part for part in (warning, outcome, coverage, stages) if part)
 
     seen = set()
     unique = []
@@ -346,7 +388,8 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     for p in filtered:
         dex_counts[p["dex_family"]] = dex_counts.get(p["dex_family"], 0) + 1
 
-    lines = [f"Solana Pool Scanner — Top {len(top)} by {config.sort_by}\n"]
+    lines = [warning] if warning else []
+    lines.append(f"Solana Pool Scanner — Top {len(top)} by {config.sort_by}\n")
     for i, p in enumerate(top, 1):
         fee_str = f"{p['fee_pct'] * 100:.2f}".rstrip("0").rstrip(".")
         chg = p["pct_24h"]
@@ -360,7 +403,8 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         )
 
     dist_str = " | ".join(f"{k}: {v}" for k, v in sorted(dex_counts.items()))
-    lines.append(f"\nScanned {len(all_pools)} pools, {len(filtered)} passed filters.")
+    stages = f"Stages: {len(raw_pools)} source rows, {len(all_pools)} valid CLMM pools, {len(volume_pools)} volume, {len(tvl_pools)} TVL, {len(filtered)} unique pools passed all filters ({invalid_rows} invalid or unsupported rows)."
+    lines.extend([f"\n{coverage}", stages])
     lines.append(f"Distribution: {dist_str}")
 
     report_text = "\n".join(lines)
@@ -373,12 +417,13 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
             await context.bot.send_photo(
                 chat_id=chat_id,
                 photo=io.BytesIO(chart_bytes),
-                caption=f"Solana Pool Scanner — Top {len(top)} pools",
+                caption=f"Solana Pool Scanner — Top {len(top)} pools"
+                + (" (incomplete scan; see report)" if warning else ""),
             )
         except Exception as e:
             logger.warning(f"Failed to send chart to Telegram: {e}")
 
-    # Report: chart FIRST, then table
+    # Keep availability warnings ahead of the chart and table.
     from condor.reports import ReportBuilder
 
     builder = ReportBuilder("Solana Pool Scanner")
@@ -386,10 +431,12 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         ["solana", "dex", "pools", "yield"]
     )
 
+    if warning:
+        builder.markdown(warning)
     builder.markdown(
-        f"Scanned {len(all_pools)} pools across Orca, Raydium, Meteora. "
-        f"{len(filtered)} passed filters (vol >= {_fmt_usd(config.min_volume_24h)}, "
-        f"tvl >= {_fmt_usd(config.min_tvl)}). Distribution: {dist_str}"
+        f"{coverage} {stages} "
+        f"Filters: vol >= {_fmt_usd(config.min_volume_24h)}, "
+        f"tvl >= {_fmt_usd(config.min_tvl)}. Distribution: {dist_str}"
     )
 
     if plotly_fig is not None:

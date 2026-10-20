@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from "react";
 import yaml from "js-yaml";
 
 import { CodeEditor } from "@/components/editor/CodeEditor";
+import { SelectField } from "@/components/ui/select-field";
+import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { api, type ControllerConfigSummary } from "@/lib/api";
 import { configToYaml, parseYamlMapping, validateYamlMapping } from "@/lib/configYaml";
@@ -43,9 +45,8 @@ export function DeleteConfirmDialog({
   const typeLabel = target.kind === "config" ? "Config" : "Controller";
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl shadow-xl z-50 p-5">
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onClose}>
+      <div className={`${DIALOG_PANEL} max-w-[400px] bg-[var(--color-bg)] p-5`} onClick={(e) => e.stopPropagation()}>
         <h2 className="text-sm font-semibold mb-2">Delete {typeLabel}</h2>
         <p className="text-xs text-[var(--color-text-muted)] mb-4">
           Are you sure you want to delete{" "}
@@ -80,7 +81,7 @@ export function DeleteConfirmDialog({
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -98,9 +99,8 @@ export function DiscardChangesDialog({
   useEscapeKey(true, onClose);
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl shadow-xl z-50 p-5">
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onClose}>
+      <div className={`${DIALOG_PANEL} max-w-[400px] bg-[var(--color-bg)] p-5`} onClick={(e) => e.stopPropagation()}>
         <h2 className="text-sm font-semibold mb-2">Unsaved Changes</h2>
         <p className="text-xs text-[var(--color-text-muted)] mb-4">
           <span className="font-mono font-medium text-[var(--color-text)]">
@@ -123,7 +123,7 @@ export function DiscardChangesDialog({
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -239,9 +239,8 @@ export function UploadDialog({
     (mode === "config" || (controllerType && controllerName.trim()));
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
-      <div className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[560px] md:max-h-[80vh] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl shadow-xl z-50 flex flex-col">
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onClose}>
+      <div className={`${DIALOG_PANEL} flex max-h-[85dvh] max-w-[560px] flex-col bg-[var(--color-bg)]`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
           <h2 className="text-sm font-semibold">Upload</h2>
           <button
@@ -288,17 +287,13 @@ export function UploadDialog({
                 <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1 uppercase tracking-wide">
                   Type *
                 </label>
-                <select
+                <SelectField
+                  size="field"
+                  label="Controller type"
                   value={controllerType}
-                  onChange={(e) => setControllerType(e.target.value)}
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm focus:border-[var(--color-primary)] focus:outline-none"
-                >
-                  {typeOptions.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setControllerType}
+                  options={typeOptions.map((t) => ({ value: t, label: t }))}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1 uppercase tracking-wide">
@@ -377,7 +372,7 @@ export function UploadDialog({
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -425,9 +420,8 @@ export function CloneConfigDialog({
   });
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
-      <div className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[560px] md:max-h-[80vh] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl shadow-xl z-50 flex flex-col">
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onClose}>
+      <div className={`${DIALOG_PANEL} flex max-h-[85dvh] max-w-[560px] flex-col bg-[var(--color-bg)]`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
           <div>
             <h2 className="text-sm font-semibold">Clone Config</h2>
@@ -506,7 +500,7 @@ export function CloneConfigDialog({
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -625,9 +619,8 @@ export function NewConfigDialog({
   }, []);
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
-      <div className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[680px] md:max-h-[80vh] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl shadow-xl z-50 flex flex-col">
+    <div className={`${DIALOG_BACKDROP} z-50`} onClick={onClose}>
+      <div className={`${DIALOG_PANEL} flex max-h-[85dvh] max-w-[680px] flex-col bg-[var(--color-bg)]`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
           <h2 className="text-sm font-semibold">New Config</h2>
           <button
@@ -647,29 +640,25 @@ export function NewConfigDialog({
               <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1 uppercase tracking-wide">
                 Controller Type
               </label>
-              <select
+              <SelectField
+                size="field"
+                label="Controller type"
                 value={selectedType}
-                onChange={(e) => handleTypeChange(e.target.value)}
-                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm focus:border-[var(--color-primary)] focus:outline-none"
-              >
-                {typeOptions.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
+                onChange={handleTypeChange}
+                options={typeOptions.map((t) => ({ value: t, label: t }))}
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1 uppercase tracking-wide">
                 Controller
               </label>
-              <select
+              <SelectField
+                size="field"
+                label="Controller"
                 value={selectedName}
-                onChange={(e) => { setSelectedName(e.target.value); setFieldValues({}); }}
-                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm focus:border-[var(--color-primary)] focus:outline-none"
-              >
-                {namesForType.map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
+                onChange={(value) => { setSelectedName(value); setFieldValues({}); }}
+                options={namesForType.map((n) => ({ value: n, label: n }))}
+              />
             </div>
           </div>
 
@@ -770,6 +759,6 @@ export function NewConfigDialog({
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }

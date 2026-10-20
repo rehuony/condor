@@ -6,6 +6,7 @@ import {
   EditorShell,
   Field,
 } from "@/components/agent/knowledge/KnowledgeChrome";
+import { SelectField } from "@/components/ui/select-field";
 import { api, type MemoryCard } from "@/lib/api";
 
 /** The taxonomy `MemoryStore` validates against — anything else falls back to `fact`. */
@@ -89,17 +90,14 @@ export function MemoryEditor({
         <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
           Type
         </label>
-        <select
+        <SelectField
+          size="compact"
+          fit
+          label="Type"
           value={type}
-          onChange={(e) => touch(setType)(e.target.value)}
-          className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-primary)]"
-        >
-          {MEMORY_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+          onChange={touch(setType)}
+          options={MEMORY_TYPES.map((t) => ({ value: t, label: t }))}
+        />
       </div>
       <div>
         <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">

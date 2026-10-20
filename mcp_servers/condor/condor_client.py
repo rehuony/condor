@@ -53,7 +53,7 @@ async def call_main_api(
     except APIError:
         raise
     except Exception as e:
-        raise APIError(f"Failed to reach main process API: {e}")
+        raise APIError(f"Failed to reach main process API: {e}") from e
 
 
 def runkey_from_agent_id(agent_id: str) -> str:

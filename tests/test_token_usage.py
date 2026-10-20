@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.usage import RequestUsage
 
 from condor.acp.client import ACPClient, PromptDone, TextChunk
@@ -42,6 +42,7 @@ from condor.runtime.conversations import (
     read_transcript,
 )
 from condor.runtime.events import EventType, RuntimeEvent
+from tests.pydantic_ai_helpers import response_model
 
 USER = 4120
 
@@ -127,7 +128,7 @@ def _answer(messages: list, info: AgentInfo) -> ModelResponse:
 
 def _pai(model: str = "openai:gpt-4o") -> PydanticAIClient:
     client = PydanticAIClient(model)
-    client._agent = Agent(FunctionModel(_answer))
+    client._agent = Agent(response_model(_answer))
     return client
 
 
@@ -199,20 +200,60 @@ def test_a_run_whose_consumer_walked_away_still_counts():
     client = _pai()
 
     async def run() -> None:
+        client._request_semaphore = asyncio.Semaphore(1)
         stream = client.prompt_stream("go")
         async for event in stream:
             if isinstance(event, TextChunk):
                 break
-        # Unwinding pydantic-ai's run from a closed generator raises on its own
-        # (its anyio cancel scope; it did before FEAT-120 too, and in
-        # production the finalizer only logs it). What this pins is that the
-        # usage was folded first: the fold is the innermost exit.
-        with contextlib.suppress(RuntimeError, GeneratorExit):
-            await stream.aclose()
+        await stream.aclose()
+        assert client.usage.input_tokens == 1000
+        assert stream.ag_frame is None
+        assert not client._slot_held
+        assert not client._request_semaphore.locked()
+        assert client._message_history, "retain the turn the user saw before leaving"
+
+        async def followup():
+            return [event async for event in client.prompt_stream("continue")]
+
+        events = await asyncio.wait_for(followup(), timeout=1)
+        assert events[-1] == PromptDone(stop_reason="end_turn")
+        assert not client._slot_held
+        assert not client._request_semaphore.locked()
 
     asyncio.run(run())
 
-    assert client.usage.input_tokens == 1000
+    assert client.usage.input_tokens == 2000
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.TimeoutError])
+def test_close_failure_releases_the_request_slot_without_yielding(
+    monkeypatch, error_type
+):
+    client = _pai()
+    original_iter = client._agent.iter
+
+    @contextlib.asynccontextmanager
+    async def failed_cleanup(*args, **kwargs):
+        async with original_iter(*args, **kwargs) as run:
+            yield run
+        raise error_type("mock cleanup failure")
+
+    monkeypatch.setattr(client._agent, "iter", failed_cleanup)
+
+    async def run():
+        client._request_semaphore = asyncio.Semaphore(1)
+        stream = client.prompt_stream("go")
+        async for event in stream:
+            if isinstance(event, TextChunk):
+                break
+        with pytest.raises(error_type, match="mock cleanup failure"):
+            await stream.aclose()
+        assert stream.ag_frame is None
+        assert not client._slot_held
+        assert not client._request_semaphore.locked()
+        assert client.usage.input_tokens == 1000
+
+    asyncio.run(run())
 
 
 def test_the_openrouter_window_comes_from_the_cached_catalog_only(monkeypatch):

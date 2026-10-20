@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Check, ChevronDown, Loader2, Plus, Send, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { SelectField } from "@/components/ui/select-field";
 import { type RoutineHooks, api } from "@/lib/api";
 
 interface Props {
@@ -175,20 +176,18 @@ function HooksForm({ routineName }: { routineName: string }) {
       <div className="space-y-1.5">
         <span className="text-xs font-medium text-[var(--color-text)]">Send when</span>
         <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <select
-              value={hooks.trigger}
-              onChange={(e) =>
-                setHooks((h) => ({ ...h, trigger: e.target.value as RoutineHooks["trigger"] }))
-              }
-              className="w-full appearance-none rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 pr-8 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
-            >
-              <option value="success">On success only</option>
-              <option value="always">Always (success or error)</option>
-              <option value="failure">On error only</option>
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
-          </div>
+          <SelectField
+            size="field"
+            label="Send when"
+            className="flex-1"
+            value={hooks.trigger}
+            onChange={(value) => setHooks((h) => ({ ...h, trigger: value as RoutineHooks["trigger"] }))}
+            options={[
+              { value: "success", label: "On success only" },
+              { value: "always", label: "Always (success or error)" },
+              { value: "failure", label: "On error only" },
+            ]}
+          />
           <button
             type="button"
             disabled={saveMutation.isPending}

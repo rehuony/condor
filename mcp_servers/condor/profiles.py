@@ -43,7 +43,7 @@ def canonical_tool_name(name: str) -> str:
 #: is written for the model.
 TOOL_DESCRIPTIONS: dict[str, str] = {
     "delegate": "Hand a long task to a background agent instance",
-    "send_notification": "Send the user a Telegram message",
+    "send_notification": "Notify the user with text and/or a generated image",
     "manage_routines": "List, run, schedule and edit routines",
     "manage_agent_controllers": "Own controller source and push it to a server",
     "run_code": "Run a Python snippet inside Condor",

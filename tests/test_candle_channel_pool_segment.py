@@ -85,6 +85,8 @@ def spy_fetch(monkeypatch):
                 "pool_address": pool_address,
                 "pair": pair,
                 "interval": interval,
+                "start": a[0] if a else None,
+                "end": a[1] if len(a) > 1 else None,
             }
         )
         return []
@@ -103,6 +105,20 @@ def test_backfill_passes_the_channel_pool(spy_fetch, channel, expected):
     assert spy_fetch, "backfill never reached fetch_dex_candles"
     assert spy_fetch[0]["pool_address"] == expected
     assert spy_fetch[0]["pair"] == "SOL-USDC"
+
+
+@pytest.mark.parametrize("interval,seconds", [("1m", 60), ("1d", 86400)])
+def test_dex_stream_backfill_stays_within_one_page_and_provider_span(
+    spy_fetch,
+    interval,
+    seconds,
+):
+    channel = f"candles:srv:solana-mainnet-beta:SOL-USDC:{interval}:{POOL}"
+    mgr = WebSocketManager()
+    mgr._candle_buffers[channel] = wsm._CandleBuffer(interval, 365 * 86400)
+    run(mgr._backfill_candles(channel))
+    request = spy_fetch[0]
+    assert request["end"] - request["start"] <= min(1000 * seconds, 180 * 86400)
 
 
 @pytest.mark.parametrize("channel", [FIVE, SIX], ids=["five-part", "six-part"])

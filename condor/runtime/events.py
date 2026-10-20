@@ -42,6 +42,7 @@ class EventType(str, Enum):
     HEARTBEAT = "heartbeat"
     ERROR = "error"
     DONE = "done"
+    ACCEPTED = "accepted"
     # The turn was accepted but has not started: it is waiting behind the one
     # in front of it. Emitted only when a caller opted into waiting, so a
     # surface can say "waiting its turn" instead of showing a dead composer.
@@ -94,7 +95,12 @@ class RuntimeEvent(BaseModel):
         """
         if isinstance(event, TextChunk):
             return cls(
-                type=EventType.TEXT, session_key=session_key, data={"text": event.text}
+                type=EventType.TEXT,
+                session_key=session_key,
+                data={
+                    "text": event.text,
+                    **({"is_error": True} if event.is_error else {}),
+                },
             )
         if isinstance(event, ThoughtChunk):
             return cls(
@@ -157,6 +163,11 @@ class RuntimeEvent(BaseModel):
         return cls(
             type=EventType.ERROR, session_key=session_key, data={"message": message}
         )
+
+    @classmethod
+    def accepted(cls, session_key: str = "") -> "RuntimeEvent":
+        """The input is on disk; output delivery may now start independently."""
+        return cls(type=EventType.ACCEPTED, session_key=session_key, data={})
 
     @classmethod
     def queued(cls, session_key: str = "") -> "RuntimeEvent":

@@ -22,11 +22,13 @@ import { ServerContext } from "@/hooks/useServer";
 
 const listConversations = vi.fn();
 const getSessionOptions = vi.fn();
+const switchSession = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
     listConversations: (...args: unknown[]) => listConversations(...args),
     getSessionOptions: () => getSessionOptions(),
+    switchSession: (...args: unknown[]) => switchSession(...args),
     // A resumed conversation hydrates its transcript over HTTP; empty is fine.
     getConversation: () => Promise.resolve({ meta: {}, turns: [] }),
   },
@@ -104,10 +106,10 @@ async function settle() {
  * Arrive at the workspace: connect, learn the roster is empty, and say this
  * surface is a chat — the exact order `AppShell` and `AgentChatTab` produce.
  */
-async function arrive() {
+async function arrive(queryClient = new QueryClient()) {
   act(() => {
     root.render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={queryClient}>
         <ServerContext value={{ server: "moneymaker", setServer: () => {} }}>
           <Harness />
         </ServerContext>
@@ -185,6 +187,69 @@ describe("prewarm on arrival at the workspace", () => {
     expect(start!.server_name).toBe("moneymaker");
     // Unbound: the specialist is the rail's question, and nobody asked it yet.
     expect(start!.agent_slug).toBeUndefined();
+  });
+
+  it("refreshes an old cached default before prewarming a new chat", async () => {
+    const client = new QueryClient();
+    client.setQueryData(["session-options"], { default_agent: "claude-code" });
+    listConversations.mockResolvedValue([]);
+    getSessionOptions.mockResolvedValue({ default_agent: "claude-acp:sonnet" });
+
+    await arrive(client);
+
+    expect(sent.find((frame) => frame.action === "start_session")?.agent_key).toBe(
+      "claude-acp:sonnet",
+    );
+  });
+
+  it.each(["", "funding_expert"])(
+    "refreshes saved model choices after switching a chat bound to %s",
+    async (agentSlug) => {
+      const client = new QueryClient();
+      const oldOptions = {
+        default_agent: "claude-code",
+        agent_bindings: [{ slug: "funding_expert", agent_key: "claude-code" }],
+      };
+      listConversations.mockResolvedValue([]);
+      getSessionOptions.mockResolvedValue(oldOptions);
+      await arrive(client);
+
+      const savedOptions = agentSlug
+        ? {
+            ...oldOptions,
+            agent_bindings: [{ slug: agentSlug, agent_key: "claude-acp:sonnet" }],
+          }
+        : { ...oldOptions, default_agent: "claude-acp:sonnet" };
+      getSessionOptions.mockResolvedValue(savedOptions);
+      switchSession.mockResolvedValue({
+        session: { agent_key: "claude-acp:sonnet", agent_slug: agentSlug },
+      });
+
+      await act(async () => {
+        await chat().switchBrain("s1", { agentKey: "claude-acp:sonnet" });
+      });
+
+      expect(client.getQueryData(["session-options"])).toEqual(savedOptions);
+    },
+  );
+
+  it("keeps the saved default when a model switch is rejected", async () => {
+    const client = new QueryClient();
+    const options = { default_agent: "claude-code" };
+    listConversations.mockResolvedValue([]);
+    getSessionOptions.mockResolvedValue(options);
+    await arrive(client);
+    switchSession.mockRejectedValue(new Error("Requested model is not available"));
+    getSessionOptions.mockClear();
+
+    await act(async () => {
+      await expect(
+        chat().switchBrain("s1", { agentKey: "claude-acp:sonnet" }),
+      ).rejects.toThrow("Requested model is not available");
+    });
+
+    expect(client.getQueryData(["session-options"])).toEqual(options);
+    expect(getSessionOptions).not.toHaveBeenCalled();
   });
 
   it("leaves a live session alone", async () => {

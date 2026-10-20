@@ -32,7 +32,6 @@ from condor.acp.pydantic_ai_client import PydanticAIClient
 from condor.runtime import toolsets
 from condor.runtime.registry_file import LoopState
 from condor.runtime.timeouts import resolve_tick_timeout
-from condor.telemetry import taps as telemetry_taps
 
 from . import actions as actions_mod
 from .agent import Agent
@@ -194,6 +193,10 @@ class TickEngine:
     _finished: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self):
+        from .config import AgentConfig
+
+        # Check overrides before allocating a session or persisting any config.
+        AgentConfig.from_dict(self.config)
         # The journal/sessions/learnings hang off the *strategy* dir (one level
         # below the Agent), so each playbook keeps its own operational history
         # while the Agent's brain (memory/skills) stays shared at the parent.
@@ -352,13 +355,12 @@ class TickEngine:
     async def _finish(self, final_state: str, reason: str) -> None:
         """End this run: the ONE teardown every exit path goes through.
 
-        ``final_state`` is the LoopState recorded on disk; ``reason`` is the
-        ``stopped_by`` of the strategy_run telemetry event ("user", "shutdown",
-        "error", "complete", "max_ticks"). Runs at most once per engine, so a
+        ``final_state`` is the LoopState recorded on disk; ``reason`` records
+        why the run ended ("user", "shutdown", "error", "complete", "max_ticks").
+        Runs at most once per engine, so a
         stop() after the loop already ended itself changes nothing.
 
-        ``getattr`` on ``_finished``/``config``: tests drive the lifecycle
-        methods with SimpleNamespace stand-ins that carry neither.
+        ``getattr`` on ``_finished`` supports lifecycle stand-ins without it.
         """
         if getattr(self, "_finished", False):
             return
@@ -375,14 +377,6 @@ class TickEngine:
             # session, which is the truth.
             if self.ledger is not None:
                 self.ledger.release()
-            # Shape of the session for telemetry (FEAT-023): mode, cadence and
-            # tick count. Never the playbook, the journal, the pairs or the
-            # positions.
-            telemetry_taps.strategy_run(
-                getattr(self, "config", None),
-                ticks=getattr(self.journal, "tick_count", 0) or 0,
-                stopped_by=reason,
-            )
             if self.journal:
                 self.journal.close()
             _supervisor().unregister(self.agent_id, final_state)
@@ -1549,6 +1543,7 @@ def build_gated_client(
         server_name=engine.config.get("server_name"),
         agent_slug=engine.agent.slug,
         tick=True,
+        execution_mode=execution_mode,
     )
     permission_cb = auto_approve_with_risk_check(
         engine.risk,
@@ -1564,9 +1559,9 @@ def build_gated_client(
     # Shared factory (ARCH-192). Engine specifics: an explicit model_base_url
     # in the run config still wins over the owner's saved custom endpoint.
     # Same allowlist the agent gets when delegated to; empty => unrestricted.
-    from condor.runtime.llm_client import build_llm_client
+    from condor.runtime.llm_client import build_llm_client, guarded_tool_error
 
-    return build_llm_client(
+    client = build_llm_client(
         engine._agent_key(),
         mcp_servers=mcp_servers,
         permission_callback=permission_cb,
@@ -1574,3 +1569,6 @@ def build_gated_client(
         user_id=engine.user_id,
         base_url_override=engine.config.get("model_base_url") or None,
     )
+    if problem := guarded_tool_error(client, execution_mode):
+        raise RuntimeError(problem)
+    return client

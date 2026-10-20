@@ -3,10 +3,13 @@
 import logging
 import shutil
 import time
+from contextlib import aclosing
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import NetworkError, TelegramError
 from telegram.ext import ContextTypes
 
+import condor.runtime.client as runtime
 from condor.acp import ACP_COMMANDS
 from condor.acp.pydantic_ai_client import is_pydantic_ai_model
 from condor.runtime import (
@@ -15,11 +18,10 @@ from condor.runtime import (
     SessionInfo,
     SessionKey,
     SessionSpec,
-)
-from condor.runtime import client as runtime
-from condor.runtime import (
     secrets,
 )
+from condor.runtime.events import RuntimeEvent
+from condor.telegram_text import telegram_call
 from handlers import clear_all_input_states
 from utils.auth import restricted
 
@@ -147,8 +149,8 @@ async def _chat_conversation_id(chat_id: int, user_data: dict | None) -> str:
     return live or stored_chat_conversation(user_data)
 
 
-# Cache CLI availability checks so we only hit the filesystem once per key
-_cli_available_cache: dict[str, bool] = {}
+# Recheck installation changes without probing PATH on every Telegram message.
+_cli_available_cache: dict[str, tuple[float, bool]] = {}
 
 # Flags that make the next plain message mean something other than "talk to the
 # agent". Tapping any button is a fresh intent, so they are all disarmed before
@@ -182,14 +184,16 @@ def _is_agent_available(agent_key: str) -> bool:
     if is_pydantic_ai_model(agent_key):
         return True
 
-    if agent_key in _cli_available_cache:
-        return _cli_available_cache[agent_key]
+    now = time.monotonic()
+    cached = _cli_available_cache.get(agent_key)
+    if cached is not None and now < cached[0]:
+        return cached[1]
 
     cmd = ACP_COMMANDS.get(agent_key, ACP_COMMANDS.get("claude-code", ""))
     # The command may have flags (e.g. "gemini --experimental-acp"), check the binary
     binary = cmd.split()[0] if cmd else ""
     available = shutil.which(binary) is not None
-    _cli_available_cache[agent_key] = available
+    _cli_available_cache[agent_key] = (now + 60, available)
 
     if not available:
         log.warning("Agent CLI %r not found in PATH (agent_key=%s)", binary, agent_key)
@@ -197,49 +201,73 @@ def _is_agent_available(agent_key: str) -> bool:
     return available
 
 
-def set_active_llm(context: ContextTypes.DEFAULT_TYPE, agent_key: str) -> None:
-    """Set the chat's model and mirror it into the shared preference store.
+async def _try_telegram_message(update, stage: str, method, **kwargs):
+    """A status or notice must not decide whether the AI receives an input."""
+    try:
+        return await telegram_call(method, **kwargs)
+    except TelegramError as exc:
+        log.warning(
+            "Telegram delivery failed stage=%s update_id=%s error_type=%s",
+            stage,
+            getattr(update, "update_id", None),
+            type(exc).__name__,
+        )
+        return None
 
-    ``user_data["agent_llm"]`` lives only in the PTB pickle, which nothing
-    outside the bot process can read. Mirroring it to config.yml is what lets
-    a newly created Agent inherit the model the user is actually running,
-    instead of the coordinator guessing one.
-    """
+
+async def _report_agent_unavailable(update, agent_key: str) -> None:
+    await _try_telegram_message(
+        update,
+        "agent_unavailable",
+        update.message.reply_text,
+        text=(
+            f"The AI backend for {agent_key} is not available on this server. "
+            "Choose another model with /agent, or install its command-line backend "
+            "and retry after a minute."
+        ),
+    )
+
+
+def set_active_llm(context: ContextTypes.DEFAULT_TYPE, agent_key: str) -> None:
+    """Save a model choice for both surfaces and update Telegram's cache."""
     from condor.preferences import set_active_agent_key
 
     context.user_data["agent_llm"] = agent_key
     try:
         set_active_agent_key(context.user_data, agent_key)
     except Exception:
-        log.debug("Could not mirror agent_llm to preferences", exc_info=True)
+        log.debug("Could not save the preferred model", exc_info=True)
 
 
 def _reclaim_default_agent(context: ContextTypes.DEFAULT_TYPE) -> str:
-    """Resolve the effective agent_key, reclaiming DEFAULT_AGENT after an auto-switch.
+    """Read the shared preference, keeping a temporary CLI fallback local to TG."""
+    from condor.preferences import get_agent_prefs
 
-    A previous auto-switch (no installed CLI for the configured default) parks the
-    user on whatever backend was available and flags it ``agent_llm_auto``. That was
-    never the user's choice, so once DEFAULT_AGENT's CLI is back, restore it. An
-    explicit pick via Change LLM clears the flag, so deliberate choices are never
-    reverted. Used by both the /agent command and the always-on message handler so
-    healing happens no matter how the user re-enters.
-    """
-    if not context.user_data.get("agent_llm"):
-        set_active_llm(context, DEFAULT_AGENT)
-    agent_key = context.user_data.get("agent_llm", DEFAULT_AGENT)
+    cached = context.user_data.get("agent_llm")
+    saved = get_agent_prefs(context.user_data).get("active_agent_key")
+    fallback_for = context.user_data.get("agent_llm_auto")
+    if fallback_for is True:
+        # Older pickles mirrored the automatic fallback as if it were a choice.
+        # Preserve their recovery behavior unless Web has since picked a model.
+        fallback_for = DEFAULT_AGENT
+        if not saved or saved == cached:
+            saved = DEFAULT_AGENT
+            set_active_llm(context, saved)
+    if not saved:
+        saved = cached or DEFAULT_AGENT
+        set_active_llm(context, saved)
     if (
-        context.user_data.get("agent_llm_auto")
-        and agent_key != DEFAULT_AGENT
-        and _is_agent_available(DEFAULT_AGENT)
+        fallback_for == saved
+        and cached
+        and cached != saved
+        and not _is_agent_available(saved)
     ):
-        set_active_llm(context, DEFAULT_AGENT)
-        context.user_data.pop("agent_llm_auto", None)
-        agent_key = DEFAULT_AGENT
-    # Backfill the shared mirror for users who picked their model before it
-    # existed — otherwise agent creation sees no active model until they
-    # happen to re-pick one. No-ops once the value already matches.
-    set_active_llm(context, agent_key)
-    return agent_key
+        context.user_data["agent_llm"] = cached
+        context.user_data["agent_llm_auto"] = saved
+        return cached
+    context.user_data.pop("agent_llm_auto", None)
+    context.user_data["agent_llm"] = saved
+    return saved
 
 
 # What someone can type after /agent to mean the coordinator rather than a
@@ -368,10 +396,10 @@ async def agent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 "Then restart the bot."
             )
             return
-        # Auto-switch to an available one. Flag it as non-user so the reclaim
-        # logic above can restore DEFAULT_AGENT once its CLI is installed.
-        set_active_llm(context, available[0])
-        context.user_data["agent_llm_auto"] = True
+        # A temporary fallback is not a new shared preference. Remember which
+        # choice to restore once its CLI is installed.
+        context.user_data["agent_llm"] = available[0]
+        context.user_data["agent_llm_auto"] = agent_key
 
     # Checked after the CLI fallback above, so a named agent is raised on a
     # model that can actually start rather than refused for the default's sake.
@@ -400,7 +428,15 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     chat_id = update.effective_chat.id
+    from condor.telegram_ingress import get_ingress
+
+    preparing = get_ingress().cancel(chat_id)
     session = await get_session(chat_id)
+    if preparing and (not session or not session.is_busy):
+        await update.message.reply_text(
+            "⏹ Stopped reading attachments. The session is kept."
+        )
+        return
 
     if not session or not session.alive:
         await update.message.reply_text("No active session.")
@@ -523,7 +559,7 @@ async def agent_callback_handler(
     # Session management
     elif action == "stop":
         await _handle_stop(update, context)
-    elif action == "cancel":
+    elif action == "cancel" or action.startswith("cancel:"):
         await _handle_cancel(update, context)
     elif action == "close":
         await _handle_close(update, context)
@@ -600,7 +636,7 @@ async def _handle_start(
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
-    agent_key = context.user_data.get("agent_llm", DEFAULT_AGENT)
+    agent_key = _reclaim_default_agent(context)
     llm_label = AGENT_OPTIONS.get(agent_key, {}).get("label", agent_key)
 
     agent, stale_slug = resolve_chat_binding(context.user_data)
@@ -673,7 +709,7 @@ async def _handle_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     from .menu import _settings_keyboard
 
     query = update.callback_query
-    current_llm = context.user_data.get("agent_llm", DEFAULT_AGENT)
+    current_llm = _reclaim_default_agent(context)
     await query.message.edit_text(
         "Select the LLM for new sessions:",
         reply_markup=_settings_keyboard(
@@ -755,7 +791,7 @@ async def _handle_openrouter_picker(
     # cached for an hour, so the index is stable across paging within a session.
     context.user_data["_openrouter_models"] = models
 
-    current = context.user_data.get("agent_llm", "")
+    current = _reclaim_default_agent(context)
     current_slug = (
         current.split(":", 1)[1]
         if current.startswith("openrouter:") and current != "openrouter:"
@@ -936,7 +972,7 @@ def _current_custom_model(context: ContextTypes.DEFAULT_TYPE) -> str | None:
     """Model id of the current agent_llm when it points at a custom endpoint."""
     from condor.preferences import parse_custom_agent_key
 
-    _, model_id = parse_custom_agent_key(context.user_data.get("agent_llm", ""))
+    _, model_id = parse_custom_agent_key(_reclaim_default_agent(context))
     return model_id or None
 
 
@@ -997,7 +1033,7 @@ async def _handle_custom_list(
     await _show(
         update,
         text,
-        _custom_endpoints_keyboard(providers, context.user_data.get("agent_llm", "")),
+        _custom_endpoints_keyboard(providers, _reclaim_default_agent(context)),
         placeholder=placeholder,
     )
 
@@ -1437,7 +1473,7 @@ async def _handle_custom_delete(
     context.user_data.pop("_custom_models", None)
 
     # Don't leave agent_llm pointing at an endpoint that no longer resolves
-    active_provider, _ = parse_custom_agent_key(context.user_data.get("agent_llm", ""))
+    active_provider, _ = parse_custom_agent_key(_reclaim_default_agent(context))
     notice = f"Forgot '{name}'."
     if active_provider == name:
         set_active_llm(context, DEFAULT_AGENT)
@@ -1480,7 +1516,15 @@ async def _handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     belongs to `TelegramStreamer.finalize()`, which marks the partial answer
     stopped and drops the button with it.
     """
-    await runtime.abort(_tg_key(update.effective_chat.id))
+    from condor.telegram_output import active_run, unregister_run
+
+    token = update.callback_query.data.removeprefix("agent:cancel:")
+    target = active_run(token, update.effective_chat.id, update.effective_user.id)
+    if target is None:
+        return  # Old, foreign or already-finished buttons cannot stop a new run.
+    target.stopped = True
+    unregister_run(target)
+    await runtime.abort_turn(target.user_id, target.conversation_id, target.request_id)
 
 
 async def _handle_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2031,84 +2075,9 @@ def _voice_display(text: str) -> str:
     bot *renders* may carry a spoken recovery phrase — otherwise the notice
     ("I removed a recovery phrase ... and deleted the message") is a lie while
     the phrase is still legible in the bot's own message, first as the
-    transcription edit and then as the prefix the streamer keeps at the head of
-    every edit through the final answer (SEC-281).
+    retained transcription in the final answer (SEC-281).
     """
     return secrets.redact(text)[0]
-
-
-async def agent_voice_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Handle voice messages — transcribe and forward as text to the always-on agent."""
-    chat_type = update.effective_chat.type
-    if chat_type in ("group", "supergroup"):
-        return
-
-    # Auth check — only approved users
-    from config_manager import UserRole, get_config_manager
-
-    user_id = update.effective_user.id
-    cm = get_config_manager()
-    role = cm.get_user_role(user_id)
-    if role not in (UserRole.ADMIN, UserRole.USER):
-        return
-
-    # Skip if no agent CLI available
-    agent_key = context.user_data.get("agent_llm", DEFAULT_AGENT)
-    if not await get_session(update.effective_chat.id) and not _is_agent_available(
-        agent_key
-    ):
-        return
-
-    voice = update.message.voice
-    if not voice:
-        return
-
-    # Download the voice file
-    status_msg = await update.message.reply_text("🎙 Transcribing voice...")
-    try:
-        tg_file = await voice.get_file()
-        file_bytes = await tg_file.download_as_bytearray()
-
-        # Resolve user voice preferences (language, model)
-        from condor.preferences import get_voice_prefs
-
-        voice_prefs = get_voice_prefs(context.user_data)
-        voice_lang = voice_prefs.get("language")  # None = auto-detect
-        voice_model = voice_prefs.get("whisper_model", "base")
-
-        from utils.transcribe import transcribe_voice
-
-        text = await transcribe_voice(
-            bytes(file_bytes), language=voice_lang, model_size=voice_model
-        )
-    except Exception as e:
-        log.exception("Voice transcription failed")
-        await status_msg.edit_text(f"Transcription failed: {e}")
-        return
-
-    if not text or not text.strip():
-        await status_msg.edit_text(
-            "Could not transcribe any speech from the voice message."
-        )
-        return
-
-    # Show the transcribed text
-    from utils.telegram_formatters import escape_markdown_v2
-
-    escaped = escape_markdown_v2(_voice_display(text))
-    await status_msg.edit_text(
-        f"🎙 _{escaped}_\n\nThinking\\.\\.\\.", parse_mode="MarkdownV2"
-    )
-
-    # Store the status message so agent_message_handler reuses it as placeholder
-    context.chat_data["_voice_placeholder"] = status_msg
-    context.chat_data["_voice_transcription"] = text
-
-    # Forward to agent handler — pass transcribed text via chat_data
-    # (Message.text is read-only in python-telegram-bot)
-    await agent_message_handler(update, context)
 
 
 # ── Pasted key material (FEAT-056) ───────────────────────────────────────
@@ -2129,7 +2098,7 @@ _CERTAIN_NOTICE = (
     "It was not sent to the agent and it is not in the transcript.\n\n"
     "Import wallets with /gateway — that flow is the only one that should ever "
     "see a key.\n\n"
-    "Telegram had the message until the delete landed, so if that phrase holds "
+    "Telegram may retain copies of source messages. If that phrase holds "
     "funds, move them."
 )
 
@@ -2152,7 +2121,7 @@ _AMBIGUOUS_TAIL = (
 )
 
 
-async def _handle_pasted_secrets(update, context, text: str) -> None:
+async def _handle_pasted_secrets(update, context, text: str, *, messages=None) -> None:
     """Delete what was eaten, warn once about what was not.
 
     Both branches run off ``secrets.scan`` on this surface's own copy of the
@@ -2166,13 +2135,26 @@ async def _handle_pasted_secrets(update, context, text: str) -> None:
     if any(finding.certain for finding in findings):
         # Mirrors handlers/config/gateway/wallets.py: the message goes first,
         # and its failure is not the user's problem to hear about.
-        try:
-            await update.message.delete()
-        except Exception:  # noqa: BLE001 - best effort, and already logged there
-            log.debug("Could not delete a message carrying key material")
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id, text=_CERTAIN_NOTICE
+        source_messages = messages or (update.message,)
+        # An external reply exposes content but may not expose a deletable
+        # original. Never claim all copies were removed in that case.
+        deleted = not any(
+            getattr(message, "external_reply", None) for message in source_messages
         )
+        for message in source_messages:
+            try:
+                await message.delete()
+            except Exception:
+                deleted = False
+                log.debug("Could not delete a message carrying key material")
+        notice = (
+            _CERTAIN_NOTICE
+            if deleted
+            else _CERTAIN_NOTICE.replace(
+                "and deleted the message", "but could not delete all source messages"
+            )
+        )
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=notice)
 
     from condor.preferences import secret_notices_enabled
 
@@ -2206,45 +2188,9 @@ async def _handle_pasted_secrets(update, context, text: str) -> None:
         )
 
 
-async def agent_message_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Handle text messages — always-on agent fallback.
-
-    This is called for any text that doesn't match a specific handler state.
-    Auto-creates an agent session with the user's preferred LLM if none exists.
-    """
-    chat_type = update.effective_chat.type
-    if chat_type in ("group", "supergroup"):
-        return
-
-    # Auth check — only approved users can use the agent
-    from config_manager import UserRole, get_config_manager
-
-    user_id = update.effective_user.id
-    cm = get_config_manager()
-    role = cm.get_user_role(user_id)
-    if role not in (UserRole.ADMIN, UserRole.USER):
-        return
-
+async def _consume_agent_text_input(update, context, text: str) -> bool:
+    """Consume explicit text controls before creating an ordinary AI turn."""
     chat_id = update.effective_chat.id
-
-    # Consume the voice hand-off exactly once, before any early return below, so
-    # the transcript survives to build the streamer prefix and neither key leaks
-    # into the next message's turn.
-    voice_transcription = context.chat_data.pop("_voice_transcription", None)
-    voice_placeholder = context.chat_data.pop("_voice_placeholder", None)
-    text = voice_transcription or update.message.text
-
-    if not text:
-        return
-
-    # Before every state branch below, because a phrase pasted into any of them
-    # is still a phrase on Telegram's servers. The turn itself continues: the
-    # funnel already replaced the value, so the agent sees a marker it can talk
-    # about rather than a hole.
-    await _handle_pasted_secrets(update, context, text)
-
     # "-" resets the ACP session: destroy current and let the next block auto-create a new one
     if text.strip() == "-":
         session = await get_session(chat_id)
@@ -2254,29 +2200,36 @@ async def agent_message_handler(
         # below would replay the transcript the user just asked to leave.
         forget_chat_conversation(context.user_data)
         await update.message.reply_text("Session reset. Send a message to start fresh.")
-        return
+        return True
 
     # Handle custom compact input
     if context.user_data.pop("agent_compact_custom", None):
         await _do_compact_from_message(update, context, text)
-        return
+        return True
 
     # Handle typed OpenRouter slug input
     if context.user_data.pop("_openrouter_typing_slug", None):
         await _resolve_openrouter_typed_slug(update, context, text)
-        return
+        return True
 
     # Handle custom endpoint input (base URL, then API key) and model search
     if context.user_data.pop("_custom_typing_url", None):
         await _resolve_custom_url(update, context, text)
-        return
+        return True
     if context.user_data.pop("_custom_typing_key", None):
         await _resolve_custom_key(update, context, text)
-        return
+        return True
     if context.user_data.pop("_custom_typing_search", None):
         await _resolve_custom_search(update, context, text)
-        return
+        return True
 
+    return False
+
+
+async def _ensure_chat_session(update, context) -> SessionInfo | None:
+    """Reuse or restore this chat's selected conversation and model."""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     session = await get_session(chat_id)
 
     # Auto-create session if none exists (always-on agent)
@@ -2290,15 +2243,22 @@ async def agent_message_handler(
         # other identity, other tools, other server, other memory (CORR-090).
         agent, stale_slug = resolve_chat_binding(context.user_data)
         if stale_slug:
-            await update.message.reply_text(stale_binding_notice(stale_slug))
+            try:
+                await update.message.reply_text(stale_binding_notice(stale_slug))
+            except NetworkError as exc:
+                log.warning(
+                    "Telegram delivery failed stage=binding_notice update_id=%s error_type=%s",
+                    getattr(update, "update_id", None),
+                    type(exc).__name__,
+                )
 
         # Check if the CLI binary is installed before attempting to spawn. A
         # bound Agent runs on its own configured model, so that is the one whose
         # CLI has to be there.
         probe_key = (agent.agent_key or agent_key) if agent else agent_key
         if not _is_agent_available(probe_key):
-            log.debug("Agent CLI for %s not found, skipping auto-create", probe_key)
-            return
+            await _report_agent_unavailable(update, probe_key)
+            return None
 
         try:
             bot = context.bot
@@ -2319,77 +2279,294 @@ async def agent_message_handler(
                 conversation_id=stored_chat_conversation(context.user_data),
             )
 
-        except Exception as e:
-            log.exception("Failed to create agent session")
-            await update.message.reply_text(f"Failed to start agent: {e}")
+        except Exception as exc:
+            log.warning(
+                "Failed to create agent session error_type=%s", type(exc).__name__
+            )
+            await _try_telegram_message(
+                update,
+                "session_start",
+                update.message.reply_text,
+                text="Could not start the agent. Please try again or choose another model with /agent.",
+            )
+            return None
+
+    return session
+
+
+async def agent_message_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Prepare one complete Telegram turn, then hand execution to the runtime.
+
+    The ingress owns batching, bounded admission and preprocessing order. The
+    runtime owns durable deduplication, the conversation queue and model work.
+    No media payload, download task or voice hand-off enters PTB persistence.
+    """
+    from condor.telegram_ingress import get_ingress
+    from condor.telegram_input import InputError
+    from config_manager import UserRole, get_config_manager
+
+    if not update.message or update.effective_chat.type != "private":
+        return
+    role = get_config_manager().get_user_role(update.effective_user.id)
+    if role not in (UserRole.ADMIN, UserRole.USER):
+        return
+    try:
+        async with get_ingress().receive(update) as admission:
+            if admission is not None:
+                await _process_agent_input(update, context, admission)
+    except InputError as exc:
+        log.warning("Telegram input rejected code=%s", exc.code)
+        await _try_telegram_message(
+            update, "input_error", update.message.reply_text, text=exc.user_message
+        )
+
+
+async def _process_agent_input(update, context, admission) -> None:
+    from condor.preferences import get_voice_prefs
+    from condor.runtime import attachments, conversations
+    from condor.runtime.models import PromptImage
+    from condor.telegram_input import (
+        InputError,
+        ResolvedInput,
+        extract_input,
+        get_resolver,
+    )
+    from config_manager import UserRole, get_config_manager
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    if get_config_manager().get_user_role(user_id) not in (
+        UserRole.ADMIN,
+        UserRole.USER,
+    ):
+        return
+    # Typed controls act on this message, never on quoted text or a transcript.
+    own_text = update.message.text
+    armed = any(context.user_data.get(key) for key in _ARMED_TEXT_INPUT_KEYS)
+    if own_text and (own_text.strip() == "-" or armed):
+        from condor.telegram_input import input_has_attachments
+
+        if armed and input_has_attachments(update.message):
+            raise InputError(
+                "text_expected",
+                "Please send text for the current input, or use /cancel before sending attachments.",
+            )
+        await _notice_input_secrets(update, context, own_text)
+        if await _consume_agent_text_input(update, context, own_text):
+            admission.accepted = True
+            return
+    sources = {}
+    for message in admission.messages:
+        sources[(message.chat_id, message.message_id)] = message
+        reply = getattr(message, "reply_to_message", None)
+        if reply is not None:
+            sources[(reply.chat_id, reply.message_id)] = reply
+
+    # Protect text already delivered by Telegram even if its attachment later
+    # fails validation or download. Scan decoded text separately below.
+    source_text = "\n\n".join(
+        message.text or message.caption or "" for message in sources.values()
+    )
+    if source_text:
+        await _notice_input_secrets(
+            update, context, source_text, tuple(sources.values())
+        )
+    if get_config_manager().get_user_role(user_id) not in (
+        UserRole.ADMIN,
+        UserRole.USER,
+    ):
+        return
+    incoming = extract_input(admission.messages)
+
+    # Avoid downloading/retranscribing a replay, including after a restart or
+    # conversation switch. The runtime remains the final deduplication gate.
+    if incoming.media and conversations.has_request(user_id, admission.request_id):
+        admission.accepted = True
+        return
+
+    if incoming.media and any(
+        context.user_data.get(key) for key in _ARMED_TEXT_INPUT_KEYS
+    ):
+        raise InputError(
+            "text_expected",
+            "Please send text for the current input, or use /cancel before sending attachments.",
+        )
+
+    session = await _ensure_chat_session(update, context)
+    if session is None:
+        return
+    conversation_id = getattr(session, "conversation_id", "")
+    status = None
+    resolved = ResolvedInput(incoming.text, (), ())
+    if incoming.media:
+        status = await _try_telegram_message(
+            update,
+            "input_status",
+            update.message.reply_text,
+            text="Reading attachments… /stop cancels this message.",
+            disable_notification=True,
+        )
+        prefs = get_voice_prefs(context.user_data)
+        try:
+            resolved = await get_resolver(context.bot).resolve(
+                incoming,
+                language=prefs.get("language"),
+                model_size=prefs.get("whisper_model", "base"),
+            )
+        except InputError as exc:
+            await _try_telegram_message(
+                update,
+                "input_error",
+                status.edit_text if status else update.message.reply_text,
+                text=exc.user_message,
+            )
+            return
+        # Resolution preserves incoming text and appends document/transcript
+        # content. Do not deliver the same caption warning twice.
+        decoded_text = resolved.text[len(incoming.text) :]
+        if decoded_text.strip():
+            await _notice_input_secrets(
+                update, context, decoded_text, tuple(sources.values())
+            )
+        # Commands and other surfaces may switch conversations during downloads
+        # or notices. This is the last await before saving/accepting the input.
+        current = await get_session(chat_id)
+        if (
+            current is None
+            or not current.alive
+            or getattr(current, "conversation_id", "") != conversation_id
+            or get_config_manager().get_user_role(user_id)
+            not in (UserRole.ADMIN, UserRole.USER)
+        ):
+            await _try_telegram_message(
+                update,
+                "input_changed",
+                status.edit_text if status else update.message.reply_text,
+                text="The chat or your access changed while reading attachments. Please send the message again.",
+            )
             return
 
-    # Busy is an acknowledgement, not a refusal. The message really is queued:
-    # `on_busy="queue"` below lets it block on the session lock, which is FIFO,
-    # so several messages sent mid-answer are answered in the order they were
-    # sent. Telegram has no live composer, so silently killing a running answer
-    # because someone sent a second thought would be hostile — the dashboard
-    # steers, this waits, and /stop is how you interrupt on purpose.
-    #
-    # The acknowledgement is not sent from here any more: the QUEUED event the
-    # runtime emits renders inside this turn's own placeholder, which costs one
-    # message instead of two and cannot miss the race where `is_busy` was read
-    # from a snapshot taken just before the turn ahead finished.
+    if get_config_manager().get_user_role(user_id) not in (
+        UserRole.ADMIN,
+        UserRole.USER,
+    ):
+        return
+    saved = []
+    duplicate = False
+    try:
+        images = []
+        for image in resolved.images:
+            attachment = attachments.save(user_id, conversation_id, image.data)
+            saved.append(attachment)
+            images.append(
+                PromptImage(data=image.data, mime=attachment.mime, id=attachment.id)
+            )
+        request = PromptRequest(
+            text=resolved.text,
+            images=images,
+            request_id=admission.request_id,
+        )
+        prefix = "\n".join(
+            f"🎙 {_voice_display(text)}" for text in resolved.transcriptions
+        )
+        duplicate = await _stream_agent_turn(
+            update,
+            context,
+            admission,
+            request,
+            status,
+            prefix,
+            conversation_id=conversation_id,
+        )
+    except (attachments.AttachmentError, OSError):
+        await _try_telegram_message(
+            update,
+            "attachment_save",
+            status.edit_text if status else update.message.reply_text,
+            text="Could not save the attachments in this conversation. Please send the message again.",
+        )
+    finally:
+        if not admission.accepted or duplicate:
+            for attachment in saved:
+                (
+                    attachments.attachments_dir(user_id, conversation_id)
+                    / attachment.id
+                ).unlink(missing_ok=True)
 
-    # Keep the spoken question at the head of the streamed answer: the streamer
-    # edits the very placeholder that was showing the transcript, so without the
-    # prefix the user's words would be overwritten by the reply.
-    prefix = f"🎙 {_voice_display(voice_transcription)}" if voice_transcription else ""
 
-    # Send or reuse placeholder message
-    if voice_placeholder:
-        placeholder = voice_placeholder
-    else:
-        placeholder = await update.message.reply_text("Thinking...")
+async def _notice_input_secrets(update, context, text: str, messages=None) -> None:
+    try:
+        await _handle_pasted_secrets(update, context, text, messages=messages)
+    except NetworkError as exc:
+        log.warning(
+            "Telegram delivery failed stage=secret_notice update_id=%s error_type=%s",
+            getattr(update, "update_id", None),
+            type(exc).__name__,
+        )
 
+
+async def _stream_agent_turn(
+    update, context, admission, request, status, prefix, *, conversation_id
+) -> bool:
+    """Delivery consumes accepted events and never retries the underlying turn."""
+    from config_manager import UserRole, get_config_manager
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     streamer = TelegramStreamer(
         bot=context.bot,
         chat_id=chat_id,
-        message_id=placeholder.message_id,
+        message_id=status.message_id if status else None,
         prefix=prefix,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        request_id=request.request_id,
+        input_message_id=update.message.message_id,
     )
-    edit_task = streamer.start_edit_loop()
-
+    edit_started = False
     last_event = None
     try:
-        async for event in runtime.prompt(
-            _tg_key(chat_id), PromptRequest(text=text), on_busy="queue"
-        ):
-            await streamer.process_event(event)
-            last_event = event
-    except Exception as e:
-        log.exception("Agent prompt error")
+        async with aclosing(
+            runtime.prompt(
+                _tg_key(chat_id),
+                request,
+                on_busy="queue",
+                can_execute=lambda: get_config_manager().get_user_role(user_id)
+                in (UserRole.ADMIN, UserRole.USER),
+            )
+        ) as events:
+            async for event in events:
+                if event.type == EventType.ACCEPTED:
+                    admission.accepted = True
+                admission.release()
+                if event.type == EventType.DONE and event.stop_reason == "duplicate":
+                    admission.accepted = True
+                    return True
+                await streamer.process_event(event)
+                if not edit_started:
+                    streamer.start_edit_loop()
+                    edit_started = True
+                last_event = event
+        stop_reason = (
+            last_event.stop_reason
+            if last_event is not None and last_event.type == EventType.DONE
+            else ""
+        )
+        if stop_reason == "disconnected":
+            await destroy_session(chat_id)
+        elif stop_reason == "timeout":
+            await destroy_session(chat_id)
         await streamer.finalize()
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=placeholder.message_id,
-            text=f"Agent error: {e}",
+    except Exception as exc:
+        # Preserve the conversation on a transport/rendering failure. Log only
+        # the type: third-party exceptions can contain credential-bearing URLs.
+        log.warning("Telegram turn failed error_type=%s", type(exc).__name__)
+        await streamer.process_event(
+            RuntimeEvent.error("Could not finish this turn. Please try again.")
         )
-        await destroy_session(chat_id)
-        return
-
-    await streamer.finalize()
-
-    # Detect subprocess death mid-stream
-    stop_reason = (
-        last_event.stop_reason
-        if last_event is not None and last_event.type == EventType.DONE
-        else ""
-    )
-    if stop_reason == "disconnected":
-        await destroy_session(chat_id)
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Agent session disconnected. Send a message to start a new session.",
-        )
-    elif stop_reason == "timeout":
-        await destroy_session(chat_id)
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Agent timed out (took too long). Send a message to start a new session.",
-        )
+        await streamer.finalize()
+    finally:
+        await streamer.stop_edit_loop()
+    return False

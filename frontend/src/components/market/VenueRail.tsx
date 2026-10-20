@@ -62,7 +62,7 @@ export function VenueRail({
   const grouped = mine.length > 0 && viewOnly.length > 0;
 
   return (
-    <div className="flex w-44 shrink-0 flex-col border-r border-[var(--color-border)]">
+    <div className="hidden w-44 shrink-0 flex-col border-r border-[var(--color-border)] md:flex">
       {/* No spacer band above the list. The rail used to reserve the search
           field's height so its first venue sat level with the table's first
           row, which cost the panel an empty rectangle in its top-left corner —

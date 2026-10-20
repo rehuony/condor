@@ -458,6 +458,10 @@ export function formatPct(val: number): string {
   return (val >= 0 ? "+" : "") + (val * 100).toFixed(2) + "%";
 }
 
+export function isExecutorTerminated(status: string) {
+  return status.toUpperCase() === "TERMINATED";
+}
+
 export function isExecutorActive(status: string) {
   return status === "active" || status === "running";
 }

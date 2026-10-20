@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { DelegationDetail } from "@/components/agent/DelegationDetail";
+import { DelegationTaskPrompt } from "@/components/agent/DelegationTaskPrompt";
 import { DelegationTranscript } from "@/components/agent/DelegationTranscript";
 import {
   DELEGATION_STATUS,
@@ -56,7 +57,7 @@ export function DelegationSheet({
   );
 
   const hasBody = "result" in task;
-  const { data } = useQuery({
+  const { data, error, refetch } = useQuery({
     queryKey: ["delegation", task.task_id],
     queryFn: () => api.getDelegation(task.task_id),
     enabled: !hasBody,
@@ -66,45 +67,55 @@ export function DelegationSheet({
 
   return (
     <WorkspaceSheet
-      title={task.agent}
+      title={`Tasks · ${task.agent}`}
       subtitle={`${DELEGATION_STATUS[task.status].label.toLowerCase()} · ${formatDelegationTime(task)}`}
       onClose={onClose}
+      bleed
+      rememberZen={false}
     >
-      {/* The ask belongs to both views, so it sits above the switch rather
-          than inside the one that happens to render it. */}
-      <p className="mb-3 whitespace-pre-wrap text-sm text-[var(--color-text)]">
-        {task.task}
-      </p>
-      <div className="mb-3 flex items-center gap-1 border-b border-[var(--color-border)]/50 pb-2">
-        {(["transcript", "result"] as const).map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setView(id)}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-all ${
-              view === id
-                ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            {id}
-          </button>
-        ))}
-      </div>
-      {view === "transcript" ? (
-        isConsult ? (
-          <p className="text-xs text-[var(--color-text-muted)]">{NO_TRANSCRIPT}</p>
-        ) : (
-          <DelegationTranscript taskId={task.task_id} />
-        )
-      ) : record ? (
-        <DelegationDetail delegation={record} />
-      ) : (
-        <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Loading result…
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* The ask belongs to both views, so it sits above the switch rather
+            than inside the one that happens to render it. */}
+        <DelegationTaskPrompt text={task.task} />
+        <div className="flex shrink-0 items-center gap-1 border-b border-[var(--color-border)] px-4 py-2" aria-label="Task views">
+          {(["transcript", "result"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={view === id}
+              onClick={() => setView(id)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-all ${
+                view === id
+                  ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
+                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              {id}
+            </button>
+          ))}
         </div>
-      )}
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [overflow-wrap:anywhere] p-4">
+          {view === "transcript" ? (
+            isConsult ? (
+              <p className="text-xs text-[var(--color-text-muted)]">{NO_TRANSCRIPT}</p>
+            ) : (
+              <DelegationTranscript taskId={task.task_id} />
+            )
+          ) : record ? (
+            <DelegationDetail delegation={record} />
+          ) : error ? (
+            <div role="alert" className="text-sm text-[var(--color-text-muted)]">
+              Could not load this task.
+              <button type="button" onClick={() => refetch()} className="ml-2 text-[var(--color-primary)]">Retry</button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading result…
+            </div>
+          )}
+        </div>
+      </div>
     </WorkspaceSheet>
   );
 }

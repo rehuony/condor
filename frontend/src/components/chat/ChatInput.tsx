@@ -40,19 +40,6 @@ interface ChatInputProps {
   /** Who the user is writing to. Defaults to Condor, the chat assistant. */
   placeholder?: string;
   /**
-   * Controls for *this* conversation, at the left edge of the box, before the
-   * field. The composer is the one piece of chrome that unambiguously belongs
-   * to the chat on screen, so an action on the chat itself — sharing it — reads
-   * here and nowhere else; the bar above the transcript is about which session
-   * you are in, not what to do with it.
-   *
-   * Rendered inside the box rather than beside it so it sits on the same
-   * baseline as the mic and Send. Nothing is rendered when the surface has
-   * nothing to put here (the hero's composer, the bubble's), and the box is
-   * then exactly what it was.
-   */
-  leading?: React.ReactNode;
-  /**
    * Where an unsent draft is kept while this composer is not on screen —
    * normally the conversation's id (lib/chatDrafts).
    *
@@ -73,7 +60,6 @@ export function ChatInput({
   onAbort,
   autoFocus,
   placeholder = "Ask Condor...",
-  leading,
   draftKey,
 }: ChatInputProps) {
   const [value, setValue] = useState(() => readDraft(draftKey));
@@ -447,8 +433,6 @@ export function ChatInput({
             narrow on the widest screen. Below `@sm` the field takes the whole
             first line and the controls drop under it. */}
         <div className="flex items-end gap-2 @max-sm:flex-wrap">
-          {leading}
-
           {isRecording ? (
             // Recording UI
             <div className="flex flex-1 items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 @max-sm:order-first @max-sm:basis-full">

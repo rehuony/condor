@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -66,16 +66,21 @@ class BalanceItem(BaseModel):
 
 
 class ConnectorBalance(BaseModel):
+    account_name: str = ""
     connector: str
     balances: list[BalanceItem]
     total_usd: float = 0.0
     note: str | None = None
+    equity_usd: float | None = None
+    unrealized_pnl_usd: float | None = None
 
 
 class PortfolioResponse(BaseModel):
     server: str
     connectors: list[ConnectorBalance]
     total_usd: float = 0.0
+    equity_usd: float | None = None
+    unrealized_pnl_usd: float | None = None
 
 
 class PortfolioHistoryPoint(BaseModel):
@@ -89,6 +94,7 @@ class PortfolioHistoryResponse(BaseModel):
     points: list[PortfolioHistoryPoint]
     interval: str
     top_tokens: list[str] = []
+    valuation: Literal["wallet", "equity"] = "wallet"
 
 
 # ── Bots ──

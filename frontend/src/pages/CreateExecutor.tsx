@@ -23,6 +23,7 @@ import { MarketDepthPanel } from "@/components/market/MarketDepthPanel";
 import { MarketBrowser, type MarketPick } from "@/components/market/MarketBrowser";
 import { FavoritesStrip } from "@/components/market/FavoritesStrip";
 import { StarMarketButton } from "@/components/market/StarMarketButton";
+import { ChartRangeToolbar } from "@/components/trade/ChartRangeToolbar";
 import { TradeChart } from "@/components/trade/TradeChart";
 import { GridConfigPanel } from "@/components/grid/GridConfigPanel";
 import {
@@ -89,16 +90,16 @@ export function CreateExecutor() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const hasMarketParams = Boolean(searchParams.get("connector") || searchParams.get("pair"));
 
-  // Executor type from URL param or default to grid
-  const [executorType, setExecutorType] = useState<ExecutorType>(
-    () => (searchParams.get("type") as ExecutorType) || "grid",
-  );
+  // Validate external input before it selects a config or chart mapping.
+  const requestedType = TYPE_TABS.find((tab) => tab.value === searchParams.get("type"))?.value ?? "grid";
 
   // Update URL when type changes
   const handleTypeChange = (type: ExecutorType) => {
-    setExecutorType(type);
-    setSearchParams({ type }, { replace: true });
+    const next = new URLSearchParams(searchParams);
+    next.set("type", type);
+    setSearchParams(next, { replace: true });
   };
 
   // ── Executor configs (all initialized for hooks rules) ──
@@ -117,6 +118,10 @@ export function CreateExecutor() {
   // Sync other types' connector/pair changes through grid state
   const connector = gridState.connector;
   const pair = gridState.pair;
+  const [rangeRequestId, setRangeRequestId] = useState(0);
+  const [customRangeKey, setCustomRangeKey] = useState<string | null>(null);
+  const rangeKey = `${server}:${connector}:${pair}:${gridState.interval}:${gridState.lookbackSeconds}:${rangeRequestId}`;
+  const isCustomRange = customRangeKey === rangeKey || !LOOKBACK_OPTIONS.some((o) => o.seconds === gridState.lookbackSeconds);
   const isSpot = isSpotConnector(connector);
   // A CLOB pair is already <BASE>-<QUOTE>, so the tickers come off the split.
   const balances = usePairBalances(
@@ -159,6 +164,7 @@ export function CreateExecutor() {
     () => !searchParams.get("pair") && !hasRememberedMarket(),
   );
   const [rightPanelWidth, setRightPanelWidth] = useState(288);
+  const [mobileResultsOpen, setMobileResultsOpen] = useState(false);
   const [bottomPaneHeight, setBottomPaneHeight] = useState(200);
   // The selection belongs to the market it was made in, so it carries that
   // market with it and simply stops matching when the market changes. Clearing
@@ -228,6 +234,7 @@ export function CreateExecutor() {
     () => connectorCapabilities(connector, venues),
     [connector, venues],
   );
+  const executorType = caps.executorTypes.includes(requestedType) ? requestedType : "order";
 
   // Pool resolution only means something where an LP position can exist, so the
   // query is off elsewhere rather than asking about a pair that has no pool.
@@ -265,19 +272,6 @@ export function CreateExecutor() {
     } catch { /* ok */ }
   }, [connector, pair]);
 
-  // A /trade URL naming a gateway network is a link to the wrong page now: its
-  // pools, not its pairs, are the thing to pick. Send it to /dex rather than
-  // silently swapping in a CEX. Only a *known* non-CLOB venue redirects, so a
-  // typo still falls through to the reset below.
-  useEffect(() => {
-    if (!listsReady) return;
-    const wanted = urlConnectorRef.current;
-    if (wanted && venues.some((v) => v.name === wanted && !v.hummingbotMarketData)) {
-      urlConnectorRef.current = null;
-      navigate("/dex", { replace: true });
-    }
-  }, [listsReady, venues, navigate]);
-
   // Sync connector to the offered venues. A venue the server no longer reports
   // cannot stay selected, or the panel queries endpoints for a venue that is gone.
   // A persisted solana-mainnet-beta retires itself here — no migration code.
@@ -285,15 +279,28 @@ export function CreateExecutor() {
     if (listsReady && allConnectors.length && !allConnectors.includes(connector)) {
       gridDispatch({ type: "SET_CONNECTOR", value: allConnectors[0] });
     }
-  }, [listsReady, allConnectors, connector]);
+  }, [listsReady, allConnectors, connector, gridDispatch]);
 
-  // Executor types the venue does not support cannot stay selected (Grid on a CEX
-  // → pick a DEX → land on Order).
+  // Gateway links belong on /dex. Keep the redirect and type correction in one
+  // effect so correcting the query cannot overwrite the destination.
   useEffect(() => {
-    if (listsReady && !caps.executorTypes.includes(executorType)) {
-      handleTypeChange("order");
+    if (!listsReady) return;
+    const wanted = urlConnectorRef.current;
+    if (wanted && venues.some((v) => v.name === wanted && !v.hummingbotMarketData)) {
+      // Preserve the destination until unmount: a connector update can render
+      // again before the router commits this navigation.
+      navigate("/dex", { replace: true });
+      return;
     }
-  }, [listsReady, caps, executorType]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Wait for URL market initialization and invalid-venue correction before
+    // normalizing the type against the selected venue's capabilities.
+    if (hasMarketParams || (allConnectors.length > 0 && !allConnectors.includes(connector))) return;
+    if (searchParams.get("type") !== executorType) {
+      const next = new URLSearchParams(searchParams);
+      next.set("type", executorType);
+      setSearchParams(next, { replace: true });
+    }
+  }, [listsReady, venues, navigate, hasMarketParams, allConnectors, connector, executorType, searchParams, setSearchParams]);
 
   // Reset pair when connector changes
   useEffect(() => {
@@ -372,7 +379,7 @@ export function CreateExecutor() {
       gridDispatch({ type: "SET_PAIR", value: market.pair });
       setBrowserOpen(false);
     },
-    [connector, gridDispatch],
+    [connector, gridDispatch, setBrowserOpen],
   );
 
   // A shortcut nobody can see. The chip used to carry a bare `<kbd>/</kbd>`,
@@ -605,9 +612,11 @@ export function CreateExecutor() {
   }
 
   return (
-    <div className="-m-6 flex h-[calc(100%+3rem)] flex-col">
-      {/* Top Bar */}
-      <div className="flex items-center border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="-m-3 flex min-h-full flex-col sm:-m-6 lg:h-[calc(100%+3rem)]">
+      {/* Top Bar. `--chart-tools` is the width the chart controls reserve:
+          they stay on this row while it has room for them, and otherwise wrap
+          onto the starred markets' row, which takes whatever they leave. */}
+      <div className="flex shrink-0 flex-wrap items-stretch border-b border-[var(--color-border)] bg-[var(--color-surface)] [--chart-tools:10.5rem] md:[--chart-tools:35rem]">
         {/* Back button */}
         <button
           onClick={() => navigate(-1)}
@@ -622,7 +631,7 @@ export function CreateExecutor() {
             on its own, dropping the page onto the new venue's default pair
             before you had chosen one. The chip states the market and opens the
             browser, which is where both halves are now chosen together. */}
-        <div className="relative flex items-center border-r border-[var(--color-border)]">
+        <div className="relative flex min-w-0 items-center border-r border-[var(--color-border)]">
           <button
             onClick={() => setBrowserOpen((v) => !v)}
             aria-pressed={browserOpen}
@@ -638,7 +647,7 @@ export function CreateExecutor() {
                   ? "Close market list (Esc)"
                   : "Change market (/)"
             }
-            className={`flex items-center gap-2 px-3 py-2.5 text-left transition-colors ${
+            className={`flex min-w-0 items-center gap-2 px-3 py-1.5 text-left transition-colors md:py-2.5 ${
               browserOpen
                 ? "bg-[var(--color-surface-hover)]"
                 : "hover:bg-[var(--color-surface-hover)]"
@@ -648,16 +657,18 @@ export function CreateExecutor() {
                 agrees with the browser it opens: venue rail first, pair table
                 after. The pair is still the identity of everything on this
                 page, so it keeps the body colour. */}
-            <span className="text-xs text-[var(--color-text-muted)]">
-              {formatConnectorName(connector)}
+            <span className="flex min-w-0 flex-col-reverse md:flex-row md:items-baseline md:gap-2">
+              <span className="truncate text-[10px] leading-tight text-[var(--color-text-muted)] md:text-xs">
+                {formatConnectorName(connector)}
+              </span>
+              <span className="truncate text-sm font-semibold leading-tight text-[var(--color-text)] md:text-base">{pair}</span>
             </span>
-            <span className="text-base font-semibold text-[var(--color-text)]">{pair}</span>
             {/* A chevron, not a list glyph: the caret is the web's word for
                 "this opens", and it points at the panel that drops below. It
                 flips while the browser is open, so the chip also says how to
                 close it. */}
             <ChevronDown
-              className={`h-4 w-4 transition-transform ${
+              className={`h-4 w-4 shrink-0 transition-transform ${
                 browserOpen
                   ? "rotate-180 text-[var(--color-primary)]"
                   : "text-[var(--color-text-muted)]"
@@ -680,8 +691,9 @@ export function CreateExecutor() {
           )}
         </div>
 
-        {/* Price ticker */}
-        <div className="flex flex-1 items-center px-4 py-2">
+        {/* Price ticker. Its minimum keeps the price (and from md the change)
+            in view: the chart controls wrap to the next row before taking it. */}
+        <div className="flex min-w-[7.5rem] flex-1 items-center px-3 py-1.5 md:min-w-48 md:py-2">
           <PriceTicker
             server={server}
             connector={connector}
@@ -691,59 +703,41 @@ export function CreateExecutor() {
           />
         </div>
 
-        {/* Interval + Range */}
-        <div className="flex items-center gap-3 border-l border-[var(--color-border)] px-4 py-2">
-          <div className="flex overflow-hidden rounded-md border border-[var(--color-border)]">
-            {INTERVALS.map((iv) => (
-              <button
-                key={iv}
-                onClick={() => gridDispatch({ type: "SET_FIELD", field: "interval", value: iv })}
-                className={`px-2.5 py-1 text-xs ${
-                  gridState.interval === iv
-                    ? "bg-[var(--color-primary)] text-white"
-                    : "bg-[var(--color-bg)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-                }`}
-              >
-                {iv}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-[var(--color-text-muted)]">Range:</span>
-            <div className="flex overflow-hidden rounded-md border border-[var(--color-border)]">
-              {LOOKBACK_OPTIONS.map((opt) => (
-                <button
-                  key={opt.label}
-                  onClick={() => gridDispatch({ type: "SET_FIELD", field: "lookbackSeconds", value: opt.seconds })}
-                  className={`px-2 py-1 text-xs ${
-                    gridState.lookbackSeconds === opt.seconds
-                      ? "bg-[var(--color-primary)] text-white"
-                      : "bg-[var(--color-bg)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        {/* Each divider is a left border and a top shadow pulled 1px outside
+            the item, so it only shows where a neighbour or a row sits on that
+            side: the page edge and the bar's top edge clip the rest. */}
+        <ChartRangeToolbar
+          intervals={INTERVALS}
+          interval={gridState.interval}
+          onIntervalChange={(value) => gridDispatch({ type: "SET_FIELD", field: "interval", value })}
+          ranges={LOOKBACK_OPTIONS}
+          rangeSeconds={gridState.lookbackSeconds}
+          isCustomRange={isCustomRange}
+          onRangeChange={(seconds) => {
+            setCustomRangeKey(null);
+            setRangeRequestId((id) => id + 1);
+            gridDispatch({ type: "SET_FIELD", field: "lookbackSeconds", value: seconds });
+          }}
+          className="-ml-px min-w-fit shrink-0 basis-[var(--chart-tools)] border-l border-[var(--color-border)] px-3 py-1 shadow-[0_-1px_0_var(--color-border)] md:py-2"
+        />
+        {/* Kept above the browser so toggling it never resizes the workspace.
+            Its basis leaves exactly the chart controls' room, so it never fits
+            beside them on the top row but always does on the row below. */}
+        {caps.hasOrderBook && (
+          <FavoritesStrip
+            server={server}
+            connector={connector}
+            pair={pair}
+            onPick={applyMarket}
+            className="-ml-px min-w-0 grow basis-[calc(100%-var(--chart-tools))] border-l border-[var(--color-border)] px-2 py-1 shadow-[0_-1px_0_var(--color-border)]"
+          />
+        )}
       </div>
 
-      {/* This server's starred markets — one click to the chart, no overlay. */}
-      {caps.hasOrderBook && !browserOpen && (
-        <FavoritesStrip
-          server={server}
-          connector={connector}
-          pair={pair}
-          onPick={applyMarket}
-        />
-      )}
-
       {/* Main Area: Chart + Right Panel */}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Chart + Bottom Pane */}
-        <div className="relative min-w-0 flex-1 flex flex-col">
+        <div className="relative min-w-0 flex-1 flex flex-col lg:min-h-0">
           {browserOpen && caps.hasOrderBook && (
             <MarketBrowser
               server={server}
@@ -755,14 +749,16 @@ export function CreateExecutor() {
               onClose={() => setBrowserOpen(false)}
             />
           )}
-          <div className="flex-1 min-h-0 overflow-hidden bg-[var(--color-surface)]">
+          <div className="h-[clamp(280px,48dvh,480px)] min-h-0 flex-none overflow-hidden bg-[var(--color-surface)] lg:h-auto lg:flex-1">
             <TradeChart
-              key={`${connector}:${pair}:${gridState.interval}`}
+              key={`${server}:${connector}:${pair}:${gridState.interval}`}
               server={server}
               connector={connector}
               pair={pair}
               interval={gridState.interval}
               lookbackSeconds={gridState.lookbackSeconds}
+              rangeRequestId={rangeRequestId}
+              onCustomRange={() => setCustomRangeKey(rangeKey)}
 
               startPrice={chartProps.startPrice}
               endPrice={chartProps.endPrice}
@@ -782,12 +778,17 @@ export function CreateExecutor() {
           </div>
           {/* Horizontal resize handle */}
           <div
-            className="group/hdrag relative h-1.5 shrink-0 cursor-row-resize border-y border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20 transition-colors"
+            className="group/hdrag relative hidden lg:block h-1.5 shrink-0 cursor-row-resize border-y border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20 transition-colors"
             onMouseDown={startVDrag}
           >
             <div className="absolute inset-x-0 top-1/2 mx-auto h-px w-12 -translate-y-1/2 rounded bg-amber-400/60 group-hover/hdrag:bg-amber-400 transition-colors" />
           </div>
-          <div style={{ height: bottomPaneHeight }} className="shrink-0 overflow-hidden">
+          <button type="button" aria-expanded={mobileResultsOpen} onClick={() => setMobileResultsOpen((open) => !open)}
+            className="flex min-h-11 items-center justify-between border-y border-[var(--color-border)] px-3 text-xs lg:hidden">
+            <span>{mainExecutors.length} executors · {mainPositions.length} positions</span>
+            <span>{mobileResultsOpen ? "Hide" : "Show"} details</span>
+          </button>
+          <div style={{ height: bottomPaneHeight }} className={`${mobileResultsOpen ? "block" : "hidden"} lg:block shrink-0 overflow-hidden`}>
             <TradeBottomPane
               executors={mainExecutors}
               positions={mainPositions}
@@ -816,16 +817,16 @@ export function CreateExecutor() {
 
         {/* Vertical resize handle */}
         <div
-          className="group/vdrag relative w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20 transition-colors"
+          className="group/vdrag relative hidden lg:block w-1.5 shrink-0 cursor-col-resize border-x border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-primary)]/10 active:bg-[var(--color-primary)]/20 transition-colors"
           onMouseDown={startHDrag}
         >
           <div className="absolute inset-y-0 left-1/2 my-auto h-12 w-px -translate-x-1/2 rounded bg-amber-400/60 group-hover/vdrag:bg-amber-400 transition-colors" />
         </div>
 
         {/* Right Panel */}
-        <div className="flex shrink-0 flex-col bg-[var(--color-surface)]" style={{ width: rightPanelWidth }}>
+        <div className={`flex min-h-0 shrink-0 flex-col bg-[var(--color-surface)] max-lg:min-h-[420px] max-lg:w-full! max-lg:border-t max-lg:border-[var(--color-border)] ${activePanel === "depth" ? "h-[420px] lg:h-auto" : ""}`} style={{ width: rightPanelWidth }}>
           {/* Panel Mode Toggle */}
-          <div className="flex border-b border-[var(--color-border)]">
+          <div className="flex shrink-0 border-b border-[var(--color-border)]">
             <button
               onClick={() => setRightPanel("config")}
               className={`flex flex-1 items-center justify-center gap-1.5 px-2 py-2 text-[11px] font-medium transition-colors ${
@@ -892,7 +893,7 @@ export function CreateExecutor() {
                     <OrderConfigPanel state={orderConfig.state} dispatch={orderConfig.dispatch} validation={orderConfig.validation} currentPrice={currentPrice} isSpot={isSpot} pair={pair} strategies={caps.orderStrategies} baseAvailable={balances.base} quoteAvailable={balances.quote} />
                   )}
                   {executorType === "dca" && (
-                    <DCAConfigPanel state={dcaConfig.state} dispatch={dcaConfig.dispatch} validation={dcaConfig.validation} currentPrice={currentPrice} isSpot={isSpot} pair={pair} />
+                    <DCAConfigPanel state={dcaConfig.state} dispatch={dcaConfig.dispatch} validation={dcaConfig.validation} currentPrice={currentPrice} isSpot={isSpot} />
                   )}
                   {executorType === "lp" && (
                     <LPConfigPanel state={lpConfig.state} dispatch={lpConfig.dispatch} validation={lpConfig.validation} currentPrice={currentPrice} pair={pair} pool={lpConfig.pool} poolFetching={lpConfig.poolFetching} baseAvailable={balances.base} quoteAvailable={balances.quote} />

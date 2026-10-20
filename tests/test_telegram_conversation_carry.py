@@ -16,6 +16,7 @@ onto the chat is exercised for real, and the assertions are on the
 
 import asyncio
 from copy import deepcopy
+from itertools import count
 
 import condor.agents.agent as agent_mod
 import config_manager as cm_mod
@@ -68,10 +69,15 @@ class _LiveSession:
 
 
 class _Message:
+    _ids = count(1)
+    chat_id = 4242
+    photo = sticker = voice = audio = document = None
+    reply_to_message = external_reply = None
+
     def __init__(self, rendered, text="hello"):
         self._rendered = rendered
         self.text = text
-        self.message_id = 7
+        self.message_id = next(self._ids)
 
     async def edit_text(self, text, **kw):
         self._rendered.append(text)
@@ -120,6 +126,9 @@ class _Streamer:
         pass
 
     async def finalize(self):
+        pass
+
+    async def stop_edit_loop(self):
         pass
 
 

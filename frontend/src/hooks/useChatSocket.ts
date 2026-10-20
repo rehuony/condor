@@ -183,6 +183,8 @@ export interface SlotInfo {
   conversation_id?: string;
   agent_key: string;
   is_busy?: boolean;
+  /** Pending turns on this web key, separate from conversation-wide busy. */
+  web_pending_turns?: number;
   server_name?: string;
   /**
    * The bound Agent's front matter chose the server, so it is not the chat's
@@ -436,9 +438,8 @@ function endedEarly(stopReason: string | undefined): boolean {
  * empty and dropped it, so the transcript silently lost a turn the user had
  * just been reading.
  *
- * Attachments are this side's own clause and have no counterpart in `flush`:
- * they hang off the *opening* turn, which is written unconditionally. A
- * picture with no words is still the message.
+ * Attachments are also kept on user turns and system notifications. A picture
+ * with no words is still a message, whichever side attached it.
  *
  * One predicate, so the next field added to a turn is considered once.
  */
@@ -489,9 +490,8 @@ function turnsToMessages(
       title: String(tc.title ?? ""),
       status: String(tc.status ?? "completed"),
     }));
-    // The picture is what makes the user's own bubble survive a reload: without
-    // it the model would remember the image while the bubble that sent it lost
-    // it, an asymmetry that reads as a bug.
+    // Restore incoming and delivered images from the same private attachment
+    // store, including notifications that contain no text.
     const attachments: ChatAttachment[] = (turn.attachments || []).map((a) => ({
       url: api.attachmentUrl(conversationId, a.id),
       mime: a.mime,
@@ -585,6 +585,10 @@ const STALL_SWEEP_MS = 5_000;
 export const NOTIFICATIONS_KEY = ["notifications"] as const;
 
 export function useChatSocket() {
+  // Stable across reconnects, distinct from other tabs and server-initiated turns.
+  const [clientId] = useState(() => Array.from(
+    crypto.getRandomValues(new Uint32Array(4)), (value) => value.toString(16),
+  ).join("-"));
   const { token, user } = useAuth();
   const queryClient = useQueryClient();
   // Which trading server a prewarmed chat is born on. Read through a ref
@@ -617,6 +621,15 @@ export function useChatSocket() {
   // Conversations already fetched, so an ordinary roster refresh doesn't
   // re-hydrate a slot and clobber what is on screen.
   const hydratedSlots = useRef<Set<string>>(new Set());
+  const hydrationRevisions = useRef<Record<string, number>>({});
+  // A refresh must not replace an optimistic question or an unfinished answer.
+  // Count locally submitted turns, including ones waiting for a spawn/upload.
+  const localTurns = useRef<Record<string, number>>({});
+  const uploadsInFlight = useRef<Record<string, number>>({});
+  const awaitingRoster = useRef(false);
+  const sentBeforeRoster = useRef<Record<string, number>>({});
+  const deferredHydrations = useRef<Record<string, string>>({});
+  const dispatchEvent = useRef<(data: Record<string, unknown>) => void>(() => {});
   // Has this hook ever had a socket up? The second and every later `onopen` is
   // a *re*-connect, which is the one event that means "the wire may have
   // skipped a push" — a delegation's completion note, a routine's result. Those
@@ -676,6 +689,33 @@ export function useChatSocket() {
   // first cleared it for all of them, stopping the other tabs' spinners and
   // re-enabling their composer and brain picker underneath a live prompt.
   const [streamingSlots, setStreamingSlots] = useState<Record<string, true>>({});
+  // The runtime's conversation-wide busy state includes Telegram and other
+  // browser tabs. Keep it separate: their completion cannot end our live stream.
+  const [conversationBusy, setBusyConversations] = useState<Record<string, true>>({});
+  const busyRevisions = useRef<Record<string, number>>({});
+  const conversationSequences = useRef<Record<string, number>>({});
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const requestHistoryRefresh = useCallback((conversationId: string, slotId: string) => {
+    deferredHydrations.current[slotId] = conversationId;
+    setRefreshVersion((version) => version + 1);
+  }, []);
+  const finishLocalTurn = useCallback((slotId: string) => {
+    const remaining = (localTurns.current[slotId] ?? 0) - 1;
+    if (remaining > 0) localTurns.current[slotId] = remaining;
+    else delete localTurns.current[slotId];
+    if (deferredHydrations.current[slotId]) {
+      setRefreshVersion((version) => version + 1);
+    }
+  }, []);
+  const setConversationBusy = useCallback((conversationId: string, busy: boolean) => {
+    setBusyConversations((prev) => {
+      if (!!prev[conversationId] === busy) return prev;
+      const next = { ...prev };
+      if (busy) next[conversationId] = true;
+      else delete next[conversationId];
+      return next;
+    });
+  }, []);
   /**
    * Conversations that were streaming and have gone silent (ARCH-329).
    *
@@ -1000,6 +1040,10 @@ export function useChatSocket() {
 
   const send = useCallback((msg: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (awaitingRoster.current && msg.action === "send_message") {
+        const slotId = String(msg.slot_id);
+        sentBeforeRoster.current[slotId] = (sentBeforeRoster.current[slotId] ?? 0) + 1;
+      }
       wsRef.current.send(JSON.stringify(msg));
       return;
     }
@@ -1030,6 +1074,7 @@ export function useChatSocket() {
     ) => {
       let ids: string[] = [];
       if (files?.length) {
+        uploadsInFlight.current[slotId] = (uploadsInFlight.current[slotId] ?? 0) + 1;
         try {
           const stored = await Promise.all(
             files.map((file) => api.uploadAttachment(conversationId, file)),
@@ -1041,18 +1086,23 @@ export function useChatSocket() {
             e instanceof Error ? e.message : "Could not attach that image",
             "error",
           );
+          finishLocalTurn(slotId);
           return;
+        } finally {
+          uploadsInFlight.current[slotId] -= 1;
+          if (!uploadsInFlight.current[slotId]) delete uploadsInFlight.current[slotId];
         }
       }
       send({
         action: "send_message",
+        client_id: clientId,
         slot_id: slotId,
         text,
         view_context: view,
         ...(ids.length ? { attachments: ids } : {}),
       });
     },
-    [appendSystemNote, send],
+    [appendSystemNote, clientId, finishLocalTurn, send],
   );
 
   /**
@@ -1136,6 +1186,10 @@ export function useChatSocket() {
 
     ws.onopen = () => {
       reconnectDelay.current = 1000;
+      // A restarted server begins its event sequence again from zero.
+      conversationSequences.current = {};
+      awaitingRoster.current = true;
+      sentBeforeRoster.current = {};
       // Anything pushed while this hook had no socket — the gap between a drop
       // and this moment — was delivered to nobody. Ask the next roster to
       // re-read the transcripts rather than trusting a wire that just proved
@@ -1146,7 +1200,7 @@ export function useChatSocket() {
       setIsConnected(true);
       const queued = unsent.current;
       unsent.current = [];
-      for (const msg of queued) ws.send(JSON.stringify(msg));
+      for (const msg of queued) send(msg);
       // The roster that follows says which conversations are alive; it says
       // nothing about which of them is holding a tool call waiting on a click.
       void replayPendingConfirmations();
@@ -1166,12 +1220,12 @@ export function useChatSocket() {
     };
     ws.onmessage = (ev) => {
       try {
-        handleEvent(JSON.parse(ev.data));
+        dispatchEvent.current(JSON.parse(ev.data));
       } catch {
         /* ignore */
       }
     };
-  }, [token, closeSocket, replayPendingConfirmations]);
+  }, [token, closeSocket, replayPendingConfirmations, send]);
 
   const disconnect = useCallback(() => {
     shouldConnect.current = false;
@@ -1204,8 +1258,15 @@ export function useChatSocket() {
   const hydrateSlot = useCallback(
     async (conversationId: string, slotId: string, resync = false) => {
       if (!conversationId) return;
+      if (resync && localTurns.current[slotId]) {
+        deferredHydrations.current[slotId] = conversationId;
+        return;
+      }
       if (hydratedSlots.current.has(slotId) && !resync) return;
       hydratedSlots.current.add(slotId);
+      const revision = (hydrationRevisions.current[slotId] ?? 0) + 1;
+      hydrationRevisions.current[slotId] = revision;
+      const busyRevision = busyRevisions.current[conversationId] ?? 0;
       // Snapshotted before the await, so "was already on screen" is judged
       // against the moment the read was issued, not the moment it returned.
       const superseded = resync
@@ -1219,6 +1280,17 @@ export function useChatSocket() {
         : null;
       try {
         const detail = await api.getConversation(conversationId);
+        if (hydrationRevisions.current[slotId] !== revision) return;
+        if ((busyRevisions.current[conversationId] ?? 0) === busyRevision &&
+            typeof detail.is_busy === "boolean") {
+          setConversationBusy(conversationId, detail.is_busy);
+        }
+        // A user can type while the GET is in flight. Defer applying that
+        // snapshot too; its optimistic turn may already be in the response.
+        if (resync && localTurns.current[slotId]) {
+          deferredHydrations.current[slotId] = conversationId;
+          return;
+        }
         // The stored total, not a sum of what this tab happened to see: a
         // resync re-seeds, so a turn answered from Telegram or another tab
         // converges here. Before the empty-transcript return below, which is
@@ -1240,10 +1312,12 @@ export function useChatSocket() {
       } catch {
         // A conversation we cannot read is not worth breaking the chat over.
         // The slot keeps whatever it had; a later reconnect tries again.
-        if (!resync) hydratedSlots.current.delete(slotId);
+        if (!resync && hydrationRevisions.current[slotId] === revision) {
+          hydratedSlots.current.delete(slotId);
+        }
       }
     },
-    [updateSlotMessages],
+    [setConversationBusy, updateSlotMessages],
   );
 
   /**
@@ -1410,7 +1484,6 @@ export function useChatSocket() {
         const options = await queryClient.fetchQuery({
           queryKey: ["session-options"],
           queryFn: api.getSessionOptions,
-          staleTime: Infinity,
         });
         if (slotsRef.current.length > 0) return;
         startSession(options.default_agent, serverRef.current || undefined);
@@ -1454,6 +1527,44 @@ export function useChatSocket() {
           // re-read on some later roster instead.
           const resync = needsResync.current;
           needsResync.current = false;
+          for (const info of sessions) {
+            const conversationId = info.conversation_id || info.slot_id;
+            busyRevisions.current[conversationId] =
+              (busyRevisions.current[conversationId] ?? 0) + 1;
+          }
+          setBusyConversations(Object.fromEntries(
+            sessions.filter((info) => info.is_busy).map((info) => [
+              info.conversation_id || info.slot_id, true as const,
+            ]),
+          ));
+          if (resync) {
+            for (const info of sessions) {
+              // Recover a lost DONE without dropping a question still being
+              // uploaded or sent just after this connection opened: the
+              // initial roster can predate the server accepting that frame.
+              if (typeof info.web_pending_turns === "number" || !info.is_busy) {
+                const pending = (outbox.current[info.slot_id]?.length ?? 0) +
+                  (uploadsInFlight.current[info.slot_id] ?? 0) +
+                  (sentBeforeRoster.current[info.slot_id] ?? 0);
+                // Do not adopt turns submitted by another browser. Of our
+                // previously sent turns, keep only as many as the server has.
+                const sent = Math.max(0, (localTurns.current[info.slot_id] ?? 0) - pending);
+                const remaining = pending + Math.min(sent, info.web_pending_turns ?? 0);
+                if (remaining) localTurns.current[info.slot_id] = remaining;
+                else {
+                  delete localTurns.current[info.slot_id];
+                  if (!info.web_pending_turns) {
+                    flushChunks(info.slot_id);
+                    updateSlotMessages(info.slot_id, settleToolCalls);
+                    stopStreaming(info.slot_id);
+                  }
+                }
+              }
+            }
+            void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          }
+          awaitingRoster.current = false;
+          sentBeforeRoster.current = {};
           if (sessions.length > 0) {
             const known = new Set(sessions.map((s) => s.slot_id));
             // A tab opened before the socket finished connecting — "Chat" on an
@@ -1491,11 +1602,11 @@ export function useChatSocket() {
               return latest.slot_id;
             });
             for (const info of sessions) {
-              void hydrateSlot(
-                info.conversation_id || info.slot_id,
-                info.slot_id,
-                resync,
-              );
+              if (resync) {
+                requestHistoryRefresh(info.conversation_id || info.slot_id, info.slot_id);
+              } else {
+                void hydrateSlot(info.conversation_id || info.slot_id, info.slot_id);
+              }
             }
             // A roster with anything on it is the conversation to be in, so
             // there is nothing to go looking for. A slot the backend reaped
@@ -1529,6 +1640,10 @@ export function useChatSocket() {
           const tabId = ref || newSlot.slot_id;
           if (ref && ref !== newSlot.slot_id) {
             refAliases.current[ref] = newSlot.slot_id;
+            if (localTurns.current[ref]) {
+              localTurns.current[newSlot.slot_id] = localTurns.current[ref];
+              delete localTurns.current[ref];
+            }
           }
           // `delete` doubles as the membership test: an unfocused spawn is
           // one-shot, and the set must not grow for the life of the tab. A
@@ -1580,6 +1695,10 @@ export function useChatSocket() {
         case "session_destroyed": {
           const destroyedId = data.slot_id as string;
           hydratedSlots.current.delete(destroyedId);
+          hydrationRevisions.current[destroyedId] =
+            (hydrationRevisions.current[destroyedId] ?? 0) + 1;
+          delete localTurns.current[destroyedId];
+          delete deferredHydrations.current[destroyedId];
           // Dropped rather than flushed: the slot is being removed, so its
           // tail has nowhere to land, and `setSlots(remaining)` below replaces
           // the state outright — a flush queued alongside it would be
@@ -1613,6 +1732,31 @@ export function useChatSocket() {
               ? (remaining[0]?.info.slot_id ?? null)
               : cur,
           );
+          break;
+        }
+
+        case "conversation_changed": {
+          const conversationId = data.conversation_id;
+          if (typeof conversationId !== "string" || !conversationId) break;
+          if (typeof data.sequence === "number") {
+            if (data.sequence <= (conversationSequences.current[conversationId] ?? -1)) break;
+            conversationSequences.current[conversationId] = data.sequence;
+          }
+          busyRevisions.current[conversationId] =
+            (busyRevisions.current[conversationId] ?? 0) + 1;
+          if (typeof data.is_busy === "boolean") {
+            setConversationBusy(conversationId, data.is_busy);
+          }
+          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          for (const slot of slotsRef.current) {
+            if ((slot.info.conversation_id || slot.info.slot_id) === conversationId) {
+              // A new turn must not inherit a previous stream's silence verdict.
+              if (data.phase === "accepted" && stalledSlots[slot.info.slot_id]) {
+                stopStreaming(slot.info.slot_id);
+              }
+              requestHistoryRefresh(conversationId, slot.info.slot_id);
+            }
+          }
           break;
         }
 
@@ -1820,6 +1964,8 @@ export function useChatSocket() {
             // mid-answer, and its composer stays locked until its own turn is
             // done.
             stopStreaming(slotId);
+            // Wakes and inherited streams do not complete this client's submissions.
+            if (data.client_id === clientId) finishLocalTurn(slotId);
             // What the turn cost, onto the total (FEAT-120). A frame without
             // it — an older backend, a DONE the funnel did not charge — leaves
             // the total where it was.
@@ -1856,6 +2002,9 @@ export function useChatSocket() {
           if (errSlotId) {
             // Nothing is coming for a tab whose spawn failed — dropping
             // `pending` stops the input pretending the queue will drain.
+            if (outbox.current[errSlotId]?.length) {
+              delete localTurns.current[errSlotId];
+            }
             delete outbox.current[errSlotId];
             setSlots((prev) =>
               prev.map((s) => {
@@ -1917,19 +2066,29 @@ export function useChatSocket() {
       appendSystemNote,
       appendToStream,
       bufferChunk,
+      clientId,
       flushChunks,
+      finishLocalTurn,
       hydrateSlot,
       noteFrame,
       prewarmLatest,
       queryClient,
+      requestHistoryRefresh,
+      setConversationBusy,
+      stalledSlots,
       stopStreaming,
       updateSlotMessages,
       uploadAndSend,
     ],
   );
 
+  useEffect(() => {
+    dispatchEvent.current = handleEvent;
+  }, [handleEvent]);
+
   const sendMessage = useCallback(
     (slotId: string, text: string, files?: File[]) => {
+      localTurns.current[slotId] = (localTurns.current[slotId] ?? 0) + 1;
       const id = nextMsgId();
       // Anything still buffered was said before this question and has to be
       // committed above it — once the user's bubble is last, the tail would
@@ -2059,8 +2218,17 @@ export function useChatSocket() {
             ? undefined
             : `Switched to ${session.label}`,
       }));
+      // The server remembers an explicit pick as either the user's default or
+      // the specialist's model. Refresh even an inactive cache so the next chat
+      // cannot restore the choice this switch just replaced.
+      if (selection.agentKey) {
+        await queryClient.invalidateQueries({
+          queryKey: ["session-options"],
+          refetchType: "all",
+        });
+      }
     },
-    [applySwitch, flushChunks, user],
+    [applySwitch, flushChunks, queryClient, user],
   );
 
   /**
@@ -2177,6 +2345,18 @@ export function useChatSocket() {
     slotsRef.current = slots;
   }, [slots]);
 
+  useEffect(() => {
+    // Run after React commits the final stream update, so a refresh snapshots
+    // closed bubbles rather than duplicating the answer that just finished.
+    for (const [slotId, conversationId] of Object.entries(deferredHydrations.current)) {
+      if (localTurns.current[slotId]) continue;
+      delete deferredHydrations.current[slotId];
+      if (slots.some((slot) => slot.info.slot_id === slotId)) {
+        void hydrateSlot(conversationId, slotId, true);
+      }
+    }
+  }, [slots, refreshVersion, hydrateSlot]);
+
   const activeSlot = slots.find((s) => s.info.slot_id === activeSlotId) || null;
   /**
    * Is *this* conversation mid-answer? The only question a consumer should ask.
@@ -2190,12 +2370,17 @@ export function useChatSocket() {
    * having to learn what a stall is.
    */
   const isSlotStreaming = useCallback(
-    (slotId: string | null | undefined) =>
-      !!slotId && slotId in streamingSlots && !(slotId in stalledSlots),
-    [streamingSlots, stalledSlots],
+    (slotId: string | null | undefined) => {
+      if (!slotId) return false;
+      const slot = slots.find((candidate) => candidate.info.slot_id === slotId);
+      const conversationId = slot?.info.conversation_id || slotId;
+      return !(slotId in stalledSlots) &&
+        (!!conversationBusy[conversationId] || slotId in streamingSlots);
+    },
+    [conversationBusy, slots, streamingSlots, stalledSlots],
   );
   /** Any conversation at all, for chrome that is not tied to one tab. */
-  const isStreaming = Object.keys(streamingSlots).some((id) => !(id in stalledSlots));
+  const isStreaming = slots.some((slot) => isSlotStreaming(slot.info.slot_id));
   /** Is *this* conversation waiting for the turn ahead of it to finish? */
   const isSlotQueued = useCallback(
     (slotId: string | null | undefined) => !!slotId && slotId in queuedSlots,

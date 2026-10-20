@@ -73,6 +73,24 @@ def test_get_returns_meta_and_transcript(store):
     assert body["turns"][0]["text"] == "what is my pnl?"
 
 
+def test_history_reports_telegram_work_without_a_web_session(store, monkeypatch):
+    meta = new_conversation(USER.id, "tg", agent_key="claude-code")
+    append_turn(USER.id, meta.id, TurnEntry(role="user", text="hello from Telegram"))
+    monkeypatch.setattr(
+        routes.turns,
+        "is_busy",
+        lambda user_id, cid: (user_id, cid) == (USER.id, meta.id),
+    )
+
+    body = _client(USER).get(f"/conversations/{meta.id}").json()
+
+    assert body["is_busy"] is True
+    assert [turn["text"] for turn in body["turns"]] == ["hello from Telegram"]
+
+    monkeypatch.setattr(routes.turns, "is_busy", lambda *args: False)
+    assert _client(USER).get(f"/conversations/{meta.id}").json()["is_busy"] is False
+
+
 def test_the_running_token_total_rides_the_meta(store):
     """FEAT-120: no route change — the total is on the model both routes dump."""
     from condor.acp.usage import TokenUsage

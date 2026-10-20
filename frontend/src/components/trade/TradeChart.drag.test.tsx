@@ -35,12 +35,16 @@ const START_PRICE = 700; // row 300
 const END_PRICE = 800; // row 200
 const LIMIT_PRICE = 600; // row 400
 
-vi.mock("@/hooks/useCandleStore", () => ({
-  useCandleStore: () => ({
-    candles: [],
-    isStale: false,
-    mergeCandles: vi.fn(),
-    setDuration: vi.fn(),
+vi.mock("@/hooks/useCandleStore", () => {
+  // Interactions operate on a displayed chart, after its first range is ready.
+  const candles = [{ timestamp: 1_700_000_000, open: 700, high: 800, low: 600, close: 750, volume: 1 }];
+  return { useCandleStore: () => ({ candles, isStale: false }) };
+});
+
+vi.mock("@/hooks/useCandleHistory", () => ({
+  useCandleHistory: () => ({
+    loadedFrom: 0, loadedTo: 1_700_000_000, status: "ready", initialComplete: true,
+    loadEarlier: vi.fn(), retry: vi.fn(),
   }),
 }));
 
@@ -89,6 +93,10 @@ async function render(extra: Partial<ComponentProps<typeof TradeChart>> = {}) {
       />,
     );
   });
+  // Presentation is released after the chart applies its initial viewport.
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
 }
 
 /** The pane the pointer handlers are bound to. */
@@ -126,7 +134,7 @@ async function drag(fromY: number, ...throughY: number[]) {
 /** Park the crosshair on a pixel row, which is what the click branches read. */
 async function hoverAt(y: number) {
   await act(async () => {
-    chartDouble.crosshairCb?.({
+    for (const callback of chartDouble.charts.at(-1)?.crosshairHandlers ?? []) callback({
       point: { x: 300, y },
       seriesData: new Map(),
       time: 1_700_000_000,
@@ -266,11 +274,22 @@ describe("TradeChart price-line drag", () => {
     // being steered by, exactly when it matters most (PR #224 QA).
     await render();
 
+    vi.mocked(chartDouble.timeScale!.width as Mock).mockReturnValue(800);
+    vi.mocked(chartDouble.timeScale!.height as Mock).mockReturnValue(26);
+    vi.mocked(chartDouble.timeScale!.timeToCoordinate as Mock).mockReturnValue(300);
+    const timeLabel = container.querySelector<HTMLDivElement>("[data-chart-time-label]")!;
+    await hoverAt(yAtPrice(START_PRICE));
+    expect(timeLabel.style.visibility).toBe("visible");
+
     await act(async () => { fire("pointerdown", yAtPrice(START_PRICE)); });
     // A press that has not travelled is still a candidate click, and keeps it.
     expect(chartDouble.options.crosshair).toBeUndefined();
+    expect(timeLabel.style.visibility).toBe("visible");
 
     await act(async () => { fire("pointermove", 340); });
+    expect(timeLabel.style.visibility).toBe("hidden");
+    await hoverAt(340);
+    expect(timeLabel.style.visibility).toBe("hidden");
     expect(chartDouble.options).toMatchObject({
       crosshair: {
         horzLine: { visible: false, labelVisible: false },
@@ -282,9 +301,11 @@ describe("TradeChart price-line drag", () => {
     expect(chartDouble.options).toMatchObject({
       crosshair: {
         horzLine: { visible: true, labelVisible: true },
-        vertLine: { visible: true, labelVisible: true },
+        vertLine: { visible: true, labelVisible: false },
       },
     });
+    await hoverAt(340);
+    expect(timeLabel.style.visibility).toBe("visible");
   });
 
   it("gives the crosshair back when the drag is cancelled mid-flight", async () => {

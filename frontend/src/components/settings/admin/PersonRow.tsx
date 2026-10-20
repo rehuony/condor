@@ -12,7 +12,8 @@ import {
 } from "@/lib/admin-api";
 import { copyText } from "@/lib/clipboard";
 
-import { displayName, handle, initials, roleLabel } from "./identity";
+import { displayName, handle, roleLabel } from "./identity";
+import { PersonAvatar } from "./PersonAvatar";
 import { PersonDetail } from "./PersonDetail";
 
 /**
@@ -109,16 +110,7 @@ export function PersonRow({
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="flex items-center gap-3 px-4 py-3">
-        <span
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
-            person.known
-              ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-              : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]"
-          }`}
-          aria-hidden
-        >
-          {initials(person)}
-        </span>
+        <PersonAvatar person={person} />
 
         <button
           type="button"

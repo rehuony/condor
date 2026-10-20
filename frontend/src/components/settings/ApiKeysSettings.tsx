@@ -71,7 +71,13 @@ export function ApiKeysSettings() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmDeleteWallet, setConfirmDeleteWallet] = useState<string | null>(null);
 
-  const { data: credsData, isLoading: loadingCreds } = useQuery({
+  const {
+    data: credsData,
+    error: credsError,
+    isLoading: loadingCreds,
+    isFetching: fetchingCreds,
+    refetch: refetchCreds,
+  } = useQuery({
     ...credentialsQuery(server),
     queryFn: () => api.getCredentials(server!),
     enabled: !!server,
@@ -512,9 +518,13 @@ export function ApiKeysSettings() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-[var(--color-text-muted)]">
-          {credentials.length} credential{credentials.length !== 1 ? "s" : ""}
-          {wallets.length > 0 && `, ${wallets.length} wallet${wallets.length !== 1 ? "s" : ""}`}{" "}
-          configured
+          {credsData && (!credsError || credentials.length > 0) ? (
+            <>
+              {credentials.length} credential{credentials.length !== 1 ? "s" : ""}
+              {wallets.length > 0 && `, ${wallets.length} wallet${wallets.length !== 1 ? "s" : ""}`}{" "}
+              configured
+            </>
+          ) : loadingCreds ? "Loading credentials..." : "Credentials unavailable"}
         </p>
         <div className="flex items-center gap-2">
           <button
@@ -535,8 +545,8 @@ export function ApiKeysSettings() {
           </button>
           <button
             onClick={() => setFlow({ ...INITIAL_FLOW, step: "select-type" })}
-            disabled={!isOwner}
-            title={isOwner ? undefined : OWNER_ONLY_HINT}
+            disabled={!isOwner || !credsData}
+            title={!isOwner ? OWNER_ONLY_HINT : !credsData ? "Load existing API keys before adding another." : undefined}
             className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--color-primary)]"
           >
             <Plus className="h-3.5 w-3.5" /> Add API Key
@@ -544,11 +554,32 @@ export function ApiKeysSettings() {
         </div>
       </div>
 
+      {credsError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--color-red)]/30 p-3 text-xs text-[var(--color-red)]">
+          <div className="min-w-0">
+            <p className="font-medium">
+              {credentials.length > 0
+                ? "Could not refresh API keys. Showing the last loaded credentials."
+                : "Could not load API keys."}
+            </p>
+            <p className="mt-1 break-words">{credsError.message}</p>
+          </div>
+          <button
+            onClick={() => void refetchCreds()}
+            disabled={fetchingCreds}
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+          >
+            {fetchingCreds && <Loader2 className="h-3 w-3 animate-spin" />}
+            {fetchingCreds ? "Retrying..." : "Retry"}
+          </button>
+        </div>
+      )}
+
       {loadingCreds ? (
         <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
           <Loader2 className="h-5 w-5 animate-spin" />
         </div>
-      ) : credentials.length === 0 ? (
+      ) : !credsData || (credsError && credentials.length === 0) ? null : credentials.length === 0 ? (
         <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
           No API keys configured. Add one to start trading.
         </p>

@@ -690,6 +690,21 @@ def dry_run_refusal(tool_call: dict[str, Any]) -> str | None:
     be allowed — an unnamed tool is already allowed — but so that an action
     added to it later has to be classified before a rehearsal can call it.
     """
+    tool_name = tool_call_name(tool_call)
+    if tool_name in {"clear_position_held", "resolve_orphaned_position"}:
+        return (
+            "this session runs in dry-run mode and cannot remove live position "
+            "tracking or clear orphan warnings"
+        )
+    if tool_name == "delegate" and _is_mutating_action(
+        tool_call, {"ask", "start", "stop"}, {"get", "list"}
+    ):
+        return (
+            "this session runs in dry-run mode; a delegated worker does not "
+            "inherit this mode and could execute routines or trades — read "
+            "existing tasks with 'get' or 'list' instead"
+        )
+
     if is_code_execution_call(tool_call):
         return (
             "this session runs in dry-run mode, where nothing mutates, and a "
@@ -770,6 +785,14 @@ def shutdown_refusal(tool_call: dict[str, Any]) -> str | None:
     Reads stay free in both modes and for the same reason: listing routines,
     reading one's source, reading back a past run or snippet, changes nothing.
     """
+    if tool_call_name(tool_call) == "delegate" and _is_mutating_action(
+        tool_call, {"ask", "start"}, {"get", "list", "stop"}
+    ):
+        return (
+            "this session is shutting down; a delegated worker does not "
+            "inherit its risk limits and could reopen exposure"
+        )
+
     if is_code_execution_call(tool_call):
         return (
             "this session is shutting down after a kill switch, and a snippet "

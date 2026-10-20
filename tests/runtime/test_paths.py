@@ -147,7 +147,6 @@ def test_every_store_hangs_off_the_one_root(tmp_path, monkeypatch):
         tmp_path / "users" / "42" / "delegations" / "condor-delegate-1"
     )
     assert paths.state_dir("ns") == tmp_path / "state" / "ns"
-    assert paths.telemetry_dir() == tmp_path / "telemetry"
 
 
 def test_the_user_is_the_first_segment_of_both_stores(tmp_path, monkeypatch):

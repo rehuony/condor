@@ -68,7 +68,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(engine_module, "TickEngine", FakeEngine)
     FakeEngine.spawned = []
     AgentStore().create(name="Brigado", description="BRL market making")
-    StrategyStore().create(agent_slug="brigado", name="Scalp")
+    # These tests exercise server ownership; keep the model on a supported
+    # rehearsal path without bypassing the independent live permission gate.
+    StrategyStore().create(
+        agent_slug="brigado", name="Scalp", default_config={"execution_mode": "dry_run"}
+    )
     return tmp_path
 
 

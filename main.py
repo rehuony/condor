@@ -14,14 +14,10 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    MessageHandler,
-    TypeHandler,
-    filters,
 )
 
 from condor import paths
 from condor.persistence import SafePicklePersistence
-from condor.telemetry import taps as telemetry_taps
 from handlers import cancel_command, clear_all_input_states
 from utils.auth import restricted
 from utils.config import (
@@ -206,7 +202,7 @@ You will be notified when approved."""
 
     reply_text = """I can help you create and manage trading bots on any CEX or DEX using Hummingbot API servers\\.
 
-See [this manual](https://condor.hummingbot.org/introduction) if you're new to Condor\\.
+See [this manual](https://github.com/rehuony/condor#readme) if you're new to Condor\\.
 
 You can control me by sending these commands:
 
@@ -349,20 +345,10 @@ def register_handlers(application: Application) -> None:
     # Import fresh versions after reload
     from handlers.admin import admin_command
     from handlers.admin.update import update_command
-    from handlers.agents import (
-        agent_callback_handler,
-        agent_command,
-        agent_voice_handler,
-        stop_command,
-    )
-    from handlers.bots import (
-        bots_callback_handler,
-        bots_command,
-        get_bots_document_handler,
-        new_bot_command,
-    )
+    from handlers.agents import agent_callback_handler, agent_command, stop_command
+    from handlers.bots import bots_callback_handler, bots_command, new_bot_command
     from handlers.cex import cex_callback_handler
-    from handlers.config import get_config_callback_handler, get_modify_value_handler
+    from handlers.config import get_config_callback_handler
     from handlers.config.api_keys import keys_command
     from handlers.config.gateway import gateway_command
     from handlers.config.servers import servers_command
@@ -370,6 +356,7 @@ def register_handlers(application: Application) -> None:
     from handlers.dex import dex_callback_handler, lp_command
     from handlers.executors import executors_callback_handler, executors_command
     from handlers.memory import memory_callback_handler, memory_command
+    from handlers.messages import get_message_handler
     from handlers.portfolio import get_portfolio_callback_handler, portfolio_command
     from handlers.routines import routines_callback_handler, routines_command
     from handlers.trading import trade_command as unified_trade_command
@@ -377,13 +364,6 @@ def register_handlers(application: Application) -> None:
 
     # Clear existing handlers
     application.handlers.clear()
-
-    # Usage telemetry observer (FEAT-023). PTB dispatches every update to every
-    # group, so one handler in group -1 sees every command and every callback
-    # without touching a single handler below. It only reads — it must never
-    # call into @restricted, or observing would become an authorization side
-    # effect — and it is a no-op unless the admin opted in.
-    application.add_handler(TypeHandler(Update, telemetry_taps.telegram_tap), group=-1)
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
@@ -462,33 +442,14 @@ def register_handlers(application: Application) -> None:
         CallbackQueryHandler(admin_callback_handler, pattern="^admin:")
     )
 
-    # Telemetry notice (FEAT-023): Got it / Turn off, admin only
-    from condor.telemetry import prompt as telemetry_prompt
-
-    application.add_handler(
-        CallbackQueryHandler(
-            telemetry_prompt.callback_handler,
-            pattern=f"^{telemetry_prompt.CALLBACK_PREFIX}:",
-        )
-    )
-
     # Add callback query handler for portfolio settings
     application.add_handler(get_portfolio_callback_handler())
 
     # Add callback query handler for config menu
     application.add_handler(get_config_callback_handler())
 
-    # Add UNIFIED message handler for ALL text input
-    # This single handler routes to: CLOB trading, DEX trading, and Config flows
-    # based on context state. This avoids issues with multiple MessageHandlers
-    # competing for the same filter.
-    application.add_handler(get_modify_value_handler())
-
-    # Add voice message handler for agent transcription
-    application.add_handler(MessageHandler(filters.VOICE, agent_voice_handler))
-
-    # Add document handler for file uploads (e.g., config files in /bots)
-    application.add_handler(get_bots_document_handler())
+    # One content router owns form priority and multimodal agent input.
+    application.add_handler(get_message_handler())
 
     logger.info("Handlers registered successfully")
 
@@ -689,12 +650,8 @@ async def startup(application: Application) -> None:
     # Sync server permissions (ensures all servers have ownership entries)
     await sync_server_permissions()
 
-    # Preload Whisper model in background so first voice message is fast
-    import asyncio
-
-    from utils.transcribe import DEFAULT_MODEL, _get_model
-
-    asyncio.get_event_loop().run_in_executor(None, _get_model, DEFAULT_MODEL)
+    # Whisper is loaded lazily on the first audio message. Text/image-only
+    # installations do not need an idle speech model or a startup download.
 
     # Same reason, different work: bringing the backtest archive to its tiered
     # v2 layout (FEAT-075) parses and re-compresses every saved payload, which
@@ -783,39 +740,8 @@ async def startup(application: Application) -> None:
 
     schedule_update_checks(application)
 
-    # Usage telemetry (FEAT-023). init() resolves the consent level once so the
-    # taps never read the disk on a hot path, and only materializes the
-    # install's random ids when telemetry is actually on. The jobs are
-    # registered either way and return immediately while consent is absent, so
-    # opting in mid-run works without a restart.
-    from condor import telemetry
-
-    try:
-        level = telemetry.init(hosted=True)
-        telemetry_taps.register_jobs(application)
-        logger.info("Telemetry level: %s", level)
-    except Exception:
-        logger.exception("Telemetry init failed (continuing without it)")
-
-    # Conversation sharing (FEAT-054, FEAT-055). Two jobs, deliberately not part
-    # of the telemetry block above: they share no consent record, no queue and
-    # no endpoint with it. Both are free on an install where nobody has opted
-    # in — the delivery job finds an empty queue and the sweep finds no user at
-    # ``always``, and neither touches the network.
-    try:
-        from condor.sharing import share as sharing
-        from condor.sharing import sweep as sharing_sweep
-
-        sharing.register_jobs(application)
-        sharing_sweep.register_jobs(application)
-    except Exception:
-        logger.exception("Sharing job registration failed (continuing without it)")
-
-    # Reflection (FEAT-073): read a finished conversation back once, for the
-    # facts and the intents in it. The sharing sweep's neighbour by shape and
-    # not by subject — it shares no consent record, no queue and no endpoint
-    # with it, and nothing it reads leaves the machine. Free on an install with
-    # nothing finished to read, and off entirely with CONDOR_REFLECTION=off.
+    # Read finished conversations for local memory and intent extraction.
+    # Disabled when CONDOR_REFLECTION=off.
     try:
         from condor.agents import reflection
 
@@ -825,6 +751,18 @@ async def startup(application: Application) -> None:
 
     # Start file watcher
     asyncio.create_task(watch_and_reload(application))
+
+
+async def _close_telegram_input() -> None:
+    """Close ingress and shared media workers in either application mode."""
+    from condor.telegram_ingress import close_ingress
+    from condor.telegram_input import close_resolver
+
+    await close_ingress()
+    await close_resolver()
+    from utils.transcribe import close_transcriber
+
+    await close_transcriber()
 
 
 async def teardown(application: Application) -> None:
@@ -875,16 +813,6 @@ async def teardown(application: Application) -> None:
     from mcp_servers.hummingbot_api.hummingbot_client import hummingbot_client
 
     await hummingbot_client.close()
-
-    # Record the clean exit and give the outbox one last chance. Both are no-ops
-    # unless the admin opted in, and neither can fail the shutdown.
-    try:
-        from condor import telemetry
-
-        telemetry.shutdown("signal")
-        await telemetry.flush("teardown")
-    except Exception:
-        logger.debug("Telemetry teardown failed", exc_info=True)
 
 
 async def watch_and_reload(application: Application) -> None:
@@ -955,15 +883,22 @@ def get_persistence() -> SafePicklePersistence:
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors gracefully."""
-    if isinstance(context.error, NetworkError):
-        # Expected and self-healing; reported as an upstream blip, not a bug.
-        telemetry_taps.on_upstream_error("telegram", "poll", "network")
-        logger.warning(f"Network error (will retry): {context.error}")
+    if isinstance(context.error, NetworkError) and not isinstance(
+        context.error, BadRequest
+    ):
+        # PTB dispatches handler errors here as well. Only the updater retries
+        # polling; an already-dispatched update is not replayed by this handler.
+        phase = "update" if update is not None else "background"
+        # A transport exception can contain a URL with the bot token.
+        logger.warning(
+            "Telegram network failure stage=%s update_id=%s error_type=%s; "
+            "this handler does not retry the update",
+            phase,
+            getattr(update, "update_id", None),
+            type(context.error).__name__,
+        )
         return
 
-    # Type, a hash of the message, and our own stack frames. Never the message
-    # itself — that is where balances, hostnames and keys leak.
-    telemetry_taps.on_error(context.error, where="telegram", surface="telegram")
     logger.exception("Exception while handling an update:", exc_info=context.error)
 
 
@@ -1102,7 +1037,9 @@ async def _run_dual(application: Application) -> None:
     else:
         await application.initialize()
         await startup(application)
-        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await application.updater.start_polling(
+            allowed_updates=["message", "callback_query", "stopped_message_generation"]
+        )
         await application.start()
 
     # Create and start the web server. With Tailscale on, WEB_HOST
@@ -1222,18 +1159,6 @@ async def _run_dual(application: Application) -> None:
         except Exception as e:
             logger.warning(f"Failed to send startup notification to admin: {e}")
 
-        # Tell the admin, once, that usage summaries are on and how to turn
-        # them off (FEAT-023). Sent next to the boot notification because that
-        # is the one moment the admin is already looking. Until the notice is
-        # delivered, only the install count is sent. It is a Telegram message
-        # with inline buttons, so local mode is skipped here and told in the
-        # dashboard instead (the notice strip). Either way the install is
-        # already counted: `telemetry.init()` does that at the ping floor.
-        if not LOCAL_MODE:
-            from condor.telemetry.prompt import maybe_prompt_admin
-
-            await maybe_prompt_admin(application.bot)
-
     if LOCAL_MODE:
         logger.info(
             "Starting Condor in local mode (no Telegram): dashboard on http://%s:%s",
@@ -1283,16 +1208,18 @@ async def _run_dual(application: Application) -> None:
         # Run each step independently so one failure can't skip the rest.
         # teardown() runs last, mirroring where post_shutdown would have sat.
         # Local mode never initialized or started the Application, so the PTB
-        # stop steps would only raise "not running" — it has a job queue to stop
-        # and nothing else.
+        # stop steps would only raise "not running". It still owns its job queue
+        # and the shared speech workers used by dashboard audio uploads.
         if LOCAL_MODE:
             steps = (
+                ("telegram_input.close", _close_telegram_input),
                 ("job_queue.stop", application.job_queue.stop),
                 ("teardown", partial(teardown, application)),
             )
         else:
             steps = (
                 ("updater.stop", application.updater.stop),
+                ("telegram_input.close", _close_telegram_input),
                 ("application.stop", application.stop),
                 ("application.shutdown", application.shutdown),
                 ("teardown", partial(teardown, application)),

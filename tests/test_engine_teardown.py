@@ -2,10 +2,8 @@
 
 A user stop, a shutdown, a single-tick run that completed or failed, and a loop
 that hit ``max_ticks`` all end in ``TickEngine._finish``: reap the client,
-release the ownership ledger, emit ``strategy_run`` telemetry, close the
-journal, unregister with the final state. The self-stop paths used to skip the
-ledger release and the telemetry tap, so a ``max_ticks`` loop kept owning its
-bots (and their PnL) after it was over.
+release the ownership ledger, close the journal and unregister with the final
+state. A completed loop must stop owning its bots and their PnL.
 """
 
 import asyncio
@@ -19,7 +17,6 @@ from condor.agents.ownership import read_owned
 from condor.agents.strategy import Strategy
 from condor.runtime.loops import LoopSupervisor
 from condor.runtime.registry_file import LoopState, read_status
-from condor.telemetry import taps as telemetry_taps
 
 
 @pytest.fixture
@@ -27,18 +24,6 @@ def supervisor(monkeypatch):
     sup = LoopSupervisor()
     monkeypatch.setattr(engine_module, "_supervisor", lambda: sup)
     return sup
-
-
-@pytest.fixture
-def runs(monkeypatch):
-    """Every strategy_run telemetry event, as its ``stopped_by``."""
-    calls: list[str] = []
-
-    def record(config, *, ticks=0, stopped_by=""):
-        calls.append(stopped_by)
-
-    monkeypatch.setattr(telemetry_taps, "strategy_run", record)
-    return calls
 
 
 def _async(result):
@@ -89,9 +74,7 @@ def _run(engine):
     asyncio.run(go())
 
 
-def test_max_ticks_completion_releases_the_ledger_and_reports_telemetry(
-    tmp_path, monkeypatch, supervisor, runs
-):
+def test_max_ticks_completion_releases_the_ledger(tmp_path, monkeypatch, supervisor):
     engine = _loop_engine_that_owns_a_bot(tmp_path, monkeypatch)
     supervisor.register(engine)
     engine._running = True
@@ -99,13 +82,12 @@ def test_max_ticks_completion_releases_the_ledger_and_reports_telemetry(
     asyncio.run(engine._loop())
 
     assert read_owned(engine.session_dir)[0].until > 0
-    assert runs == ["max_ticks"]
     assert read_status(engine.session_dir)["state"] == LoopState.COMPLETED
     assert supervisor.all() == {}
     assert engine._running is False
 
 
-def test_run_once_completion_reports_telemetry(tmp_path, monkeypatch, supervisor, runs):
+def test_run_once_completion_records_final_state(tmp_path, monkeypatch, supervisor):
     engine = _engine(tmp_path, monkeypatch, mode="run_once")
     monkeypatch.setattr(engine, "_tick", _async(None))
     finals = []
@@ -113,12 +95,11 @@ def test_run_once_completion_reports_telemetry(tmp_path, monkeypatch, supervisor
 
     _run(engine)
 
-    assert runs == ["complete"]
     assert finals[-1] == LoopState.COMPLETED
     assert supervisor.all() == {}
 
 
-def test_run_once_failure_reports_telemetry(tmp_path, monkeypatch, supervisor, runs):
+def test_run_once_failure_records_final_state(tmp_path, monkeypatch, supervisor):
     engine = _engine(tmp_path, monkeypatch, mode="run_once")
 
     async def boom():
@@ -131,7 +112,6 @@ def test_run_once_failure_reports_telemetry(tmp_path, monkeypatch, supervisor, r
 
     _run(engine)
 
-    assert runs == ["error"]
     assert finals[-1] == LoopState.ERROR
     assert supervisor.all() == {}
 
@@ -144,7 +124,7 @@ class _OrderedClient:
         self.order.append("reap")
 
 
-def test_shutdown_reports_telemetry_once(tmp_path, monkeypatch, supervisor, runs):
+def test_shutdown_runs_once(tmp_path, monkeypatch, supervisor):
     engine = _engine(tmp_path, monkeypatch, mode="loop")
     order: list[str] = []
     engine._active_client = _OrderedClient(order)
@@ -162,24 +142,22 @@ def test_shutdown_reports_telemetry_once(tmp_path, monkeypatch, supervisor, runs
     asyncio.run(drive())
 
     assert order == ["reap", "winddown"]  # client dead before the winddown
-    assert runs == ["shutdown"]
     assert read_status(engine.session_dir)["state"] == LoopState.STOPPED
     assert supervisor.all() == {}
 
 
-def test_user_stop_reports_telemetry(tmp_path, monkeypatch, supervisor, runs):
+def test_user_stop_releases_ownership(tmp_path, monkeypatch, supervisor):
     engine = _engine(tmp_path, monkeypatch, mode="loop")
     engine.ledger.adopt("acme-scalp-bot", now=100.0)
     supervisor.register(engine)
 
     asyncio.run(engine.stop())
 
-    assert runs == ["user"]
     assert read_owned(engine.session_dir)[0].until > 0
     assert read_status(engine.session_dir)["state"] == LoopState.STOPPED
 
 
-def test_stop_after_self_completion_is_a_noop(tmp_path, monkeypatch, supervisor, runs):
+def test_stop_after_self_completion_is_a_noop(tmp_path, monkeypatch, supervisor):
     engine = _loop_engine_that_owns_a_bot(tmp_path, monkeypatch)
     supervisor.register(engine)
     engine._running = True
@@ -188,6 +166,5 @@ def test_stop_after_self_completion_is_a_noop(tmp_path, monkeypatch, supervisor,
 
     asyncio.run(engine.stop())
 
-    assert runs == ["max_ticks"]  # no second event
     assert read_owned(engine.session_dir)[0].until == until
     assert read_status(engine.session_dir)["state"] == LoopState.COMPLETED

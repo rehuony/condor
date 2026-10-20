@@ -23,13 +23,14 @@ import { ServerContext } from "@/hooks/useServer";
 import type { ControllerInfo } from "@/lib/api";
 
 const getBots = vi.fn();
+const getExecutorsPage = vi.fn();
 
 vi.mock("@/lib/api", () => {
   const named: Record<string, (...args: unknown[]) => unknown> = {
     getBots: (...a) => getBots(...a),
     getBotRuns: () => Promise.resolve({ runs: [], total: 0 }),
     getTerminatedControllers: () => Promise.resolve({ controllers: [], runs_seen: 0 }),
-    getExecutorsPage: () => Promise.resolve({ executors: [], next_cursor: null }),
+    getExecutorsPage: (...a) => getExecutorsPage(...a),
     getFleetMap: () => Promise.resolve({ owners: [], deeds: { bots: {}, since: 0 } }),
   };
   return {
@@ -124,6 +125,8 @@ beforeEach(() => {
   root = createRoot(container);
   getBots.mockReset();
   getBots.mockResolvedValue(FLEET);
+  getExecutorsPage.mockReset();
+  getExecutorsPage.mockResolvedValue({ executors: [], next_cursor: null });
 });
 
 afterEach(async () => {
@@ -232,4 +235,58 @@ describe("/bots, grouped", () => {
     // Landed on the fleet, which is the report the lost level was inside of.
     expect(text()).toContain("$35");
   });
+});
+
+
+it("retains grouping when the mobile scope panel closes and reopens", async () => {
+  const original = window.matchMedia;
+  window.matchMedia = (() => ({ matches: true, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  try {
+    await render("");
+    const toggle = container.querySelector<HTMLButtonElement>("[data-perf-scope-toggle]")!;
+    await act(async () => toggle.click());
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => button("Pair")!.click());
+    const row = [...container.querySelectorAll<HTMLButtonElement>("[data-perf-scope-tree] button")].find((item) => item.textContent?.startsWith("SOL-USDC+$10.00"))!;
+    await act(async () => row.click());
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => button("View results")!.click());
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+    await act(async () => toggle.click());
+    expect(button("Pair")!.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => container.querySelector<HTMLElement>("[data-perf-scope-backdrop]")!.click());
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+    await act(async () => toggle.click());
+    expect(button("Pair")!.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  } finally { window.matchMedia = original; }
+});
+
+it("deletes the selected scope's history from the header, not the tree", async () => {
+  getExecutorsPage.mockResolvedValue({ executors: [{
+    id: "completed", status: "TERMINATED", type: "position_executor",
+    connector: "binance", trading_pair: "SOL-USDC", side: "BUY", close_type: "COMPLETED",
+    pnl: 10, volume: 100, timestamp: Date.now() / 1000 - 3600, close_timestamp: Date.now() / 1000,
+    controller_id: "main", cum_fees_quote: 0, net_pnl_pct: 0, entry_price: 100,
+    current_price: 110, custom_info: {}, config: {},
+  }], next_cursor: null });
+  await render("?population=terminated");
+  const tree = container.querySelector("[data-perf-scope-tree]")!;
+  expect(tree.querySelector('button[aria-label^="Delete history"]')).toBeNull();
+  // The fleet root offers no blanket delete.
+  expect(button("Delete History")).toBeUndefined();
+  await act(async () => button("Pair")!.click());
+  const row = [...tree.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.startsWith("SOL-USDC"))!;
+  await act(async () => row.click());
+  const action = button("Delete History")!;
+  expect(action.title).toBe("Delete 1 terminated record under SOL-USDC");
+  await act(async () => action.click());
+  expect(document.querySelector('[aria-labelledby="delete-executor-title"]')).not.toBeNull();
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Escape", bubbles: true, cancelable: true,
+  })));
+  expect(document.querySelector('[aria-labelledby="delete-executor-title"]')).toBeNull();
 });

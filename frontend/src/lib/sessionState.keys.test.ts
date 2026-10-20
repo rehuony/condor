@@ -77,7 +77,7 @@ function moduleConsts(source: string): Map<string, string> {
 describe("sessionState is the single definition site for persisted keys", () => {
   it("finds the modules it is meant to be scanning", () => {
     // A broken glob would make every assertion below pass vacuously.
-    expect(FILES.map(([file]) => file)).toContain("lib/page-context.ts");
+    expect(FILES.map(([file]) => file)).toContain("hooks/useTheme.ts");
     expect(FILES.length).toBeGreaterThan(100);
   });
 

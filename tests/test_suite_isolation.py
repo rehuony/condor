@@ -14,8 +14,7 @@ root that ignores ``CONDOR_RUNTIME_ROOT``, ``CONDOR_DATA_DIR``,
 one of these fails.
 
 All four roots are covered, because all four are durable and all four were
-reachable from a test: ``.condor/`` (conversations, delegations, state,
-telemetry), ``data/`` (the bell, routine hooks, backtests, code runs) -- whose
+reachable from a test: ``.condor/`` (conversations, delegations, state), ``data/`` (the bell, routine hooks, backtests, code runs) -- whose
 three cwd-relative constants READ-215 replaced with resolvers -- and
 ``agents/`` (every agent's per-user memory and skill library), the one READ-215
 did not reach and CORR-220 did -- and ``reports/``, which had a constant *and*
@@ -46,7 +45,6 @@ def test_no_store_resolves_inside_the_repository():
     assert _outside_the_repo(paths.conversation_dir(42, "abc"))
     assert _outside_the_repo(paths.delegation_dir(42, "t"))
     assert _outside_the_repo(paths.state_dir("ns"))
-    assert _outside_the_repo(paths.telemetry_dir())
 
 
 def test_the_agent_stores_are_isolated_too():

@@ -118,6 +118,10 @@ def _regular_step(arr: np.ndarray) -> tuple[Any, float] | None:
 
 def _collapse_x(trace: dict) -> bool:
     """Replace an evenly spaced ``x`` array with ``x0``/``dx``. True if applied."""
+    # Financial traces require explicit coordinates: Candlestick and OHLC do
+    # not accept x0/dx. Only rewrite the trace types this optimizer supports.
+    if trace.get("type") not in {"scatter", "scattergl", "bar"}:
+        return False
     if "x0" in trace or "dx" in trace:
         return False
     arr = _as_array(trace.get("x"))

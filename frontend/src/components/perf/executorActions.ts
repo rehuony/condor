@@ -5,10 +5,20 @@
 // every scope that has them (FEAT-086), so both moved out here rather than
 // being reimplemented beside the new table.
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
 import { api, type ExecutorInfo } from "@/lib/api";
+import { isExecutorTerminated } from "@/lib/formatters";
+import { collectLeaves, type PerfNode } from "@/lib/perf-tree";
+
+/** What deleting a scope's history removes: the terminated executors loaded under it. */
+export function terminatedExecutorIds(node: PerfNode): string[] {
+  return [...new Set(collectLeaves(node, "executor")
+    .map((leaf) => leaf.source as ExecutorInfo)
+    .filter((executor) => isExecutorTerminated(executor.status))
+    .map((executor) => executor.id))];
+}
 
 /** The columns the export writes, in order. */
 const CSV_HEADERS = [
@@ -125,5 +135,92 @@ export function useExecutorStop(server: string): ExecutorStop {
     request,
     confirm,
     cancel,
+  };
+}
+
+export interface ExecutorDelete {
+  deletingIds: Set<string>;
+  pendingIds: string[] | null;
+  label: string | null;
+  error: string | null;
+  pending: boolean;
+  request: (ids: string[], label?: string) => void;
+  confirm: (ids: string[]) => void;
+  cancel: () => void;
+}
+
+/** Deletion is confirmed, and partial failures keep their rows and report the reason. */
+export function useExecutorDelete(
+  server: string,
+  onDeleted?: (ids: string[]) => void,
+): ExecutorDelete {
+  const queryClient = useQueryClient();
+  const [pendingIds, setPendingIds] = useState<string[] | null>(null);
+  const [label, setLabel] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results: PromiseSettledResult<unknown>[] = [];
+      // Bound requests for large parent nodes without adding a second API.
+      for (let offset = 0; offset < ids.length; offset += 4) {
+        results.push(...await Promise.allSettled(
+          ids.slice(offset, offset + 4).map((id) => api.deleteExecutor(server, id)),
+        ));
+      }
+      return results;
+    },
+    onSuccess: async (results, ids) => {
+      const deleted = ids.filter((_, i) => results[i].status === "fulfilled");
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+      if (failed.length) {
+        const reason = failed[0].reason;
+        setPendingIds(ids.filter((_, i) => results[i].status === "rejected"));
+        setError(`${deleted.length} deleted; failed to delete ${failed.length} of ${ids.length} records: ${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+      else {
+        setPendingIds(null);
+      }
+      if (!deleted.length) return;
+
+      const affectedQueries = [
+        "executors-infinite", "executors", "dex-lp-executors", "executors-summary", "perf-history",
+      ].map((root) => ({ queryKey: [root, server] }));
+      // Invalidation can reuse a cold in-flight request. Discard pre-deletion
+      // responses before refetching so they cannot restore deleted history/totals.
+      await Promise.all(affectedQueries.map((filters) => queryClient.cancelQueries(filters)));
+      queryClient.setQueriesData<InfiniteData<{ executors: ExecutorInfo[]; next_cursor: string | null }>>(
+        { queryKey: ["executors-infinite", server] },
+        (data) => data && ({
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page, executors: page.executors.filter((ex) => !deleted.includes(ex.id)),
+          })),
+        }),
+      );
+      onDeleted?.(deleted);
+      await Promise.all(affectedQueries.map((filters) => queryClient.invalidateQueries(filters)));
+    },
+  });
+
+  return {
+    deletingIds: new Set(mutation.isPending ? mutation.variables : []),
+    pendingIds,
+    label,
+    error,
+    pending: mutation.isPending,
+    request: (ids, label) => {
+      if (!ids.length || mutation.isPending) return;
+      setError(null);
+      setLabel(label ?? null);
+      setPendingIds([...new Set(ids)]);
+    },
+    confirm: (ids) => {
+      if (mutation.isPending) return;
+      setError(null);
+      mutation.mutate([...new Set(ids)]);
+    },
+    cancel: () => {
+      if (!mutation.isPending) { setPendingIds(null); setError(null); }
+    },
   };
 }

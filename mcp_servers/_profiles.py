@@ -20,11 +20,53 @@ precisely so that the tables stay reachable without waking a server. Hence the
 from __future__ import annotations
 
 import argparse
+import inspect
 from collections.abc import Callable, Iterable, Mapping
+from functools import wraps
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - annotation only, never imported at runtime
     from mcp.server.fastmcp import FastMCP
+
+
+EXECUTION_MODES = frozenset({"", "dry_run", "run_once", "loop", "shutdown"})
+
+
+def parse_execution_mode() -> str:
+    """The trusted spawner's mode, never a model-supplied tool argument."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--execution-mode", choices=sorted(EXECUTION_MODES), default="")
+    args, _ = parser.parse_known_args()
+    return args.execution_mode
+
+
+def _dry_run_tool(fn: Callable) -> Callable:
+    """Enforce the rehearsal policy even when an ACP host skips approval RPCs."""
+    from condor.runtime.danger import (
+        dry_run_refusal,
+        is_dangerous_tool_call,
+        raw_controller_code_refusal,
+    )
+
+    signature = inspect.signature(fn)
+
+    @wraps(fn)
+    async def guarded(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        call = {"tool": fn.__name__, "input": dict(bound.arguments)}
+        reason = raw_controller_code_refusal(call) or dry_run_refusal(call)
+        if not reason and is_dangerous_tool_call(call):
+            reason = "this session runs in dry-run mode, where nothing mutates"
+        if reason:
+            # Raise before entering the original wrapper/body: FastMCP turns it
+            # into a tool error without running any routine, API call or tap.
+            raise ValueError(f"Dry-run refused {fn.__name__}: {reason}")
+        return await fn(*args, **kwargs)
+
+    # Preserve concrete annotations across modules for FastMCP's schema builder.
+    guarded.__signature__ = inspect.signature(fn, eval_str=True)
+    return guarded
 
 
 def parse_profile_flags(default_profile: str) -> tuple[str, tuple[str, ...]]:
@@ -106,6 +148,7 @@ def register_tools(
     tool_profiles: Mapping[str, tuple],
     profile: str,
     muted: Iterable[str] = (),
+    execution_mode: str = "",
 ) -> None:
     """Register this profile's tools on ``server``, minus the muted ones.
 
@@ -120,6 +163,8 @@ def register_tools(
     mount different rings, so "off here, never mounted there" is an ordinary
     difference between seats and not a mistake to report.
     """
+    if execution_mode not in EXECUTION_MODES:
+        raise ValueError(f"Unknown execution mode {execution_mode!r}")
     try:
         tools = tool_profiles[profile]
     except KeyError:
@@ -131,4 +176,4 @@ def register_tools(
     for fn in tools:
         if fn.__name__ in switched_off:
             continue
-        server.tool()(fn)
+        server.tool()(_dry_run_tool(fn) if execution_mode == "dry_run" else fn)

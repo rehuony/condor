@@ -344,6 +344,117 @@ def test_a_closed_window_pins_before_timestamp(monkeypatch):
     assert seen["before"] == 1_600_003_600
 
 
+def test_strict_history_keeps_both_inclusive_edges(monkeypatch):
+    start, end = 6000, 6600
+    seen = {}
+
+    async def fake(pool, connector, timeframe, limit, before, **kwargs):
+        seen.update(before=before, **kwargs)
+        return [_row(start - 60), _row(start), _row(end), _row(end + 60)]
+
+    monkeypatch.setattr(dex_candles, "_pool_ohlcv", fake)
+    rows = run(
+        dex_candles.fetch_dex_candles(
+            "solana-mainnet-beta",
+            "fixed-pool",
+            f"{MINT}-SOL",
+            "1m",
+            start,
+            end,
+            strict=True,
+        )
+    )
+    assert [row["timestamp"] for row in rows] == [start, end]
+    assert seen["before"] == end + 1
+    assert seen["requested_start"] == start
+    assert seen["strict"] is True
+
+
+def test_empty_strict_history_never_switches_the_explicit_pool(monkeypatch):
+    import pandas as pd
+
+    async def fake(method, *args, **kwargs):
+        assert method == "get_ohlcv", "an empty page must not resolve a different pool"
+        return pd.DataFrame()
+
+    pool_data.reset_gecko_throttle()
+    monkeypatch.setattr(pool_data, "gecko_call", fake)
+    assert (
+        run(
+            dex_candles.fetch_dex_candles(
+                "solana-mainnet-beta",
+                "fixed-pool",
+                f"{MINT}-SOL",
+                "1m",
+                6000,
+                6600,
+                strict=True,
+            )
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "connector,pair,pool",
+    [
+        ("solana-mainnet-beta", f"{MINT}-SOL", "fixed-pool"),
+        ("solana-mainnet-beta", f"{MINT}-SOL", None),
+        ("xrpl", "SOLO-XRP", None),
+    ],
+)
+def test_history_throttles_propagate_through_pool_resolution_and_ohlcv(
+    monkeypatch,
+    connector,
+    pair,
+    pool,
+):
+    from fastapi import HTTPException
+
+    async def fail(*args, **kwargs):
+        raise pool_data.GeckoRateLimited("GeckoTerminal rate limit")
+
+    pool_data.reset_gecko_throttle()
+    monkeypatch.setattr(pool_data, "gecko_call", fail)
+    with pytest.raises(HTTPException) as caught:
+        run(
+            market._fetch_candles_upstream(
+                None,
+                "srv",
+                connector,
+                pair,
+                "1m",
+                1000,
+                6000,
+                6600,
+                pool,
+            )
+        )
+    assert caught.value.status_code == 429
+    assert caught.value.headers == {"Retry-After": "60"}
+    # Other consumers retain their deliberate empty-on-error behaviour.
+    assert (
+        run(
+            dex_candles.fetch_dex_candles(
+                connector,
+                pool,
+                pair,
+                "1m",
+                6000,
+                6600,
+            )
+        )
+        == []
+    )
+
+
+def test_history_throttle_retry_after_uses_existing_cooldown(monkeypatch):
+    monkeypatch.setattr(pool_data, "gecko_health", lambda: {"cooldown_remaining": 12.2})
+    error = market._candle_upstream_error(pool_data.GeckoRateLimited("rate limit"))
+    assert error.status_code == 429
+    assert error.headers == {"Retry-After": "13"}
+
+
 def test_top_pool_fallback_when_the_executors_pool_is_empty(monkeypatch):
     """A closed slot, or an executor that never recorded a pool_address, still
     charts against the token's live main pool."""
@@ -353,7 +464,7 @@ def test_top_pool_fallback_when_the_executors_pool_is_empty(monkeypatch):
         queried.append(pool)
         return [] if pool == "dead_pool" else [_row(1000)]
 
-    async def _fake_top(mint, network, quote):
+    async def _fake_top(mint, network, quote, *, strict=False):
         assert (mint, quote) == (MINT, "SOL")
         return "live_pool"
 
@@ -503,7 +614,7 @@ def test_xrpl_pair_charts_the_pool_found_by_symbol(monkeypatch):
         seen["token"] = kwargs.get("token", "base")
         return [_row(1000, close=0.0121)]
 
-    async def _fake_search(base, quote, network):
+    async def _fake_search(base, quote, network, *, strict=False):
         assert (base, quote, network) == ("SOLO", "XRP", "xrpl")
         return "solo_xrp_pool", False
 

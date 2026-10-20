@@ -17,8 +17,7 @@ apart) and the line between them is *who writes and when*:
     │   ├── ui/                        # ...and what they did to the world by
     │   └── telegram/                  # hand, from the dashboard and from chat
     ├── deed_coverage.json
-    ├── state/{namespace}/
-    └── telemetry/
+    └── state/{namespace}/
 
     <repo>/data/                       # or $CONDOR_DATA_DIR
     ├── condor_bot_data.pickle         # the operational store: what the *bot*
@@ -196,6 +195,11 @@ def data_dir() -> Path:
     if override:
         return Path(override).expanduser()
     return _PROJECT_ROOT / DATA_DIRNAME
+
+
+def research_dir() -> Path:
+    """Locally generated research artifacts, kept outside the Git index."""
+    return runtime_root() / "research"
 
 
 def stock_agents_root() -> Path:
@@ -406,10 +410,6 @@ def deed_coverage_path() -> Path:
 def state_dir(namespace: str) -> Path:
     """The fallback home for a state namespace (``state.py`` owns the policy)."""
     return runtime_root() / "state" / safe_id(namespace)
-
-
-def telemetry_dir() -> Path:
-    return runtime_root() / "telemetry"
 
 
 def iter_user_ids() -> Iterator[str]:

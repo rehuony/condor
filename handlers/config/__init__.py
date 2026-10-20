@@ -5,7 +5,7 @@ Configuration management command handlers
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from utils.auth import restricted
 
@@ -197,101 +197,3 @@ def get_config_callback_handler():
         config_callback_handler,
         pattern="^config_|^modify_field_|^add_server_|^api_server_|^api_key_|^gateway_|^admin:",
     )
-
-
-def get_modify_value_handler():
-    """
-    Get the UNIFIED message handler for ALL text input flows.
-
-    This handler routes text input to the appropriate sub-handler based on context state.
-    Order of priority:
-    1. Trading states (cex_state, dex_state) - highest priority
-    2. Config states (server modification, API keys, gateway)
-    """
-    from .gateway import handle_gateway_input
-    from .servers import handle_server_input
-
-    @restricted
-    async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Route text input to appropriate handler based on context state.
-
-        Guarded by @restricted: blocked/pending/unknown users are rejected
-        before any text input is routed to a sub-handler (defense at the
-        message-handler trust boundary, mirroring the @restricted entry
-        commands like /keys and /servers).
-        """
-        logger.info(
-            f"handle_all_text_input: user_data keys = {list(context.user_data.keys())}"
-        )
-
-        # 1. Check CEX trading state (highest priority)
-        if context.user_data.get("cex_state"):
-            from handlers.cex import cex_message_handler
-
-            await cex_message_handler(update, context)
-            return
-
-        # 2. Check DEX trading state
-        if context.user_data.get("dex_state"):
-            from handlers.dex import dex_message_handler
-
-            await dex_message_handler(update, context)
-            return
-
-        # 3. Check Bots state
-        if context.user_data.get("bots_state"):
-            from handlers.bots import bots_message_handler
-
-            await bots_message_handler(update, context)
-            return
-
-        # 3.5. Check Executors state
-        if context.user_data.get("executors_state"):
-            from handlers.executors import executors_message_handler
-
-            handled = await executors_message_handler(update, context)
-            if handled:
-                return
-
-        # 4. Check config flows - server modification
-        if context.user_data.get("awaiting_add_server_input") or context.user_data.get(
-            "awaiting_modify_input"
-        ):
-            await handle_server_input(update, context)
-            return
-
-        # 5. Check config flows - gateway
-        if (
-            context.user_data.get("awaiting_gateway_input")
-            or context.user_data.get("awaiting_wallet_input")
-            or context.user_data.get("awaiting_connector_input")
-            or context.user_data.get("awaiting_network_input")
-            or context.user_data.get("awaiting_token_input")
-            or context.user_data.get("awaiting_pool_input")
-            or context.user_data.get("awaiting_rpc_input")
-        ):
-            await handle_gateway_input(update, context)
-            return
-
-        # 7. Check routines state
-        if context.user_data.get("routines_state"):
-            from handlers.routines import routines_message_handler
-
-            await routines_message_handler(update, context)
-            return
-
-        # 8. Check server share state
-        if context.user_data.get("awaiting_share_user_id"):
-            from handlers.config.servers import handle_share_user_id_input
-
-            await handle_share_user_id_input(update, context)
-            return
-
-        # 9. Fallback — route to agent (always-on assistant)
-        # Any message that doesn't match a specific handler state goes to the AI agent.
-        # This auto-creates a session with the user's preferred LLM if none exists.
-        from handlers.agents import agent_message_handler
-
-        await agent_message_handler(update, context)
-
-    return MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text_input)

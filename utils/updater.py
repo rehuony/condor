@@ -372,14 +372,11 @@ async def is_git_repo(repo_dir: str) -> bool:
 async def fast_forward(repo_dir: str = CONDOR_DIR) -> tuple[bool, str]:
     """Fetch and fast-forward to ``origin/<branch>``. Never merges.
 
-    Replaces the old ``git pull``: an update means "take upstream's commits",
+    Replaces the old ``git pull``: an update means "take published commits",
     and anything that is not a fast-forward is a state the admin has to look
     at, not something a button should resolve.
     """
     branch = await get_current_branch(repo_dir)
-
-    # The sha we are leaving, so a successful move can report what it moved.
-    before = await get_local_commit(repo_dir)
 
     ok, out = await fetch(repo_dir)
     if not ok:
@@ -390,23 +387,6 @@ async def fast_forward(repo_dir: str = CONDOR_DIR) -> tuple[bool, str]:
     )
     if rc != 0:
         return False, f"Fast-forward failed:\n{output}"
-
-    # Version adoption telemetry (FEAT-023): two short shas and how far behind
-    # this install had drifted. Only for the Condor repo itself, and a no-op
-    # unless the admin opted in.
-    try:
-        after = await get_local_commit(repo_dir)
-        if repo_dir == CONDOR_DIR and before and after and before != after:
-            _, behind = await _run_git(
-                "rev-list", "--count", f"{before}..{after}", repo_dir=repo_dir
-            )
-            from condor.telemetry import taps as telemetry_taps
-
-            telemetry_taps.version_change(
-                before, after, int(behind) if behind.strip().isdigit() else 0
-            )
-    except Exception:
-        logger.debug("Could not record version change", exc_info=True)
 
     return True, output
 
@@ -728,8 +708,10 @@ async def move_to_local_root(repo_dir: str, rel_paths: list[str]) -> tuple[bool,
 
 
 async def install_dependencies() -> tuple[bool, str]:
-    """Run uv sync to install any new dependencies, then bring the Claude bridge current."""
-    rc, output = await _run_cmd("uv", "sync", cwd=CONDOR_DIR, timeout=DEPS_TIMEOUT)
+    """Install the published lockfile, then bring the Claude bridge current."""
+    rc, output = await _run_cmd(
+        "uv", "sync", "--locked", cwd=CONDOR_DIR, timeout=DEPS_TIMEOUT
+    )
     if rc != 0:
         return False, f"Dependency install failed:\n{output}"
     bridge = await upgrade_outdated_bridge()

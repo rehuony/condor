@@ -110,7 +110,10 @@ def _manage_strategy(
             s.skills = skills
         if config:
             s.default_config = config
-        store.update(s)
+        try:
+            store.update(s)
+        except ValueError as exc:
+            return {"error": str(exc)}
         return {"updated": True, "loop_id": s.key, "name": s.name}
 
     elif action == "delete_strategy":

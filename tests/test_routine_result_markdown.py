@@ -112,7 +112,7 @@ def ctx(monkeypatch):
     """A job context whose routine returns HOSTILE, with the store stubbed out."""
 
     async def _execute(*args, **kwargs):
-        return HOSTILE, 1.5, None
+        return HOSTILE, 1.5, None, False
 
     monkeypatch.setattr(hr, "_execute_routine", _execute)
     monkeypatch.setattr(hr, "get_routine_store", lambda: SimpleNamespace())
@@ -179,3 +179,17 @@ def test_truncation_happens_before_escaping():
     escaped = escape_markdown_v2_code("\\" * 400)
     assert len(escaped) == 800
     assert render_markdown_v2(f"```\n{escaped}\n```") == "\n" + "\\" * 400 + "\n"
+
+
+@pytest.mark.parametrize("callback", ["_interval_job_callback", "_daily_job_callback"])
+def test_silent_scheduled_run_posts_nothing(ctx, monkeypatch, callback):
+    """A routine that delivers its own alerts can opt out of the per-run message."""
+
+    async def _execute(*args, **kwargs):
+        return "nothing to report", 1.5, None, True
+
+    monkeypatch.setattr(hr, "_execute_routine", _execute)
+    asyncio.run(getattr(hr, callback)(ctx))
+    assert ctx.bot.rendered == []
+    instance = ctx.application.user_data[42]["routine_instances"]["i1"]
+    assert instance["last_result"] == "nothing to report"

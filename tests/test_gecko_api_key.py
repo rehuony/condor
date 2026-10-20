@@ -128,14 +128,19 @@ def test_only_two_plans_exist():
 
 
 @pytest.mark.parametrize("status", [401, 403])
-def test_a_rejected_key_falls_back_to_keyless(monkeypatch, status):
+@pytest.mark.parametrize("address", ["pool", "pool429"])
+def test_a_rejected_key_falls_back_to_keyless(monkeypatch, status, address):
     """A bad key must not be worse than no key.
 
     Without the fallback the 401 propagates, every caller degrades to an empty
     list, and the whole DEX surface reads as a chain with no pools.
     """
     with_key(monkeypatch)
-    rejecting = _Client(error=_http_error(status))
+    request = httpx.Request("GET", f"https://example.test/pools/{address}")
+    response = httpx.Response(status, request=request)
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        response.raise_for_status()
+    rejecting = _Client(error=error.value)
     keyless = _Client()
     clients = iter([rejecting, keyless])
     monkeypatch.setattr(pool_data, "_gecko_client", lambda: next(clients, keyless))
@@ -143,6 +148,7 @@ def test_a_rejected_key_falls_back_to_keyless(monkeypatch, status):
     assert run(pool_data.gecko_call("api_request", "GET", "networks")) == {"data": []}
     assert rejecting.calls == 1 and keyless.calls == 1
     assert pool_data.gecko_plan() == "public"
+    assert pool_data.gecko_health()["count_429"] == 0
 
 
 def test_a_rejected_key_resizes_the_guards(monkeypatch):

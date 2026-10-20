@@ -1,9 +1,8 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
 
 jobs:
@@ -22,13 +21,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: Check formatting with black
-        run: uv run black --check .
+        run: uv run --locked black --check .
 
       - name: Check import sorting with isort
-        run: uv run isort --check .
+        run: uv run --locked isort --check .
 
   backend-import-check:
     name: Backend Import Check
@@ -45,11 +44,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Verify main modules import without errors
         run: |
-          uv run python -c "
+          uv run --locked python -c "
           import config_manager
           import handlers
           import utils
@@ -71,13 +70,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: Run tests
-        run: uv run pytest --tb=short -q
+        run: uv run --locked pytest --tb=short -q
 
   frontend-build:
-    name: Frontend Build & Lint
+    name: Frontend Tests, Build & Lint
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -98,6 +97,9 @@ jobs:
       # 76 that predate this workflow -- see frontend/scripts/lint-baseline.mjs.
       - name: Lint
         run: npm run lint:ci
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build

@@ -12,14 +12,10 @@ import {
   sameSource,
 } from "./pool-source";
 
-
-/**
- * Pills rather than underlined tabs, because there are seven of them and they no
- * longer sit on one baseline: a wrapped underline reads as two broken rules across
- * the header, while a pill is legible on whatever row it lands on.
- */
 const TAB_BASE =
-  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap";
+  "flex min-h-8 items-center justify-center rounded-md px-1.5 py-1 text-xs font-medium sm:px-2.5 transition-colors whitespace-nowrap sm:min-h-7";
+
+const SEPARATOR = "mx-0.5 sm:mx-1.5 h-4 w-px shrink-0 bg-[var(--color-border)]";
 
 function tabClass(active: boolean) {
   return `${TAB_BASE} ${
@@ -49,7 +45,7 @@ function ChainSelect({
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const close = useCallback(() => setOpen(false), []);
 
-  // One chain is not a choice — render it as a label rather than a dead dropdown.
+  // Hide the selector when there is no chain choice.
   if (chains.length <= 1) return null;
 
   const current = chains.find((c) => c.network_id === network);
@@ -61,11 +57,11 @@ function ChainSelect({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         title="Chain to browse pools on"
-        className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+        className="flex min-h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)] sm:min-h-7"
       >
-        {current?.label ?? network}
+        <span className="truncate">{current?.label ?? network}</span>
         <ChevronDown
-          className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
 
@@ -147,16 +143,16 @@ function DexFilter({
         ref={setAnchor}
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+        className={`flex min-h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors sm:min-h-7 ${
           selected.length
             ? "border-[var(--color-primary)] text-[var(--color-primary)]"
             : "border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
         }`}
       >
-        {label}
+        <span className="truncate">{label}</span>
         {selected.length > 0 ? (
           <X
-            className="h-3 w-3"
+            className="h-3 w-3 shrink-0"
             onClick={(e) => {
               e.stopPropagation();
               onChange([]);
@@ -164,7 +160,7 @@ function DexFilter({
           />
         ) : (
           <ChevronDown
-            className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
+            className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
           />
         )}
       </button>
@@ -181,14 +177,13 @@ function DexFilter({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter venues…"
-            autoFocus
             spellCheck={false}
             className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]"
           />
         </div>
         <div>
           {shown.map((v) => {
-              const active = selected.includes(v.id);
+            const active = selected.includes(v.id);
             return (
               <button
                 key={v.id}
@@ -263,56 +258,63 @@ export function PoolSourceTabs({
   const showGatewayTabs = network.startsWith(GATEWAY_TAB_CHAIN);
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--color-border)] px-4 py-2">
-      {/* Wraps rather than scrolls. Seven short labels fit one row on any desktop
-          width, and on a phone a second row is reachable where a horizontal
-          scroller inside a vertically-scrolling page is largely not. */}
-      <ChainSelect
-        chains={chains}
-        network={network}
-        onChange={onNetworkChange}
-      />
+    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 sm:gap-x-4 sm:px-4">
+      {chains.length > 1 && (
+        <div className="min-w-0 max-w-[calc(50%-0.25rem)] sm:max-w-44">
+          <ChainSelect
+            chains={chains}
+            network={network}
+            onChange={onNetworkChange}
+          />
+        </div>
+      )}
 
-      <div className="flex flex-wrap items-center gap-0.5">
+      {/* Every source on one row, groups split by hairlines. Phones share the
+          row out evenly and keep only the star for Favorites; a very narrow
+          screen scrolls the row rather than wrapping it. */}
+      <div className="order-1 flex w-full min-w-0 items-center overflow-x-auto sm:order-none sm:w-auto sm:gap-0.5">
         {GECKO_TABS.map((t) => (
           <button
             key={t.view}
             onClick={() => onSourceChange({ kind: "gecko", view: t.view })}
-            className={tabClass(
+            aria-pressed={sameSource(source, { kind: "gecko", view: t.view })}
+            className={`${tabClass(
               sameSource(source, { kind: "gecko", view: t.view }),
-            )}
+            )} max-sm:flex-1`}
           >
             {t.label}
           </button>
         ))}
         {showGatewayTabs && (
           <>
-            <span className="mx-1.5 h-4 w-px bg-[var(--color-border)]" />
+            <span className={SEPARATOR} aria-hidden="true" />
             {GATEWAY_TABS.map((t) => (
               <button
                 key={t.connector}
                 onClick={() =>
                   onSourceChange({ kind: "gateway", connector: t.connector })
                 }
-                className={tabClass(
+                aria-pressed={sameSource(source, { kind: "gateway", connector: t.connector })}
+                className={`${tabClass(
                   sameSource(source, { kind: "gateway", connector: t.connector }),
-                )}
+                )} max-sm:flex-1`}
               >
                 {t.label}
               </button>
             ))}
           </>
         )}
-        <span className="mx-1.5 h-4 w-px bg-[var(--color-border)]" />
+        <span className={SEPARATOR} aria-hidden="true" />
         <button
           onClick={() => onSourceChange({ kind: "favorites" })}
-          className={`${tabClass(source.kind === "favorites")} flex items-center gap-1`}
+          aria-pressed={source.kind === "favorites"}
+          className={`${tabClass(source.kind === "favorites")} gap-1 max-sm:flex-1`}
           title="Pools you starred"
         >
           <Star
-            className={`h-3 w-3 ${source.kind === "favorites" ? "fill-[var(--color-primary)] text-[var(--color-primary)]" : ""}`}
+            className={`h-3 w-3 shrink-0 ${source.kind === "favorites" ? "fill-[var(--color-primary)] text-[var(--color-primary)]" : ""}`}
           />
-          Favorites
+          <span className="max-sm:sr-only">Favorites</span>
           {favoriteCount > 0 && (
             <span className="text-[10px] text-[var(--color-text-muted)]">
               {favoriteCount}
@@ -321,35 +323,37 @@ export function PoolSourceTabs({
         </button>
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
-        {source.kind === "gecko" && (
+      {source.kind === "gecko" && venues.length > 0 && (
+        <div className="ml-auto flex min-w-0 max-w-[calc(50%-0.25rem)] justify-end sm:max-w-48">
           <DexFilter
             venues={venues}
             selected={selectedDexes}
             onChange={onDexesChange}
           />
-        )}
-        {searchShown && (
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <input
-              value={query}
-              onChange={(e) => onQueryChange(e.target.value)}
-              placeholder={searchLabel}
-              spellCheck={false}
-              className="w-64 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] py-1 pl-7 pr-6 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]"
-            />
-            {query && (
-              <button
-                onClick={() => onQueryChange("")}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
+      {searchShown && (
+        <div className="relative order-2 w-full min-w-0 sm:order-none sm:ml-auto sm:w-64">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--color-text-muted)]" />
+          <input
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder={searchLabel}
+            aria-label={searchLabel}
+            spellCheck={false}
+            className="min-h-10 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] py-1 pl-7 pr-8 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] sm:min-h-7"
+          />
+          {query && (
+            <button
+              onClick={() => onQueryChange("")}
+              aria-label="Clear pool search"
+              className="absolute right-0 top-0 flex h-full w-8 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

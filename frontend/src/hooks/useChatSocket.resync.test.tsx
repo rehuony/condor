@@ -22,13 +22,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerContext } from "@/hooks/useServer";
 
 const getConversation = vi.fn();
+const listConversations = vi.fn();
+const uploadAttachment = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    listConversations: () => Promise.resolve([]),
+    listConversations: (...args: unknown[]) => listConversations(...args),
     getSessionOptions: () => Promise.resolve({ default_agent: "claude-code" }),
     getConversation: (...args: unknown[]) => getConversation(...args),
+    uploadAttachment: (...args: unknown[]) => uploadAttachment(...args),
+    attachmentUrl: (conversationId: string, id: string) => `/api/v1/conversations/${conversationId}/attachments/${id}`,
   },
+}));
+
+vi.mock("@/lib/viewFacts", () => ({
+  collectViewFacts: () => ({}),
+  renderViewBlock: () => "",
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -52,11 +61,12 @@ class FakeSocket {
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
+  sent: Record<string, unknown>[] = [];
 
   constructor() {
     FakeSocket.last = this;
   }
-  send() {}
+  send(raw: string) { this.sent.push(JSON.parse(raw)); }
   close() {
     this.readyState = FakeSocket.CLOSED;
   }
@@ -66,6 +76,7 @@ class FakeSocket {
 }
 
 const sock = () => FakeSocket.last!;
+const localClientId = () => sock().sent.find((frame) => frame.action === "send_message")?.client_id;
 
 const holder: { current: ReturnType<typeof useChatSocket> | null } = {
   current: null,
@@ -82,6 +93,7 @@ function Harness() {
 
 let container: HTMLDivElement;
 let root: Root;
+let queryClient: QueryClient;
 
 async function settle() {
   await act(async () => {
@@ -104,7 +116,7 @@ const messages = () =>
 async function arrive() {
   act(() => {
     root.render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={queryClient}>
         <ServerContext value={{ server: "moneymaker", setServer: () => {} }}>
           <Harness />
         </ServerContext>
@@ -140,9 +152,385 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  listConversations.mockResolvedValue([]);
   getConversation.mockResolvedValue({
     meta: {},
     turns: [{ role: "user", text: "run the audit", ts: "1", tool_calls: [] }],
+  });
+});
+
+function changed(phase: "accepted" | "completed", extra: Record<string, unknown> = {}) {
+  act(() => sock().deliver({
+    event: "conversation_changed",
+    conversation_id: "c1",
+    session_key: "tg:7",
+    phase,
+    is_busy: phase === "accepted",
+    ...extra,
+  }));
+}
+
+const turn = (role: string, text: string, ts: number) => ({
+  role, text, ts, tool_calls: [],
+});
+
+describe("changes from Telegram or another browser", () => {
+  it("loads an image-only notification during a Telegram turn and preserves it after a page reload", async () => {
+    await arrive();
+    getConversation.mockResolvedValue({
+      meta: {}, is_busy: true,
+      turns: [turn("user", "run the audit", 1), {
+        ...turn("system", "", 2), kind: "notification",
+        attachments: [{ id: "plot.png", mime: "image/png", bytes: 1024 }],
+      }],
+    });
+    changed("completed", { is_busy: true });
+    await settle();
+
+    const notification = messages()[1];
+    expect(notification).toMatchObject({
+      role: "system", kind: "notification", text: "",
+      attachments: [{ url: "/api/v1/conversations/c1/attachments/plot.png", mime: "image/png" }],
+    });
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+    expect(sock().sent).toEqual([]);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await arrive();
+    expect(messages()[1]).toEqual(notification);
+    expect(messages()).toHaveLength(2);
+  });
+
+  it("restores a sent image after a local answer finishes without duplicating the active answer", async () => {
+    await arrive();
+    act(() => chat().sendMessage("s1", "draw the chart"));
+    act(() => sock().deliver({ event: "tool_call", slot_id: "s1", tool_call_id: "image", title: "send_notification", status: "in_progress" }));
+    getConversation.mockResolvedValue({ meta: {}, is_busy: true, turns: [
+      turn("user", "run the audit", 1), turn("user", "draw the chart", 2), {
+        ...turn("system", "Entry and exit levels", 3), kind: "notification",
+        attachments: [{ id: "plot.png", mime: "image/png", bytes: 1024 }],
+      }, turn("assistant", "Image sent", 4),
+    ] });
+    changed("completed", { is_busy: true });
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    expect(messages().at(-1)?.open).toBe(true);
+
+    act(() => {
+      sock().deliver({ event: "text_chunk", slot_id: "s1", text: "Image sent" });
+      sock().deliver({ event: "prompt_done", slot_id: "s1", client_id: localClientId() });
+    });
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual([
+      "run the audit", "draw the chart", "Entry and exit levels", "Image sent",
+    ]);
+    expect(messages()[2].attachments).toEqual([
+      { url: "/api/v1/conversations/c1/attachments/plot.png", mime: "image/png" },
+    ]);
+  });
+
+  it("reads accepted messages and completed answers without starting another turn", async () => {
+    await arrive();
+    queryClient.setQueryData(["conversations"], []);
+    getConversation.mockResolvedValue({
+      meta: {}, is_busy: true,
+      turns: [turn("user", "run the audit", 1), turn("user", "from my phone", 2)],
+    });
+    changed("accepted");
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["run the audit", "from my phone"]);
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+    expect(queryClient.getQueryState(["conversations"])?.isInvalidated).toBe(true);
+
+    getConversation.mockResolvedValue({
+      meta: {}, is_busy: false,
+      turns: [turn("user", "run the audit", 1), turn("user", "from my phone", 2), turn("assistant", "phone answer", 3)],
+    });
+    changed("completed");
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["run the audit", "from my phone", "phone answer"]);
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+    expect(sock().sent).toEqual([]);
+  });
+
+  it("invalidates a new Telegram conversation without opening it or stealing focus", async () => {
+    await arrive();
+    queryClient.setQueryData(["conversations"], []);
+    const active = chat().activeSlotId;
+    changed("accepted", { conversation_id: "phone-only" });
+    await settle();
+    expect(queryClient.getQueryState(["conversations"])?.isInvalidated).toBe(true);
+    expect(chat().slots).toHaveLength(1);
+    expect(chat().activeSlotId).toBe(active);
+    expect(chat().isStreaming).toBe(false);
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    expect(sock().sent).toEqual([]);
+  });
+
+  it("also refreshes changes from another browser using the same web session key", async () => {
+    await arrive();
+    getConversation.mockResolvedValue({ meta: {}, turns: [turn("user", "other browser", 2)] });
+    changed("accepted", { session_key: "web:7:s1" });
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["other browser"]);
+    expect(sock().sent).toEqual([]);
+  });
+
+  it("defers a refresh until the local question and streamed answer finish", async () => {
+    await arrive();
+    act(() => chat().sendMessage("s1", "local question"));
+    act(() => sock().deliver({ event: "tool_call", slot_id: "s1", tool_call_id: "tool", title: "Read", status: "in_progress" }));
+    changed("accepted");
+    changed("completed");
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    expect(messages().map((message) => message.text)).toEqual(["run the audit", "local question", ""]);
+    expect(messages().at(-1)?.open).toBe(true);
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+
+    getConversation.mockResolvedValue({ meta: {}, is_busy: false, turns: [
+      turn("user", "run the audit", 1), turn("user", "phone question", 2),
+      turn("assistant", "phone answer", 3), turn("user", "local question", 4),
+      turn("assistant", "local answer", 5),
+    ] });
+    act(() => {
+      sock().deliver({ event: "text_chunk", slot_id: "s1", text: "local answer" });
+      sock().deliver({ event: "prompt_done", slot_id: "s1", client_id: localClientId() });
+    });
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual([
+      "run the audit", "phone question", "phone answer", "local question", "local answer",
+    ]);
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+    expect(sock().sent.filter((message) => message.action === "send_message")).toHaveLength(1);
+  });
+
+  it("preserves a local message typed while the external refresh is in flight", async () => {
+    await arrive();
+    let release: (value: unknown) => void = () => {};
+    getConversation.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    changed("accepted");
+    await settle();
+    act(() => chat().sendMessage("s1", "still waiting locally"));
+    await act(async () => release({ meta: {}, turns: [turn("user", "phone question", 2)] }));
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["run the audit", "still waiting locally"]);
+  });
+
+  it("ignores an older read that finishes after the completion refresh", async () => {
+    await arrive();
+    let release: (value: unknown) => void = () => {};
+    getConversation.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    changed("accepted");
+    await settle();
+    getConversation.mockResolvedValue({ meta: {}, is_busy: false, turns: [turn("assistant", "finished", 3)] });
+    changed("completed");
+    await settle();
+    await act(async () => release({ meta: {}, is_busy: true, turns: [turn("user", "old snapshot", 2)] }));
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["finished"]);
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+  });
+
+  it("keeps questions queued behind a pending session spawn", async () => {
+    await arrive();
+    getConversation.mockResolvedValue({ meta: {}, turns: [] });
+    act(() => chat().resumeConversation("pending"));
+    await settle();
+    act(() => chat().sendMessage("pending", "send after the spawn"));
+    changed("accepted", { conversation_id: "pending" });
+    await settle();
+    const pending = chat().slots.find((slot) => slot.info.slot_id === "pending");
+    expect(pending?.messages.map((message) => message.text)).toEqual(["send after the spawn"]);
+    expect(getConversation).toHaveBeenCalledTimes(2);
+    expect(sock().sent.filter((message) => message.action === "send_message")).toHaveLength(0);
+
+    act(() => sock().deliver({ event: "session_started", slot_id: "pending", conversation_id: "pending", agent_key: "k", restored: true }));
+    await settle();
+    expect(sock().sent.filter((message) => message.action === "send_message")).toHaveLength(1);
+    expect(getConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for both local turns instead of refreshing after the interrupted one", async () => {
+    await arrive();
+    act(() => {
+      chat().sendMessage("s1", "first local question");
+      chat().sendMessage("s1", "redirect it");
+    });
+    changed("accepted");
+    act(() => sock().deliver({ event: "prompt_done", slot_id: "s1", client_id: localClientId(), stop_reason: "cancelled" }));
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    expect(messages().map((message) => message.text)).toEqual([
+      "run the audit", "first local question", "redirect it",
+    ]);
+    act(() => sock().deliver({ event: "prompt_done", slot_id: "s1", client_id: localClientId() }));
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores stale lifecycle events and accepts a reset sequence on reconnect", async () => {
+    await arrive();
+    changed("completed", { sequence: 2 });
+    await settle();
+    changed("accepted", { sequence: 1 });
+    await settle();
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+    expect(getConversation).toHaveBeenCalledTimes(2);
+
+    reconnect();
+    act(() => sock().deliver(roster()));
+    await settle();
+    changed("accepted", { sequence: 1 });
+    await settle();
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+    expect(getConversation).toHaveBeenCalledTimes(4);
+  });
+
+  it("recovers cross-surface busy state from history and clears it on reconnect", async () => {
+    getConversation.mockResolvedValue({ meta: {}, is_busy: true, turns: [] });
+    await arrive();
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+    getConversation.mockResolvedValue({ meta: {}, is_busy: false, turns: [] });
+    reconnect();
+    act(() => sock().deliver(roster()));
+    await settle();
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+  });
+
+  it("keeps a conversation busy while another accepted turn is still queued", async () => {
+    await arrive();
+    changed("accepted");
+    changed("completed", { is_busy: true });
+    await settle();
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+    changed("completed");
+    await settle();
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+  });
+
+  it("does not erase a question sent as the socket reconnects", async () => {
+    await arrive();
+    act(() => {
+      sock().readyState = FakeSocket.CLOSED;
+      sock().onclose?.();
+      chat().sendMessage("s1", "sent on reconnect");
+    });
+    act(() => {
+      chat().connect();
+      sock().onopen?.();
+      sock().deliver(roster());
+    });
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["run the audit", "sent on reconnect"]);
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    expect(sock().sent.filter((message) => message.action === "send_message")).toHaveLength(1);
+  });
+
+  it("does not erase a question whose attachment is still uploading on reconnect", async () => {
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL() { return "blob:preview"; }
+    });
+    let release: (value: unknown) => void = () => {};
+    uploadAttachment.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    await arrive();
+    act(() => chat().sendMessage("s1", "uploading", [new File(["image"], "image.png", { type: "image/png" })]));
+    reconnect();
+    act(() => sock().deliver(roster()));
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["run the audit", "uploading"]);
+    expect(messages().at(-1)?.attachments?.[0].url).toBe("blob:preview");
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    await act(async () => release({ id: "image-1" }));
+    await settle();
+    expect(sock().sent.filter((message) => message.action === "send_message")).toHaveLength(1);
+  });
+
+  it("recovers a missed local DONE even when Telegram is now busy", async () => {
+    await arrive();
+    act(() => chat().sendMessage("s1", "finished while offline"));
+    act(() => sock().deliver({ event: "tool_call", slot_id: "s1", tool_call_id: "tool", title: "Read", status: "in_progress" }));
+    expect(messages().at(-1)?.open).toBe(true);
+    getConversation.mockResolvedValue({ meta: {}, is_busy: true, turns: [
+      turn("user", "run the audit", 1), turn("user", "finished while offline", 2),
+      turn("assistant", "local result", 3), turn("user", "new phone request", 4),
+    ] });
+    reconnect();
+    act(() => sock().deliver({ event: "sessions_list", sessions: [{
+      ...ROSTER[0], is_busy: true, web_pending_turns: 0,
+    }] }));
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual([
+      "run the audit", "finished while offline", "local result", "new phone request",
+    ]);
+    expect(chat().isSlotStreaming("s1")).toBe(true);
+
+    getConversation.mockResolvedValue({ meta: {}, is_busy: false, turns: [turn("assistant", "phone finished", 5)] });
+    changed("completed");
+    await settle();
+    expect(messages().map((message) => message.text)).toEqual(["phone finished"]);
+    expect(chat().isSlotStreaming("s1")).toBe(false);
+  });
+
+  it("continues protecting a local turn the reconnect roster still lists", async () => {
+    await arrive();
+    act(() => chat().sendMessage("s1", "still running locally"));
+    const clientId = localClientId();
+    reconnect();
+    act(() => sock().deliver({ event: "sessions_list", sessions: [{
+      ...ROSTER[0], is_busy: true, web_pending_turns: 1,
+    }] }));
+    changed("completed", { is_busy: true });
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    expect(messages().map((message) => message.text)).toEqual(["run the audit", "still running locally"]);
+    act(() => sock().deliver({ event: "prompt_done", slot_id: "s1", client_id: clientId }));
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["uploading", "sent"])("keeps a %s local question when a foreign turn completes", async (stage) => {
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL() { return "blob:preview"; }
+      static revokeObjectURL() {}
+    });
+    let releaseUpload: (value: { id: string }) => void = () => {};
+    uploadAttachment.mockReturnValue(new Promise((resolve) => { releaseUpload = resolve; }));
+    await arrive();
+    act(() => sock().deliver({ event: "text_chunk", slot_id: "s1", text: "inherited answer" }));
+    act(() => chat().sendMessage("s1", "local question", stage === "uploading"
+      ? [new File(["image"], "image.png", { type: "image/png" })] : undefined));
+    getConversation.mockResolvedValue({ meta: {}, is_busy: false, turns: [
+      turn("user", "run the audit", 1), turn("assistant", "inherited answer", 2),
+    ] });
+    changed("completed");
+    act(() => sock().deliver({
+      event: "prompt_done", slot_id: "s1",
+      // Wakes have no client; inherited browser turns retain their origin.
+      ...(stage === "sent" ? { client_id: "other-browser" } : {}),
+    }));
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(1);
+    expect(messages().map((message) => message.text)).toContain("local question");
+
+    if (stage === "uploading") {
+      expect(sock().sent.filter((frame) => frame.action === "send_message")).toHaveLength(0);
+      expect(messages().at(-1)?.attachments?.[0].url).toBe("blob:preview");
+      await act(async () => releaseUpload({ id: "image-1" }));
+    }
+    expect(localClientId()).toEqual(expect.any(String));
+    getConversation.mockResolvedValue({ meta: {}, is_busy: false, turns: [
+      turn("user", "run the audit", 1), turn("assistant", "inherited answer", 2),
+      turn("user", "local question", 3), turn("assistant", "local answer", 4),
+    ] });
+    act(() => sock().deliver({ event: "prompt_done", slot_id: "s1", client_id: localClientId() }));
+    await settle();
+    expect(getConversation).toHaveBeenCalledTimes(2);
+    expect(messages().map((message) => message.text)).toEqual([
+      "run the audit", "inherited answer", "local question", "local answer",
+    ]);
   });
 });
 

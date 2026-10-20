@@ -110,6 +110,56 @@ def test_a_429_is_never_retried(monkeypatch):
     assert client.calls == 1
 
 
+@pytest.mark.parametrize("concurrency", [1, 4])
+def test_a_429_stops_requests_already_waiting_for_dispatch(monkeypatch, concurrency):
+    """Only requests already on the wire may finish after the breaker opens."""
+    import httpx
+
+    async def drive():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        class Client:
+            async def api_request(self, _method, path):
+                calls.append(path)
+                if len(calls) == concurrency:
+                    entered.set()
+                await release.wait()
+                if path == "0":
+                    request = httpx.Request("GET", "https://example.test/pools")
+                    response = httpx.Response(429, request=request)
+                    raise httpx.HTTPStatusError(
+                        "Too Many Requests", request=request, response=response
+                    )
+                return {"data": []}
+
+        monkeypatch.setattr(pool_data, "_gecko_client", lambda: Client())
+        monkeypatch.setattr(
+            pool_data, "_gecko_semaphore", asyncio.Semaphore(concurrency)
+        )
+        monkeypatch.setattr(pool_data, "_gecko_rate_lock", asyncio.Lock())
+        tasks = [
+            asyncio.create_task(pool_data.gecko_request("GET", str(i)))
+            for i in range(12)
+        ]
+        await entered.wait()
+        release.set()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        assert len(calls) == concurrency
+        assert isinstance(results[0], httpx.HTTPStatusError)
+        assert all(result == {"data": []} for result in results[1:concurrency])
+        assert all(
+            isinstance(result, pool_data.GeckoRateLimited)
+            for result in results[concurrency:]
+        )
+        health = pool_data.gecko_health()
+        assert health["requests_last_minute"] == concurrency
+        assert health["count_429"] == 1
+
+    run(drive())
+
+
 def test_a_timeout_is_retried(monkeypatch):
     """A slow chain listing is not a throttled one — that one is worth retrying."""
     import httpx

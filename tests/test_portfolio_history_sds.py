@@ -18,8 +18,13 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
-from condor.fetchers.portfolio import PORTFOLIO_HISTORY_RANGES, fetch_portfolio_history
+from condor.fetchers.portfolio import (
+    PORTFOLIO_HISTORY_LIST_KEYS,
+    PORTFOLIO_HISTORY_RANGES,
+    fetch_portfolio_history,
+)
 from condor.server_data_service import (
     _DEFAULTS,
     CacheKey,
@@ -71,7 +76,9 @@ class _FakePortfolio:
         self._client.history_calls.append(kwargs)
         if self._client.delay:
             await asyncio.sleep(self._client.delay)
-        return _HISTORY
+        if self._client.error:
+            raise self._client.error
+        return self._client.history
 
     async def get_state(self, **kwargs):
         self._client.state_calls.append(kwargs)
@@ -85,6 +92,8 @@ class FakeClient:
         self.history_calls: list[dict] = []
         self.state_calls: list[dict] = []
         self.delay = delay
+        self.history = _HISTORY
+        self.error = None
         self.portfolio = _FakePortfolio(self)
 
 
@@ -214,6 +223,123 @@ def test_per_range_ttls_survived_the_move():
     assert {
         rk: defaults.ttl_for({"range_key": rk}) for rk in PORTFOLIO_HISTORY_RANGES
     } == {"1D": 120, "1W": 600, "1M": 3600, "3M": 7200}
+
+
+@pytest.mark.parametrize("range_key", PORTFOLIO_HISTORY_RANGES)
+@pytest.mark.parametrize(
+    "empty_history",
+    [[], {}] + [{key: [], "pagination": {}} for key in PORTFOLIO_HISTORY_LIST_KEYS],
+)
+def test_empty_history_read_discovers_first_snapshot_after_a_minute(
+    env, range_key, empty_history
+):
+    sds, client = env()
+    client.history = empty_history
+
+    async def _drive():
+        first = await get_portfolio_history(name="srv", range=range_key, user=_USER)
+        assert first.points == []
+
+        client.history = _HISTORY
+        _age(sds, 59)
+        cached = await get_portfolio_history(name="srv", range=range_key, user=_USER)
+        assert cached.points == []
+        assert len(client.history_calls) == 1
+
+        _age(sds, 2)
+        populated = await get_portfolio_history(name="srv", range=range_key, user=_USER)
+        assert [p.total_usd for p in populated.points] == [150.0, 160.0]
+        assert len(client.history_calls) == 2
+
+        # The short retry is only for empty data. Once history arrives, the
+        # normal per-range TTL applies again, including the longer windows.
+        _age(sds, 61)
+        await get_portfolio_history(name="srv", range=range_key, user=_USER)
+        assert len(client.history_calls) == 2
+
+    asyncio.run(_drive())
+
+
+@pytest.mark.parametrize("range_key", PORTFOLIO_HISTORY_RANGES)
+def test_empty_history_poll_discovers_first_snapshot_after_a_minute(env, range_key):
+    sds, client = env()
+    client.history = {"data": [], "pagination": {"has_more": False}}
+
+    async def _drive():
+        await sds.subscribe(
+            "srv", ServerDataType.PORTFOLIO_HISTORY, "test", range_key=range_key
+        )
+        client.history = _HISTORY
+        _age(sds, 59)
+        await sds._poll_tick()
+        assert len(client.history_calls) == 1
+
+        _age(sds, 2)
+        await sds._poll_tick()
+        assert len(client.history_calls) == 2
+        assert sds.get("srv", ServerDataType.PORTFOLIO_HISTORY, range_key=range_key)
+
+        _age(sds, 61)
+        await sds._poll_tick()
+        assert len(client.history_calls) == 2
+
+    asyncio.run(_drive())
+
+
+@pytest.mark.parametrize("previous_history", [None, [], _HISTORY])
+def test_history_fetch_failure_returns_502_and_recovers(env, previous_history):
+    sds, client = env()
+
+    async def _drive():
+        if previous_history is not None:
+            client.history = previous_history
+            await get_portfolio_history(name="srv", range="1W", user=_USER)
+            _expire(sds)
+
+        client.error = RuntimeError("upstream at http://private-backend:8000 failed")
+        with pytest.raises(HTTPException) as exc:
+            await get_portfolio_history(name="srv", range="1W", user=_USER)
+        assert exc.value.status_code == 502
+        assert "temporarily unavailable" in exc.value.detail
+        assert "private-backend" not in exc.value.detail
+
+        entry = sds.get_entry("srv", ServerDataType.PORTFOLIO_HISTORY, range_key="1W")
+        assert entry.value == previous_history
+        assert entry.consecutive_errors == 1
+
+        client.error = None
+        client.history = _HISTORY
+        recovered = await get_portfolio_history(name="srv", range="1W", user=_USER)
+        assert [p.total_usd for p in recovered.points] == [150.0, 160.0]
+        assert (
+            sds.get_entry(
+                "srv", ServerDataType.PORTFOLIO_HISTORY, range_key="1W"
+            ).consecutive_errors
+            == 0
+        )
+
+    asyncio.run(_drive())
+
+
+def test_history_poll_failure_is_not_served_as_current_history(env):
+    sds, client = env()
+
+    async def _drive():
+        await sds.subscribe(
+            "srv", ServerDataType.PORTFOLIO_HISTORY, "test", range_key="1W"
+        )
+        client.error = RuntimeError("offline")
+        _expire(sds)
+        await sds._poll_tick()
+        with pytest.raises(HTTPException) as exc:
+            await get_portfolio_history(name="srv", range="1W", user=_USER)
+        assert exc.value.status_code == 502
+        assert (
+            sds.get_entry("srv", ServerDataType.PORTFOLIO_HISTORY, range_key="1W").value
+            == _HISTORY
+        )
+
+    asyncio.run(_drive())
 
 
 # ── the lifecycle ws_manager drives ──

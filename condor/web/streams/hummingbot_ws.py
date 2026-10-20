@@ -414,6 +414,7 @@ class HummingbotStreamsMixin:
                 )
 
                 sds = get_server_data_service()
+                revision = sds.get_revision(server_name, ServerDataType.EXECUTORS)
                 client = await cm.get_client(server_name)
                 all_raw: list[dict] = []
                 # Rows already through ExecutorInfo, accumulated page by page.
@@ -438,6 +439,10 @@ class HummingbotStreamsMixin:
                     first_page_size=FIRST_PAGE,
                     max_items=MAX_PREFETCH,
                 ):
+                    if revision != sds.get_revision(
+                        server_name, ServerDataType.EXECUTORS
+                    ):
+                        break
                     all_raw.extend(page)
                     transformed.extend(self._transform_executors(page))
 
@@ -457,7 +462,8 @@ class HummingbotStreamsMixin:
                     page_num += 1
 
                 # Cache in SDS so other consumers benefit
-                sds.put(server_name, ServerDataType.EXECUTORS, all_raw)
+                if revision == sds.get_revision(server_name, ServerDataType.EXECUTORS):
+                    sds.put(server_name, ServerDataType.EXECUTORS, all_raw)
             except asyncio.CancelledError:
                 return
             except Exception as e:

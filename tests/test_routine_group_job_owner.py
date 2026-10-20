@@ -78,7 +78,7 @@ def executed(monkeypatch):
 
     async def _execute(context, instance_id, routine_name, config_dict, chat_id, **kw):
         calls.append({"chat_id": chat_id, **kw})
-        return "ok", 1.5, None
+        return "ok", 1.5, None, False
 
     monkeypatch.setattr(hr, "_execute_routine", _execute)
     monkeypatch.setattr(hr, "get_routine", lambda name: _routine())

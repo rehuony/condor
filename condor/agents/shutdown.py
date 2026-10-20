@@ -192,12 +192,11 @@ async def _get_running_executors(engine: Any, client: Any) -> list[dict]:
 async def _fetch_positions(client: Any, agent_id: str) -> list[dict]:
     """Positions summary scoped to this session (``controller_id``).
 
-    Non-strict on purpose: ``run_shutdown`` never raises for an individual API
-    failure and ``_verify_and_retry`` calls this unguarded, so a failed request
-    is logged by the fetcher and reads as no positions.
+    An unavailable book is not an empty book. The caller reports a failed
+    verification without interrupting the rest of the shutdown teardown.
     """
     return await fetch_tracked_positions(
-        client, controller_id=agent_id or None, strict=False
+        client, controller_id=agent_id or None, strict=True
     )
 
 
@@ -325,7 +324,8 @@ async def _run_llm_cleanup(
 
         from .engine import _NullTracker, build_gated_client
 
-        # Independent reads, and each swallows its own failure.
+        # An unreadable position book aborts this optional pass. The final
+        # verification still runs and reports whether the book was readable.
         running, positions = await asyncio.gather(
             _get_running_executors(engine, client),
             _fetch_positions(client, engine.agent_id),
@@ -430,9 +430,20 @@ async def run_shutdown(engine: Any, reason: str) -> None:
     # LLM nuance pass on top of the guaranteed floor (best-effort, bounded).
     await _run_llm_cleanup(engine, client, policy, body, failures)
 
-    stranded = await _verify_and_retry(engine, client, policy)
+    verification_failed = False
+    try:
+        stranded = await _verify_and_retry(engine, client, policy)
+    except Exception:
+        log.exception("shutdown: could not verify positions for %s", agent_id)
+        stranded = []
+        verification_failed = True
 
-    if stranded:
+    if verification_failed:
+        msg = (
+            f"🚨 Agent {agent_id}: emergency shutdown could NOT verify positions — "
+            "positions may still be OPEN. Check the exchange manually!"
+        )
+    elif stranded:
         details = ", ".join(_describe_position(p) for p in stranded) or "unknown"
         msg = (
             f"🚨 Agent {agent_id}: emergency shutdown left {len(stranded)} position(s) "
@@ -450,13 +461,17 @@ async def run_shutdown(engine: Any, reason: str) -> None:
     await engine._notify(msg)
 
     if engine.journal:
-        verified = "flat" if not stranded else f"{len(stranded)} stranded"
+        verified = (
+            "unknown"
+            if verification_failed
+            else ("flat" if not stranded else f"{len(stranded)} stranded")
+        )
         # Both journal.md updates of this winddown go into one batch, so the file
         # is rewritten once instead of twice (PERF-136 idiom, PERF-173).
         with engine.journal.batch():
             engine.journal.append_action(
                 engine.journal.tick_count + 1,
-                "shutdown_done",
+                "shutdown_failed" if verification_failed else "shutdown_done",
                 f"stopped={stopped}, failures={len(failures)}, verify={verified}",
             )
             engine.journal.record_tick("shutdown: " + reason)

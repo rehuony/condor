@@ -266,14 +266,6 @@ class ConversationMeta(BaseModel):
     before a field was dropped — ``mode``, retired with the persona axis in
     FEAT-033 — still loads instead of failing the whole conversation list.
 
-    ``share_delete_token`` is the one field that is read from disk but never
-    serialized. It is a *capability*: whoever holds it can delete the shared
-    row from the collector, which is exactly why the owner keeps it and nobody
-    else receives it. Every route that returns a conversation dumps this model,
-    and one of them (``?user_id=``, admin only) returns someone else's — so a
-    plain field would hand an admin the token for a share that is not theirs to
-    revoke. ``exclude=True`` keeps it out of every dump; writes go through
-    ``update_meta``'s explicit kwargs, which are unaffected.
     """
 
     id: str
@@ -289,41 +281,6 @@ class ConversationMeta(BaseModel):
     updated_at: datetime = Field(default_factory=_utcnow)
     turn_count: int = 0
     last_snippet: str = ""
-
-    # ── Sharing (FEAT-054) ──
-    # Optional, defaulted, and tolerated in both directions like every other
-    # field here: a meta written before this existed loads unchanged, and one
-    # written by a newer build still loads in an older one.
-    share_id: str = Field(
-        default="",
-        description="Stable per conversation once shared; '' = never shared.",
-    )
-    share_revision: int = Field(
-        default=0, description="Bumped on each re-share; the server upserts on it."
-    )
-    shared_at: datetime | None = None
-    share_delete_token: str = Field(
-        default="",
-        exclude=True,
-        description="The capability that revokes the share. Local only.",
-    )
-
-    # ── Automatic sharing (FEAT-055) ──
-    share_excluded: bool = Field(
-        default=False,
-        description="The user took this one chat out of the sweep. Honoured forever.",
-    )
-    share_turn_count: int = Field(
-        default=0,
-        description="``turn_count`` at the last share; growth past it re-shares.",
-    )
-    multi_author: bool = Field(
-        default=False,
-        description=(
-            "Another human can speak in the room this was born in — a Telegram "
-            "group. The sweep never takes one: a user consents for themselves."
-        ),
-    )
 
     # ── Reflection (FEAT-073) ──
     # The marker is the *attempt*, not the success: a conversation whose answer
@@ -355,11 +312,7 @@ class TurnEntry(BaseModel):
     written before a field existed still parses, and unknown keys are ignored,
     so a line written by a newer build still loads here. Anything added later
     must keep both halves of that bargain — optional, with a default that reads
-    as "not recorded" rather than as a real value. That default is also what
-    makes the shape safe to grow: ``condor.sharing.scrub`` reads its redaction
-    coverage off these fields rather than naming them, so a text field added
-    here is scrubbed the day it is added, and one whose type the scrubber cannot
-    walk is dropped to its default instead of being shared raw.
+    as "not recorded" rather than as a real value.
 
     The attribution fields say which brain produced the turn. They live on the
     turn rather than only on ``ConversationMeta`` because the meta is
@@ -380,8 +333,8 @@ class TurnEntry(BaseModel):
     again and calls a second one lands in those two fields as one merged
     reasoning blob beside a flat list, and no reader can put the four steps
     back. It is additive and derived — the two flat fields are still written
-    in full — so every existing reader (``replay_context``, ``condor.sharing``,
-    Telegram, an older client) is untouched, and a turn recorded before this
+    in full — so existing readers (``replay_context``, Telegram, an older
+    client) are untouched, and a turn recorded before this
     existed simply has an empty list, which reads as "the order was not kept"
     rather than as "nothing happened".
     """
@@ -389,6 +342,9 @@ class TurnEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     role: str = Field(description="user | assistant | system")
+    request_id: str = Field(
+        default="", description="Identity linking an accepted input to its result."
+    )
     text: str = ""
     thought: str = ""
     tool_calls: list[dict] = Field(
@@ -398,7 +354,7 @@ class TurnEntry(BaseModel):
     kind: str = Field(
         default="",
         description=(
-            "System entries only: switch | error | delegation | resume | "
+            "System entries only: switch | error | access_denied | delegation | resume | "
             "notification."
         ),
     )
@@ -413,7 +369,7 @@ class TurnEntry(BaseModel):
     attachments: list[dict] = Field(
         default_factory=list,
         description=(
-            "User turns: what was handed over with the words. Per element "
+            "Images received or delivered with this turn. Per element "
             "{id, mime, bytes} — an id under this conversation's attachments/ "
             "directory, its type, and its size. Never the payload and never a "
             "filename."
@@ -460,17 +416,8 @@ def new_conversation(
     agent_key: str = "",
     agent_slug: str = "",
     server_name: str | None = None,
-    multi_author: bool = False,
 ) -> ConversationMeta:
-    """Mint an empty conversation and persist its meta.
-
-    ``multi_author`` is recorded at birth because that is the only moment the
-    fact is known: a turn carries which *brain* produced it but not which human
-    typed it, and the recorder is built from the session's owner, so by the time
-    a second person's words are on disk they are indistinguishable from the
-    owner's. The caller who provisioned the session knows whether the room admits
-    anyone else, and says so here (FEAT-055).
-    """
+    """Mint an empty conversation and persist its meta."""
     now = _utcnow()
     meta = ConversationMeta(
         id=uuid.uuid4().hex[:12],
@@ -481,7 +428,6 @@ def new_conversation(
         server_name=server_name,
         created_at=now,
         updated_at=now,
-        multi_author=bool(multi_author),
     )
     write_status(_conv_dir(user_id, meta.id), META_FILENAME, **_meta_fields(meta))
     return meta
@@ -533,7 +479,7 @@ def list_conversations(
     ``updated_at`` order are the same order; the result is still sorted on
     ``updated_at`` so the contract does not lean on the filesystem's clock.
 
-    ``limit=0`` walks everything, which the sharing sweep and reflection need.
+    ``limit=0`` walks everything, which background reflection needs.
     Reads only ``meta.json`` per directory. One without a readable meta (hand
     deleted, half written) is skipped rather than failing the whole listing.
 
@@ -700,10 +646,13 @@ def read_transcript(
     ]
 
 
-def append_turn(user_id: int, conv_id: str, entry: TurnEntry) -> None:
+def append_turn(
+    user_id: int, conv_id: str, entry: TurnEntry, *, durable: bool = False
+) -> None:
     """Append one turn and touch the conversation's meta.
 
-    Never raises: losing a transcript line must not take down a live prompt.
+    Accepted inputs use ``durable=True`` and fail closed on a write error.
+    Output recording is best effort so it cannot take down a live prompt.
     """
     conv_dir = _conv_dir(user_id, conv_id)
     try:
@@ -712,7 +661,12 @@ def append_turn(user_id: int, conv_id: str, entry: TurnEntry) -> None:
             fh.write(
                 json.dumps(entry.model_dump(mode="json"), ensure_ascii=False) + "\n"
             )
+            if durable:
+                fh.flush()
+                os.fsync(fh.fileno())
     except OSError:
+        if durable:
+            raise
         log.warning("Could not append turn to %s", conv_dir, exc_info=True)
         return
 
@@ -880,20 +834,36 @@ def delete_conversation(user_id: int, conv_id: str) -> bool:
 # ── Replay ──
 
 
-def _render_turn(turn: TurnEntry) -> str:
+def _render_turn(turn: TurnEntry, conv_id: str) -> str:
     """One transcript line as the resumed agent will read it.
 
     Tool calls become "→ used X" rather than their results: the point is
     continuity of the conversation, not replaying outputs that are stale by
     now. An agent that reads a stale result will treat it as current.
-    """
-    if turn.role == "system":
-        body = turn.text.strip()
-        return f"({body})" if body else ""
 
+    Attachments keep their conversation-scoped references, not their pixels.
+    This preserves image-only events without claiming the resumed model has
+    seen the image or that a recorded notification reached Telegram.
+    """
     parts: list[str] = []
     if turn.text.strip():
         parts.append(turn.text.strip())
+    for attachment in turn.attachments:
+        att_id = attachment.get("id")
+        if not isinstance(att_id, str):
+            continue
+        try:
+            att_id = paths.safe_id(att_id)
+        except paths.UnsafeIdError:
+            continue
+        parts.append(
+            f"Image attachment recorded: conversation={conv_id}, attachment={att_id} "
+            "(content not included in replay)"
+        )
+    if turn.role == "system":
+        body = "\n".join(parts)
+        return f"({body})" if body else ""
+
     for call in turn.tool_calls:
         title = str((call or {}).get("title") or "").strip()
         if title:
@@ -907,7 +877,11 @@ def _render_turn(turn: TurnEntry) -> str:
 
 
 def replay_context(
-    user_id: int, conv_id: str, *, max_chars: int = REPLAY_MAX_CHARS
+    user_id: int,
+    conv_id: str,
+    *,
+    max_chars: int = REPLAY_MAX_CHARS,
+    exclude_request_ids: set[str] | None = None,
 ) -> str:
     """The tail of a conversation, framed for the next session's opening context.
 
@@ -942,8 +916,16 @@ def replay_context(
     used = 0
     omitted = False
     newest = ""
+    excluded = set(exclude_request_ids or ())
     for turn in chain([newest_turn], turns):
-        rendered = _render_turn(turn)
+        # Walk results before inputs. A refused queued request remains visible
+        # in the audit transcript, but must never become an unseen instruction
+        # when another turn or a restored session replays completed history.
+        if turn.kind == "access_denied" and turn.role == "system" and turn.request_id:
+            excluded.add(turn.request_id)
+        if turn.request_id in excluded:
+            continue
+        rendered = _render_turn(turn, conv_id)
         if not rendered:
             continue
         if not newest:
@@ -972,13 +954,31 @@ def replay_context(
 # ── Recorder ──
 
 
+def has_request(user_id: int, request_id: str) -> bool:
+    """An accepted transport message is never executed again, even after restart.
+
+    Search this owner's retained transcripts, including archived turns and
+    conversations other than the one currently selected in Telegram.
+    """
+    for directory in paths.conversations_dir(user_id).glob("*"):
+        if not directory.is_dir():
+            continue
+        for name in (TRANSCRIPT_FILENAME, TRANSCRIPT_ARCHIVE_FILENAME):
+            if any(
+                t.request_id == request_id
+                for t in _iter_turns_reverse(directory / name)
+            ):
+                return True
+    return False
+
+
 class Recorder:
     """Accumulates one turn's events in memory and writes it once.
 
     Wrapped around ``client.prompt()``, so every surface — Telegram, the
-    dashboard, MCP — is recorded by one piece of code. Exactly **two** appends
-    per turn (the user line and the assistant line); a per-chunk write would
-    put file IO on the token hot path.
+    dashboard, MCP — is recorded by one piece of code. ``accept()`` persists
+    the input before generation. Output accumulates in memory until flush;
+    a per-chunk write would put file IO on the token hot path.
 
     Flushing happens in the caller's ``finally``, not on ``DONE``. The
     dashboard abandons that generator constantly (page reload, ``abort_prompt``
@@ -998,11 +998,15 @@ class Recorder:
         agent_slug: str = "",
         user_kind: str = "",
         attachments: list[dict] | None = None,
+        request_id: str = "",
     ):
         self.enabled = bool(conv_id) and user_id is not None
         self.user_id = user_id
         self.conv_id = conv_id
         self._user_text = user_text
+        self.request_id = request_id
+        self._accepted = False
+        self.written_turns = 0
         # A turn nobody typed (a background task waking the chat, FEAT-034) is
         # recorded as a system entry of this kind. Recording it as ``user``
         # would put words in the user's mouth, and ``_render_turn`` would then
@@ -1040,6 +1044,31 @@ class Recorder:
         self._flushed = False
         if self.enabled:
             _live_recorders.add(self)
+
+    def accept(self) -> None:
+        """Persist the input before any model or delivery await. Fail closed on IO errors."""
+        if not self.enabled or self._accepted:
+            return
+        try:
+            append_turn(self.user_id, self.conv_id, self._opening(), durable=True)
+        except Exception:
+            _live_recorders.discard(self)
+            raise
+        self.written_turns += 1
+        self._accepted = True
+
+    def bind_agent(self, agent_key: str, agent_slug: str) -> None:
+        self._agent_key = agent_key
+        self._agent_slug = agent_slug
+
+    def _opening(self) -> TurnEntry:
+        return TurnEntry(
+            role="system" if self._user_kind else "user",
+            text=self._user_text,
+            kind=self._user_kind,
+            attachments=self._attachments,
+            request_id=self.request_id,
+        )
 
     def observe(self, event) -> None:
         """Accumulate one ``RuntimeEvent``. Never writes.
@@ -1195,7 +1224,7 @@ class Recorder:
         }
 
     def flush(self) -> None:
-        """Write the user turn and the accumulated assistant turn. Idempotent.
+        """Write accumulated output and any unaccepted input. Idempotent.
 
         Synchronous on purpose: it runs from a ``finally`` that may be executing
         under ``GeneratorExit``, where awaiting is not allowed.
@@ -1206,16 +1235,7 @@ class Recorder:
         _live_recorders.discard(self)
 
         try:
-            opening = (
-                TurnEntry(role="system", text=self._user_text, kind=self._user_kind)
-                if self._user_kind
-                else TurnEntry(
-                    role="user",
-                    text=self._user_text,
-                    attachments=self._attachments,
-                )
-            )
-            entries = [opening]
+            entries = [] if self._accepted else [self._opening()]
             text = "".join(self._text)
             tools = self._recorded_calls()
             if text or tools or self._thought:
@@ -1227,27 +1247,62 @@ class Recorder:
                         tool_calls=tools,
                         events=self._recorded_events(tools),
                         stop_reason=self._stop,
+                        request_id=self.request_id,
                         **self._attribution(),
                     )
                 )
             elif self._error:
-                entries.append(TurnEntry(role="system", text=self._error, kind="error"))
+                entries.append(
+                    TurnEntry(
+                        role="system",
+                        text=self._error,
+                        kind=(
+                            "access_denied"
+                            if self._stop == "access_denied"
+                            else "error"
+                        ),
+                        request_id=self.request_id,
+                    )
+                )
             # On the *last* entry written — the answer, else the error, else the
             # opening line — so a turn that failed or never answered still adds
             # what it spent to the conversation's total.
             if not self._usage.is_zero():
+                if not entries:
+                    entries.append(
+                        TurnEntry(
+                            role="system", kind="usage", request_id=self.request_id
+                        )
+                    )
                 entries[-1].usage = self._usage.to_dict()
             for entry in entries:
                 append_turn(self.user_id, self.conv_id, entry)
+                self.written_turns += 1
         except Exception:  # noqa: BLE001 - recording must not break a prompt
             log.warning("Could not record turn for %s", self.conv_id, exc_info=True)
 
 
-def record_system(user_id: int | None, conv_id: str, text: str, kind: str = "") -> None:
+def record_system(
+    user_id: int | None,
+    conv_id: str,
+    text: str,
+    kind: str = "",
+    *,
+    attachments: list[dict] | None = None,
+    durable: bool = False,
+) -> None:
     """Note a non-conversational event in the transcript (e.g. an agent switch)."""
     if not conv_id or user_id is None:
         return
-    append_turn(user_id, conv_id, TurnEntry(role="system", text=text, kind=kind))
+    append_turn(
+        user_id,
+        conv_id,
+        TurnEntry(role="system", text=text, kind=kind, attachments=attachments or []),
+        durable=durable,
+    )
+    from condor.runtime import turns
+
+    turns.publish(user_id, conv_id, "", "completed")
 
 
 def flush_all() -> None:

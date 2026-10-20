@@ -1,6 +1,6 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Element, ElementContent } from "hast";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   Copy,
   CornerDownLeft,
   CornerDownRight,
+  FileText,
   Loader2,
   RotateCw,
   ShieldAlert,
@@ -23,11 +24,16 @@ import { useAuthedImage } from "@/hooks/useAuthedImage";
 import { agentColor } from "@/lib/agentColor";
 import { copyText } from "@/lib/clipboard";
 import { splitStreamedMarkdown } from "@/lib/markdownStream";
+import { researchLink } from "@/lib/research-links";
 import { ChartSlot, ChartSlotHost } from "./ChartSlots";
 import { RunStrip } from "./ToolCallStatus";
 
 /** One array, so the plugin list is never a fresh prop on a streamed frame. */
 const GFM = [remarkGfm];
+
+function markdownUrl(url: string) {
+  return researchLink(url)?.href ?? defaultUrlTransform(url);
+}
 
 /** Flatten a rendered subtree back into the source text it was parsed from. */
 function nodeText(children: ReactNode): string {
@@ -119,6 +125,18 @@ function numericColumns(node?: Element): string | undefined {
  */
 function markdownComponents(live: boolean): Components {
   return {
+    a({ href = "", children, title }) {
+      const file = researchLink(href);
+      if (!file) return <a href={href} title={title}>{children}</a>;
+      // Old transcripts sometimes use the entire local path as the label too.
+      const label = researchLink(nodeText(children)) ? file.path.split("/").pop() : children;
+      return (
+        <a href={file.href} target="_blank" rel="noopener noreferrer" title={`Preview ${file.path}`}>
+          <FileText aria-hidden="true" className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" />
+          {label}
+        </a>
+      );
+    },
     pre({ children, ...props }) {
       const child = Array.isArray(children) ? children[0] : children;
       if (isValidElement<{ className?: string; children?: ReactNode }>(child)) {
@@ -153,7 +171,7 @@ const STATIC_COMPONENTS = markdownComponents(false);
  */
 const FrozenMarkdown = memo(function FrozenMarkdown({ text }: { text: string }) {
   return (
-    <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS}>
+    <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS} urlTransform={markdownUrl}>
       {text}
     </ReactMarkdown>
   );
@@ -188,7 +206,7 @@ function StreamedMarkdown({ text }: { text: string }) {
         <FrozenMarkdown key={i} text={chunk} />
       ))}
       {tail && (
-        <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS}>
+        <ReactMarkdown remarkPlugins={GFM} components={LIVE_COMPONENTS} urlTransform={markdownUrl}>
           {tail}
         </ReactMarkdown>
       )}
@@ -285,29 +303,39 @@ const NOTE_KINDS: Record<string, { label: string; Icon: typeof Zap }> = {
 };
 
 /**
- * One picture the user handed over, in the bubble that sent it.
+ * One picture attached to a user turn, an answer, or a delivery receipt.
  *
  * A locally previewed attachment is already an object URL for bytes in this tab
  * and is rendered straight; a hydrated one names a bearer-guarded route, which
  * has to be *fetched* — an `<img src>` cannot carry an `Authorization` header.
- * While those bytes are on the way there is a placeholder to stand in for them;
- * a picture that cannot be read leaves nothing behind at all, rather than a
- * broken-image glyph or an empty frame that never fills.
+ * Loading and unavailable pictures stay visible, including image-only turns.
  */
-function Attachment({ attachment }: { attachment: ChatAttachment }) {
+function Attachment({ attachment, user = false }: { attachment: ChatAttachment; user?: boolean }) {
   const fetched = useAuthedImage(attachment.local ? null : attachment.url);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const src = attachment.local ? attachment.url : fetched.src;
-  if (fetched.status === "error") return null;
+  if (fetched.status === "error" || (src && failedSrc === src)) {
+    return (
+      <p role="status" className="px-2 py-2 text-sm">
+        Image unavailable. Reload this page to try again.
+      </p>
+    );
+  }
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--on-primary)]/20 bg-black/10">
+    <div className={`max-w-full overflow-hidden rounded-lg border ${user ? "border-[var(--on-primary)]/20 bg-black/10" : "border-[var(--color-border)] bg-[var(--color-surface)]"}`}>
       {src ? (
         <img
           src={src}
           alt="Attached image"
-          className="max-h-64 w-auto max-w-full object-contain"
+          onError={() => setFailedSrc(src)}
+          className={`w-auto max-w-full object-contain ${user ? "max-h-64" : "max-h-[32rem]"}`}
         />
       ) : (
-        <div className="h-24 w-32 animate-pulse bg-[var(--on-primary)]/10" />
+        <div
+          role="status"
+          aria-label="Loading image"
+          className={`h-24 w-32 animate-pulse motion-reduce:animate-none ${user ? "bg-[var(--on-primary)]/10" : "bg-[var(--color-border)]/30"}`}
+        />
       )}
     </div>
   );
@@ -350,7 +378,7 @@ export const ChatMessageView = memo(function ChatMessageView({
           </div>
         </div>
         <div className="chat-markdown text-sm text-[var(--color-text-muted)]">
-          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS}>
+          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS} urlTransform={markdownUrl}>
             {message.text}
           </ReactMarkdown>
         </div>
@@ -388,8 +416,15 @@ export const ChatMessageView = memo(function ChatMessageView({
             <TurnActions ts={message.ts} text={message.text} />
           </div>
         </div>
+        {!!message.attachments?.length && (
+          <div className={`flex flex-wrap gap-2 ${message.text ? "mb-2" : ""}`}>
+            {message.attachments.map((attachment) => (
+              <Attachment key={attachment.url} attachment={attachment} />
+            ))}
+          </div>
+        )}
         <div className="chat-markdown text-sm text-[var(--color-text-muted)]">
-          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS}>
+          <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS} urlTransform={markdownUrl}>
             {message.text}
           </ReactMarkdown>
         </div>
@@ -427,7 +462,7 @@ export const ChatMessageView = memo(function ChatMessageView({
               className={`flex flex-wrap justify-end gap-1.5 ${message.text ? "mb-2" : ""}`}
             >
               {message.attachments.map((attachment) => (
-                <Attachment key={attachment.url} attachment={attachment} />
+                <Attachment key={attachment.url} attachment={attachment} user />
               ))}
             </div>
           )}
@@ -473,6 +508,13 @@ export const ChatMessageView = memo(function ChatMessageView({
         live={live}
         thinking={live && !message.text}
       />
+      {!!message.attachments?.length && (
+        <div className={`flex flex-wrap gap-2 ${message.text ? "mb-2" : ""}`}>
+          {message.attachments.map((attachment) => (
+            <Attachment key={attachment.url} attachment={attachment} />
+          ))}
+        </div>
+      )}
       {message.text && (
         /* Every chart in the answer is owned here, above the swap below, so
            that the swap cannot destroy one (PERF-328). */
@@ -485,14 +527,14 @@ export const ChatMessageView = memo(function ChatMessageView({
             {live ? (
               <StreamedMarkdown text={message.text} />
             ) : (
-              <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS}>
+              <ReactMarkdown remarkPlugins={GFM} components={STATIC_COMPONENTS} urlTransform={markdownUrl}>
                 {message.text}
               </ReactMarkdown>
             )}
           </div>
         </ChartSlotHost>
       )}
-      {!message.text && message.toolCalls.length === 0 && !message.thought && (
+      {!message.text && !message.attachments?.length && message.toolCalls.length === 0 && !message.thought && (
         <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
           {/* The turn exists before anything is in it. While it is live that
               gap is the agent working, so it spins like the run strip does; a

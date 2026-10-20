@@ -129,6 +129,11 @@ class PromptRequest(BaseModel):
     """One user turn sent to a session."""
 
     text: str
+    request_id: str = Field(
+        default="",
+        max_length=160,
+        description="Transport message identity used to suppress duplicate execution.",
+    )
     images: list[PromptImage] = Field(
         default_factory=list,
         description=(

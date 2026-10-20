@@ -64,27 +64,41 @@ _WEB_FORMATTING = (
     "- No message length limits, but stay concise.\n"
     "- Use tables for structured data (portfolios, prices, comparisons).\n"
     "- Use code blocks for configs, JSON, or commands.\n"
-    "- CHARTS: when the answer is a numeric series or comparison (a price or\n"
-    "  PnL curve, volume per venue, a distribution), draw it with a ```chart\n"
-    "  fence holding one JSON object. The dashboard renders it as an\n"
-    "  interactive chart:\n"
+    "- Link research as [Report title](/research/<path relative to .condor/research/>).\n"
+    "  Use descriptive labels, never local filesystem paths.\n"
+    "- CHARTS: use a ```chart fence for a useful numeric series or comparison:\n"
     "  ```chart\n"
-    '  {"type": "line", "title": "SOL/USDC 24h", "x": "time",\n'
-    '   "series": [{"key": "price", "name": "Price"}],\n'
-    '   "data": [{"time": "12:00", "price": 150.1}, {"time": "16:00", "price": 152.4}]}\n'
+    '  {"type": "line", "title": "Example", "x": "time",\n'
+    '   "series": [{"key": "value", "name": "Value"}],\n'
+    '   "data": [{"time": "12:00", "value": 10}, {"time": "16:00", "value": 12}]}\n'
     "  ```\n"
     '  "type" is "line", "area" or "bar"; "x" and every series "key" name\n'
     "  fields of the data rows. Max 4 series and 200 points (downsample longer\n"
     '  series). A series may set "color": "up", "down", "yellow" or a hex.\n'
     "  Chart for the shape, table for exact values; use both when both matter.\n"
+    "- For images or charts beyond those limits, read the charting skill. Send a\n"
+    "  local PNG/JPEG with send_notification(image_path=..., text=...); text is\n"
+    "  optional and file access requires admin or code_run permission. Check\n"
+    "  image_recorded for conversation storage and image_sent for Telegram;\n"
+    "  Local mode does not send to Telegram. A saved file or report is not delivery.\n"
+    "  Report partial or unknown delivery; do not blindly resend.\n"
     "- Respond in the user's language."
 )
 
 _TELEGRAM_FORMATTING = (
     "FORMATTING (Telegram mobile):\n"
-    "- NEVER use Markdown tables. Use bullet lists or key: value lines.\n"
-    "- Keep paragraphs short (2-3 sentences max).\n"
-    "- Cap lists at 5-7 items.\n"
+    "- Lead with the conclusion and essential evidence or next steps. Use short\n"
+    "  paragraphs, concise lists, bold labels and descriptive source links.\n"
+    "  Use bullets or key: value lines instead of Markdown tables.\n"
+    "- Make the final answer self-contained; omit repeated progress and tool logs.\n"
+    "  Preserve material figures, timestamps and risks. Delivery splits long answers.\n"
+    "- For images, read the charting skill and call send_notification with a local\n"
+    "  PNG/JPEG image_path and optional text. File access requires admin or code_run\n"
+    "  permission. A file, report or Markdown image does not upload a photo;\n"
+    "  dashboard chart fences do not render here.\n"
+    "- Check image_sent for Telegram, image_recorded for conversation storage,\n"
+    "  and sent for overall delivery. Report partial or unknown delivery; do not\n"
+    "  blindly resend after a timeout, as content may already have arrived.\n"
     "- Respond in the user's language."
 )
 

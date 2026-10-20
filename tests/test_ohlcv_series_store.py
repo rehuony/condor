@@ -348,3 +348,155 @@ def test_a_contiguous_walk_back_still_costs_one_request_per_page(monkeypatch):
     assert len(calls) == 2, f"one request per page and not one more: {calls}"
     assert calls[0][1] is None and calls[1][1] is not None, "the second walks back"
     _assert_window(rows, inside, 400)
+
+
+def test_four_history_pages_are_complete_even_when_cache_evicts_them(monkeypatch):
+    gecko = _Gecko(total=6000)
+
+    async def scenario():
+        monkeypatch.setattr(pool_data, "gecko_call", gecko)
+        end = int(gecko.rows[-1][0])
+        pages = []
+        for _ in range(4):
+            start = end // MINUTE * MINUTE - 999 * MINUTE
+            rows, error = await pool_data.fetch_ohlcv(
+                POOL,
+                NET,
+                timeframe="1m",
+                limit=1000,
+                before_timestamp=end + 1,
+                requested_start=start,
+                strict=True,
+            )
+            assert error is None
+            assert [row[0] for row in rows] == list(range(start, end + 1, MINUTE))
+            pages.extend(rows)
+            end = start - 1
+        return pages
+
+    pages = run(scenario())
+    assert len(pages) == len({row[0] for row in pages}) == 4000
+    assert len(gecko.calls) == 4
+    assert len(next(iter(pool_data._ohlcv_series.values())).rows) <= 2100
+
+
+def test_gappy_history_cache_only_claims_the_requested_window(monkeypatch):
+    gecko = _Gecko(total=6000)
+    # The provider can return a short page because no trades happened in most
+    # buckets, or because older data lies beyond its per-request history span.
+    newest = int(gecko.rows[-1][0])
+    gecko.rows = [gecko.rows[-1]]
+
+    async def scenario():
+        monkeypatch.setattr(pool_data, "gecko_call", gecko)
+        rows, error = await pool_data.fetch_ohlcv(
+            POOL,
+            NET,
+            timeframe="1m",
+            limit=1000,
+            before_timestamp=newest + 1,
+            requested_start=newest - 999 * MINUTE,
+            strict=True,
+        )
+        assert error is None and len(rows) == 1
+        series = next(iter(pool_data._ohlcv_series.values()))
+        assert series.covered_from == newest - 999 * MINUTE
+        await pool_data.fetch_ohlcv(
+            POOL,
+            NET,
+            timeframe="1m",
+            limit=1000,
+            before_timestamp=newest - 999 * MINUTE,
+            requested_start=newest - 1999 * MINUTE,
+            strict=True,
+        )
+        return gecko.calls
+
+    assert len(run(scenario())) == 2, "a short page must not suppress earlier requests"
+
+
+def test_cache_hits_filter_both_bounds_and_keep_gecko_end_exclusive(monkeypatch):
+    gecko = _Gecko(total=100)
+    newest = int(gecko.rows[-1][0])
+
+    async def scenario():
+        monkeypatch.setattr(pool_data, "gecko_call", gecko)
+        await pool_data.fetch_ohlcv(POOL, NET, timeframe="1m", limit=100)
+        start, end = newest - 10 * MINUTE, newest - MINUTE
+        rows, error = await pool_data.fetch_ohlcv(
+            POOL,
+            NET,
+            timeframe="1m",
+            limit=1000,
+            before_timestamp=end + 1,
+            requested_start=start,
+            strict=True,
+        )
+        assert error is None
+        assert [row[0] for row in rows] == list(range(start, end + 1, MINUTE))
+
+    run(scenario())
+    assert len(gecko.calls) == 1
+
+
+def test_bounded_page_fills_both_sides_of_a_partial_cached_window(monkeypatch):
+    gecko = _Gecko(total=6000)
+    newest = int(gecko.rows[-1][0])
+    start = newest - 999 * MINUTE
+
+    async def scenario():
+        monkeypatch.setattr(pool_data, "gecko_call", gecko)
+        # A previous request retained only the middle of the desired page.
+        series = pool_data._get_series(("solana", POOL, "1m", "usd", "base"))
+        middle = [
+            row
+            for row in gecko.rows
+            if start + 500 * MINUTE <= row[0] <= start + 600 * MINUTE
+        ]
+        series.rows = {row[0]: row for row in middle}
+        series.covered_from = middle[0][0]
+        series.covered_to = middle[-1][0]
+        rows, error = await pool_data.fetch_ohlcv(
+            POOL,
+            NET,
+            timeframe="1m",
+            limit=1000,
+            before_timestamp=newest + 1,
+            requested_start=start,
+            strict=True,
+        )
+        assert error is None
+        assert [row[0] for row in rows] == list(range(start, newest + 1, MINUTE))
+
+    run(scenario())
+    assert gecko.calls == [(1000, newest + 1)]
+
+
+def test_bounded_page_fetches_new_tail_even_while_live_cache_is_fresh(monkeypatch):
+    old = 1_700_000_040
+    now = [old + 1]
+    gecko = _Gecko(total=1200, now=old)
+
+    async def scenario():
+        monkeypatch.setattr(pool_data.time, "time", lambda: now[0])
+        monkeypatch.setattr(pool_data, "gecko_call", gecko)
+        await pool_data.fetch_ohlcv(POOL, NET, timeframe="1m", limit=1000)
+        # A new bar arrives before the five-minute live cache TTL expires.
+        now[0] += MINUTE
+        newest = old + MINUTE
+        gecko.rows.append([float(newest), 1.0, 2.0, 0.5, 1.5, 10.0])
+        start = newest - 999 * MINUTE
+        rows, error = await pool_data.fetch_ohlcv(
+            POOL,
+            NET,
+            timeframe="1m",
+            limit=1000,
+            before_timestamp=now[0] + 1,
+            requested_start=start,
+            strict=True,
+        )
+        assert error is None
+        assert [row[0] for row in rows] == list(range(start, newest + 1, MINUTE))
+
+    run(scenario())
+    assert len(gecko.calls) == 2

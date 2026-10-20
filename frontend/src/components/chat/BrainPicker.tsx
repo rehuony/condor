@@ -273,7 +273,6 @@ export function BrainMenuBody({
       <div className="sticky top-0 flex items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5">
         <Search className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
         <input
-          autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search models..."

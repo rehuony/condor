@@ -1,6 +1,7 @@
 import { Check, CheckCircle, Copy, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import { copyText } from "@/lib/clipboard";
 
 interface ExecutorSuccessModalProps {
@@ -39,8 +40,8 @@ export function ExecutorSuccessModal({
   }, [copied]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="relative w-[360px] rounded-xl border border-[var(--color-green)]/30 bg-[var(--color-surface)] p-6 shadow-2xl shadow-black/40 animate-in fade-in zoom-in-95 duration-200">
+    <div className={`${DIALOG_BACKDROP} z-50`}>
+      <div className={`${DIALOG_PANEL} relative max-w-[360px] bg-[var(--color-surface)] p-6`}>
         {/* Close button */}
         <button
           onClick={onClose}

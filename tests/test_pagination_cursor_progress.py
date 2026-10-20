@@ -74,6 +74,9 @@ class _FakeSDS:
     def get(self, server_name, data_type):
         return []
 
+    def get_revision(self, server_name, data_type):
+        return 0
+
     def put(self, server_name, data_type, value):
         self.puts.append(value)
 

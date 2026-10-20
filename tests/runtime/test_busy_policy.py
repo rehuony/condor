@@ -142,12 +142,29 @@ def test_two_queued_prompts_are_answered_in_the_order_they_were_sent(registry):
 
     assert client.finished == ["first", "second", "third"]
     # The one that ran immediately was never queued...
-    assert _types(first) == [EventType.TEXT, EventType.DONE]
+    assert _types(first) == [
+        EventType.ACCEPTED,
+        EventType.HEARTBEAT,
+        EventType.TEXT,
+        EventType.DONE,
+    ]
     # ...and the ones that waited said so before blocking.
-    assert _types(second) == [EventType.QUEUED, EventType.TEXT, EventType.DONE]
-    assert _types(third) == [EventType.QUEUED, EventType.TEXT, EventType.DONE]
-    assert second[1].text == "answering second"
-    assert third[1].text == "answering third"
+    assert _types(second) == [
+        EventType.ACCEPTED,
+        EventType.QUEUED,
+        EventType.HEARTBEAT,
+        EventType.TEXT,
+        EventType.DONE,
+    ]
+    assert _types(third) == [
+        EventType.ACCEPTED,
+        EventType.QUEUED,
+        EventType.HEARTBEAT,
+        EventType.TEXT,
+        EventType.DONE,
+    ]
+    assert second[3].text == "answering second"
+    assert third[3].text == "answering third"
 
 
 def test_a_queued_message_does_not_trip_the_stuck_prompt_timeout(registry, monkeypatch):
@@ -198,8 +215,8 @@ def test_reject_is_the_default_and_keeps_the_stuck_prompt_deadline(
 
     client, events = asyncio.run(scenario())
 
-    assert _types(events) == [EventType.ERROR, EventType.DONE]
-    assert "not responding" in events[0].field("message")
+    assert _types(events) == [EventType.ACCEPTED, EventType.ERROR, EventType.DONE]
+    assert "not responding" in events[1].field("message")
     # Nothing was steered aside on the caller's behalf.
     assert client.aborts == 0
     assert client.finished == ["first"]
@@ -232,7 +249,13 @@ def test_steer_stops_the_turn_ahead_and_takes_over(registry):
     # ...and the new turn went to the *same* session, so the agent keeps
     # everything the interrupted one had worked out.
     assert client.prompts == ["first", "second"]
-    assert _types(second) == [EventType.QUEUED, EventType.TEXT, EventType.DONE]
+    assert _types(second) == [
+        EventType.ACCEPTED,
+        EventType.QUEUED,
+        EventType.HEARTBEAT,
+        EventType.TEXT,
+        EventType.DONE,
+    ]
 
 
 def test_steer_denies_the_confirmation_the_abandoned_turn_was_holding(

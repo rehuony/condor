@@ -16,7 +16,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from telegram import Update
-from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from handlers import clear_all_input_states
 from utils.auth import hummingbot_api_required, restricted
@@ -536,65 +536,66 @@ async def bots_callback_handler(
 # ============================================
 
 
+async def _process_progressive_text(update, context, _text: str) -> None:
+    """Adapt the progressive flow, which reads its text from the update."""
+    await handle_deploy_progressive_input(update, context)
+
+
+_TEXT_INPUT_HANDLERS = {
+    "ctrl_bulk_edit": process_controller_field_input,
+    "deploy_progressive": _process_progressive_text,
+    "deploy_custom_name": process_deploy_custom_name_input,
+    "deploy_edit_name": process_instance_name_input,
+    "gs_wizard_input": process_gs_wizard_input,
+    "pmm_wizard_input": process_pmm_wizard_input,
+    "pv1_wizard_input": process_pv1_wizard_input,
+    "cfg_bulk_edit": process_cfg_edit_input,
+}
+_TEXT_INPUT_PREFIX_HANDLERS = {
+    "set_field:": process_field_input,
+    "ctrl_set:": process_controller_field_input,
+    "deploy_set:": process_deploy_field_input,
+    "cfg_edit_input:": process_cfg_edit_input,
+}
+
+
+def get_text_input_handler(state: str | None):
+    """Select an actual text processor; menu-only states do not consume input."""
+    if not state:
+        return None
+    if state in _TEXT_INPUT_HANDLERS:
+        return _TEXT_INPUT_HANDLERS[state]
+    return next(
+        (
+            handler
+            for prefix, handler in _TEXT_INPUT_PREFIX_HANDLERS.items()
+            if state.startswith(prefix)
+        ),
+        None,
+    )
+
+
 @restricted
 async def bots_message_handler(
     update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Handle user text input - Routes to appropriate processor"""
-    bots_state = context.user_data.get("bots_state")
-
-    if not bots_state:
-        return
+) -> bool:
+    """Consume a controller form value, or let ordinary chat continue."""
+    state = context.user_data.get("bots_state")
+    handler = get_text_input_handler(state)
+    if handler is None:
+        return False
 
     user_input = update.message.text.strip()
-    logger.info(f"Bots message handler - state: {bots_state}, input: {user_input}")
-
+    logger.debug("Bots text input state=%s", state)
     try:
-        # Handle controller config field input
-        if bots_state.startswith("set_field:"):
-            await process_field_input(update, context, user_input)
-        # Handle live controller bulk edit input
-        elif bots_state == "ctrl_bulk_edit":
-            await process_controller_field_input(update, context, user_input)
-        # Handle live controller field input (legacy single field)
-        elif bots_state.startswith("ctrl_set:"):
-            await process_controller_field_input(update, context, user_input)
-        # Handle deploy field input (legacy form)
-        elif bots_state.startswith("deploy_set:"):
-            await process_deploy_field_input(update, context, user_input)
-        # Handle progressive deploy flow input
-        elif bots_state == "deploy_progressive":
-            await handle_deploy_progressive_input(update, context)
-        # Handle custom instance name input for streamlined deploy
-        elif bots_state == "deploy_custom_name":
-            await process_deploy_custom_name_input(update, context, user_input)
-        # Handle instance name edit in config step
-        elif bots_state == "deploy_edit_name":
-            await process_instance_name_input(update, context, user_input)
-        # Handle Grid Strike wizard input
-        elif bots_state == "gs_wizard_input":
-            await process_gs_wizard_input(update, context, user_input)
-        # Handle PMM Mister wizard input
-        elif bots_state == "pmm_wizard_input":
-            await process_pmm_wizard_input(update, context, user_input)
-        # Handle PMM V1 wizard input
-        elif bots_state == "pv1_wizard_input":
-            await process_pv1_wizard_input(update, context, user_input)
-        # Handle config edit loop field input (legacy single field)
-        elif bots_state.startswith("cfg_edit_input:"):
-            await process_cfg_edit_input(update, context, user_input)
-        # Handle config bulk edit (key=value format)
-        elif bots_state == "cfg_bulk_edit":
-            await process_cfg_edit_input(update, context, user_input)
-        else:
-            logger.debug(f"Unhandled bots state: {bots_state}")
-
+        await handler(update, context, user_input)
     except Exception as e:
         logger.error(f"Error processing bots input: {e}", exc_info=True)
         from utils.telegram_formatters import format_error_message
 
         error_message = format_error_message(f"Failed to process input: {str(e)}")
         await update.message.reply_text(error_message, parse_mode="MarkdownV2")
+    return True
 
 
 # ============================================
@@ -607,32 +608,9 @@ def get_bots_callback_handler():
     return CallbackQueryHandler(bots_callback_handler, pattern="^bots:")
 
 
-def get_bots_message_handler():
-    """Returns the message handler"""
-    return MessageHandler(filters.TEXT & ~filters.COMMAND, bots_message_handler)
-
-
-@restricted
-async def bots_document_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Handle document uploads for bots module (e.g., config file uploads)"""
-    # Only process if we're expecting a config upload
-    if context.user_data.get("bots_state") == "awaiting_config_upload":
-        await handle_config_file_upload(update, context)
-
-
-def get_bots_document_handler():
-    """Get the document handler for bots module"""
-    return MessageHandler(filters.Document.ALL, bots_document_handler)
-
-
 __all__ = [
     "bots_command",
     "bots_callback_handler",
     "bots_message_handler",
-    "bots_document_handler",
     "get_bots_callback_handler",
-    "get_bots_message_handler",
-    "get_bots_document_handler",
 ]

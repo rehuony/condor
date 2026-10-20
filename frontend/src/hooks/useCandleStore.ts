@@ -36,7 +36,6 @@ export function useCandleStore(
   candles: CandleData[];
   isStale: boolean;
   mergeCandles: (c: CandleData[]) => void;
-  setDuration: (seconds: number) => void;
 } {
   const key = server ? candleChannelKey(server, connector, pair, interval, poolAddress) : "";
 
@@ -57,7 +56,7 @@ export function useCandleStore(
     // Written unconditionally: retaining the previous key's candles here would
     // leak one market's prices into another for callers that are not remounted
     // on a pair change (CreateExecutor's `currentPrice`, for one).
-    const cached = candleStore.subscribe(key);
+    const cached = candleStore.subscribe(key, true);
     setCandles(cached);
     setIsStale(false); // freshly subscribed; the periodic check re-evaluates below
 
@@ -80,7 +79,7 @@ export function useCandleStore(
     return () => {
       removeListener();
       clearInterval(timer);
-      candleStore.unsubscribe(key);
+      candleStore.unsubscribe(key, true);
     };
   }, [key, interval]);
 
@@ -88,11 +87,7 @@ export function useCandleStore(
     if (key) candleStore.mergeCandles(key, c);
   };
 
-  const setDuration = (seconds: number) => {
-    if (key) candleStore.setDuration(key, seconds);
-  };
-
-  return { candles, isStale, mergeCandles, setDuration };
+  return { candles, isStale, mergeCandles };
 }
 
 /** The close of the newest candle, or null for an empty channel. */

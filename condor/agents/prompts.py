@@ -169,7 +169,14 @@ MEMORY (about the user, NOT operational learnings):
   Operational/market learnings go to the journal (see JOURNAL above), NOT here.
 
 NOTIFICATIONS:
-- Use send_notification(text="...") to message the user on Telegram.
+- Use send_notification(text="...", image_path="...") for text and/or a local
+  PNG/JPEG. Image access requires admin or code_run permission; read the charting
+  skill for image limits and export instructions.
+- image_sent and text_sent confirm Telegram delivery; sent covers the whole
+  notification. image_recorded confirms storage in an originating conversation,
+  which a background tick may lack. Local mode does not send to Telegram.
+- Report partial or unknown delivery accurately. Do not blindly resend after a
+  timeout or partial success: some content may already have arrived.
 """
 
 # Journal guidance. In experiment modes (dry_run / run_once) the engine keeps NO

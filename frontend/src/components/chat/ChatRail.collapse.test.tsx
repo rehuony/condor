@@ -35,9 +35,10 @@ const AGENTS: AgentSummary[] = [
 
 let container: HTMLDivElement;
 let root: Root;
+const closeRail = vi.fn();
 
 /** The workspace, reduced to the rail and whatever is in the pane. */
-function Workspace({ sheet }: { sheet: boolean }) {
+function Workspace({ sheet, mobileOpen = false }: { sheet: boolean; mobileOpen?: boolean }) {
   return (
     <MemoryRouter>
       <QueryClientProvider
@@ -54,8 +55,8 @@ function Workspace({ sheet }: { sheet: boolean }) {
               hasSession={false}
               liveIds={new Set()}
               activeId=""
-              open
-              onClose={() => {}}
+              open={mobileOpen}
+              onClose={closeRail}
               onTalk={() => {}}
               onNew={() => {}}
               onOpenConversation={() => {}}
@@ -73,9 +74,9 @@ function Workspace({ sheet }: { sheet: boolean }) {
   );
 }
 
-async function render(sheet = false) {
+async function render(sheet = false, mobileOpen = false) {
   await act(async () => {
-    root.render(<Workspace sheet={sheet} />);
+    root.render(<Workspace sheet={sheet} mobileOpen={mobileOpen} />);
   });
 }
 
@@ -97,6 +98,7 @@ async function click(el: HTMLElement) {
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
+  closeRail.mockClear();
   // Wide enough to split, so a sheet claims the pane.
   window.matchMedia = ((media: string) => ({
     matches: true,
@@ -122,6 +124,17 @@ afterEach(() => {
 });
 
 describe("ChatRail beside an open pane", () => {
+  it("lets a mobile overlay close without changing the desktop preference", async () => {
+    localStorage.setItem("condor.chat.rail.open", "false");
+    await render(false, true);
+    expect(listsAgents()).toBe(true);
+    await click(container.querySelector<HTMLButtonElement>('[aria-label="Hide conversations"]')!);
+    expect(closeRail).toHaveBeenCalledOnce();
+    expect(localStorage.getItem("condor.chat.rail.open")).toBe("false");
+    await render(false, false);
+    expect(listsAgents()).toBe(false);
+  });
+
   it("collapses while the pane is open and comes back after", async () => {
     await render();
     expect(listsAgents()).toBe(true);
@@ -159,4 +172,13 @@ describe("ChatRail beside an open pane", () => {
     expect(listsAgents()).toBe(true);
     expect(localStorage.getItem("condor.chat.rail.open")).toBe("true");
   });
+});
+
+it("keeps the activity summary without a navigation entry beside Collapse", async () => {
+  await render();
+  expect(container.textContent).toContain("Nothing looping");
+  expect(container.querySelector('a')).toBeNull();
+  expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+  await click(collapseButton()!);
+  expect(expandButton()).toBeTruthy();
 });

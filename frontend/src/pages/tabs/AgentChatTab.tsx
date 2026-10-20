@@ -44,7 +44,6 @@ import { LoopsPanel } from "@/components/chat/LoopsPanel";
 import { SessionTabs } from "@/components/chat/SessionTabs";
 import { StrategySheet } from "@/components/chat/StrategySheet";
 import { usePaneGuard } from "@/components/chat/usePaneGuard";
-import { ShareChatButton } from "@/components/chat/ShareChatButton";
 import { WorkspaceRail } from "@/components/chat/WorkspaceRail";
 import {
   WorkspacePaneOutlet,
@@ -642,24 +641,6 @@ export function AgentChatTab() {
               }
               onAbort={() =>
                 chat.activeSlotId && chat.abortPrompt(chat.activeSlotId)
-              }
-              // Share the chat that is open, from the box that is open with
-              // it. The rail has the same gesture per row, but only under a
-              // hover on a column most readers keep collapsed — so the case
-              // that actually comes up, sharing what you are reading, had
-              // nothing visible on screen. It sat in the bar above for a
-              // while, where it read as an action on the session strip beside
-              // it rather than on the transcript below; the composer is the
-              // one place where "this chat" needs no explaining.
-              composerLeading={
-                <ShareChatButton
-                  conversationId={
-                    activeSlot
-                      ? activeSlot.info.conversation_id ||
-                        activeSlot.info.slot_id
-                      : null
-                  }
-                />
               }
               boundAgent={boundAgent}
               // The domain roster, so a turn stamped with a slug can be named

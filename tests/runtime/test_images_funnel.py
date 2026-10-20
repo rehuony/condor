@@ -203,6 +203,7 @@ def test_the_pydantic_ai_prompt_is_a_list_with_the_image_first():
     import contextlib
 
     from pydantic_ai.messages import BinaryContent
+    from pydantic_ai.models.test import TestModel
     from pydantic_ai.usage import RunUsage
 
     from condor.acp import pydantic_ai_client as pac
@@ -229,6 +230,8 @@ def test_the_pydantic_ai_prompt_is_a_list_with_the_image_first():
             return []
 
     class _Agent:
+        model = TestModel()
+
         @contextlib.asynccontextmanager
         async def iter(self, prompt, **kwargs):
             seen.append(prompt)

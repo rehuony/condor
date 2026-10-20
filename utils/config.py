@@ -41,33 +41,51 @@ ADMIN_USER_ID = resolve_admin_id()
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
+
+def telegram_agent_reply_settings(env=None) -> tuple[str, float]:
+    """Process-wide presentation policy for agent replies and wake turns only."""
+    import math
+
+    env = os.environ if env is None else env
+    mode = env.get("TELEGRAM_AGENT_REPLY_MODE", "final").strip().lower()
+    if mode not in {"final", "edit"}:
+        raise ConfigError("TELEGRAM_AGENT_REPLY_MODE must be final or edit")
+    try:
+        interval = float(env.get("TELEGRAM_AGENT_EDIT_INTERVAL", "1.0"))
+    except (ValueError, TypeError) as exc:
+        raise ConfigError(
+            "TELEGRAM_AGENT_EDIT_INTERVAL must be a finite positive number"
+        ) from exc
+    if not math.isfinite(interval) or interval <= 0:
+        raise ConfigError(
+            "TELEGRAM_AGENT_EDIT_INTERVAL must be a finite positive number"
+        )
+    return mode, interval
+
+
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# Single WEB_URL param: full URL including port if needed (e.g. http://myserver.com:8088)
-# Falls back to WEB_PORT for backward compat, then default 8088
-_web_url_raw = os.environ.get("WEB_URL", "").strip()
-_web_port_raw = os.environ.get("WEB_PORT", "").strip()
 
-if _web_url_raw:
-    WEB_URL = _web_url_raw.rstrip("/")
-    _parsed = urlparse(WEB_URL)
-    WEB_PORT = _parsed.port or (443 if _parsed.scheme == "https" else 80)
-else:
-    WEB_PORT = int(_web_port_raw) if _web_port_raw else 8088
-    WEB_URL = f"http://localhost:{WEB_PORT}"
+def resolve_web_url_and_port(env=None) -> tuple[str, int]:
+    """Public login URL and bind port, with an explicit port taking precedence.
 
-# ── Telemetry (FEAT-023) ──
-# An operator override, in both directions. An unset value means "no override",
-# and the stored consent decides — whose default, with no answer given, is
-# `ping`: the four adoption events and nothing else, from the first boot. The
-# admin prompt chooses between `ping` and `usage`. An install whose admin
-# *refused* (stored consent `denied`, from Settings -> Privacy or from an older
-# build's "No thanks") stays at `off` across upgrades; setting this to
-# `ping`/`usage` overrides that refusal too.
-#   off   - nothing, ever. emit() returns immediately.
-#   ping  - install / heartbeat / version_change / shutdown only.
-#   usage - the full allowlisted taxonomy in condor/telemetry/schema.py.
-CONDOR_TELEMETRY = os.environ.get("CONDOR_TELEMETRY", "").strip().lower() or None
+    Without WEB_PORT, preserve URL-derived ports for existing deployments.
+    Reverse proxies can set WEB_PORT independently of their public WEB_URL.
+    """
+    env = os.environ if env is None else env
+    url = (env.get("WEB_URL") or "").strip().rstrip("/")
+    port_raw = (env.get("WEB_PORT") or "").strip()
+    if port_raw:
+        port = int(port_raw)
+    elif url:
+        parsed = urlparse(url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    else:
+        port = 8088
+    return url or f"http://localhost:{port}", port
+
+
+WEB_URL, WEB_PORT = resolve_web_url_and_port()
 
 # ── Run mode (FEAT-049) ──
 # Condor runs either as a Telegram bot (the default) or as a local, Telegram-less
@@ -185,6 +203,7 @@ def check_startup_config(env=None) -> None:
     """
     env = os.environ if env is None else env
 
+    telegram_agent_reply_settings(env)
     raw_admin = (env.get("ADMIN_USER_ID") or "").strip()
     if raw_admin and resolve_admin_id(env) is None:
         raise ConfigError(

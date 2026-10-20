@@ -126,13 +126,18 @@ def test_stop_is_private_chat_only(approved_user, monkeypatch):
 class _RecordingBot:
     def __init__(self):
         self.edits: list[str] = []
+        self.sent = []
 
     async def edit_message_text(self, **kw):
         self.edits.append(kw["text"])
-        return None
+        return True
 
     async def send_message(self, **kw):
+        self.sent.append(kw["text"])
         return SimpleNamespace(message_id=99)
+
+    async def delete_message(self, **kw):
+        return True
 
 
 def _streamer():
@@ -164,11 +169,12 @@ def test_the_queued_notice_gives_way_to_the_answer():
             RuntimeEvent(type=EventType.TEXT, data={"text": "hello"})
         )
         await streamer._flush(final=False)
+        await streamer.stop_edit_loop()
 
     asyncio.run(drive())
 
     assert streamer._queued is False
-    assert bot.edits[-1] == "hello"
+    assert bot.edits[-1] == "Processing…"
 
 
 def test_waiting_its_turn_costs_one_edit_not_two_per_second():
@@ -199,7 +205,7 @@ def test_a_stopped_turn_keeps_its_partial_answer_and_says_it_was_stopped():
 
     asyncio.run(drive())
 
-    final = bot.edits[-1]
+    final = bot.sent[-1]
     # What the agent managed to say is kept — abort is not a rollback.
     assert "half an answ" in final
     assert STOPPED_LABEL in final
@@ -214,8 +220,8 @@ def test_a_turn_stopped_before_it_spoke_is_not_reported_as_no_response():
 
     asyncio.run(drive())
 
-    assert "stopped" in bot.edits[-1]
-    assert "no response" not in bot.edits[-1]
+    assert "stopped" in bot.sent[-1].lower()
+    assert "no response" not in bot.sent[-1]
 
 
 def test_a_normal_turn_is_unmarked():
@@ -230,4 +236,4 @@ def test_a_normal_turn_is_unmarked():
 
     asyncio.run(drive())
 
-    assert STOPPED_LABEL not in bot.edits[-1]
+    assert STOPPED_LABEL not in bot.sent[-1]

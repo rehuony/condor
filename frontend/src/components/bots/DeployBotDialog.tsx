@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useEscapeKey } from "@/hooks/useEscapeKey";
+import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import {
   api,
   type ControllerConfigSummary,
@@ -396,11 +397,11 @@ export function DeployBotDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className={`${DIALOG_BACKDROP} z-50`}
       onClick={handleClose}
     >
       <div
-        className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl"
+        className={`${DIALOG_PANEL} flex max-h-[85dvh] max-w-2xl flex-col bg-[var(--color-bg)]`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
