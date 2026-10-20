@@ -13,7 +13,7 @@ import {
   barrierPct,
   barrierPrice,
 } from "./barriers";
-import { loadPersistedDefaults, savePersistedDefaults } from "./persisted-defaults";
+import { loadPersistedDefaults, savePersistedDefaults } from "@/lib/executor-defaults";
 import { getThemeColors } from "@/lib/theme-colors";
 import { DCA_DEFAULTS_KEY } from "@/lib/sessionState";
 

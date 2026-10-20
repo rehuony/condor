@@ -6,7 +6,7 @@
 import { useMemo, useReducer } from "react";
 
 import type { ChartPriceMapping, ExecutorValidation, PickSlot } from "./types";
-import { loadPersistedDefaults, savePersistedDefaults } from "./persisted-defaults";
+import { loadPersistedDefaults, savePersistedDefaults } from "@/lib/executor-defaults";
 import { ORDER_DEFAULTS_KEY } from "@/lib/sessionState";
 
 // ── State ──

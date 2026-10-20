@@ -11,7 +11,7 @@
 // as an argument for the same reason the components pass it down: the display
 // currency is a preference, and a fold that reached for it would be untestable.
 
-import { agentBucket, BEFORE_LEDGER, OUTSIDE } from "@/components/perf/agentFilter";
+import { agentBucket, BEFORE_LEDGER, OUTSIDE } from "@/lib/agent-filter";
 import type { DeedIndex, Provenance } from "@/lib/agent-attribution";
 import type { BotRunInfo, ControllerInfo } from "@/lib/api/bots";
 import type { ExecutorInfo } from "@/lib/api/executors";

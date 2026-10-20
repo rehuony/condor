@@ -1,3 +1,4 @@
+import type { AgentSummary, StrategySummary } from "@/lib/api/agents";
 // ── Whose trading is this? (FEAT-096) ──
 //
 // Attribution in this browser is a client-side join, and this is the second one
@@ -415,7 +416,7 @@ export function ownerTitle(owners: readonly FleetOwner[], runKey: string): strin
  * {@link ownerTitle}, so a stale deep link names something rather than nothing.
  *
  * A caller that also has the two unowned buckets in hand wants
- * `agentBucketLabel` (`components/perf/agentFilter`), which is this plus those
+ * `agentBucketLabel` (`lib/agent-filter`), which is this plus those
  * two fixed labels — and nothing else names an owner row.
  */
 export function ownerRowLabel(owners: readonly FleetOwner[], runKey: string): string {
@@ -461,4 +462,30 @@ export function loopFacts(live: LiveLoop | null | undefined, nowMs: number): str
   const dueIn = live.lastTickAt + live.frequencySec - nowMs / 1000;
   facts.push(dueIn > 0 ? `next tick ${countdown(dueIn)}` : `tick overdue by ${countdown(-dueIn)}`);
   return facts;
+}
+
+/**
+ * The server a row declares, before any ambient fallback (ARCH-324).
+ *
+ * `AgentWorkspace`'s rule, to the letter: the strategy's own configured server,
+ * else the agent's pin. Both can be empty — an agent that declares no pin
+ * follows whichever server the chat is on, which is what most of them do — and
+ * empty is passed on as empty rather than substituted here, because this file
+ * does not know what the app is currently pointed at.
+ */
+export function declaredServerOf(
+  agent: Pick<AgentSummary, "server_name">,
+  strategy: Pick<StrategySummary, "server_name"> | null,
+): string {
+  return strategy?.server_name || agent.server_name || "";
+}
+
+
+/**
+ * The words that go with `dueInSec`, so the four surfaces that print a
+ * countdown cannot word the same state differently. A tick due exactly now is
+ * overdue, not "next in 0s" — the beat has already slipped.
+ */
+export function tickCountdownLabel(due: number): string {
+  return due > 0 ? `next in ${countdown(due)}` : `overdue ${countdown(-due)}`;
 }

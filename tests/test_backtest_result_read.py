@@ -185,7 +185,6 @@ def test_the_routine_asks_the_server_for_a_task_it_has_never_stored(monkeypatch)
     monkeypatch.setattr(bc, "get_client", fake_get_client)
     monkeypatch.setattr(bc, "fetch_and_save", fake_fetch_and_save)
     monkeypatch.setattr(bc, "_render", fake_render)
-    monkeypatch.setattr(bc, "_server_name", lambda chat_id, context: "srv")
 
     async def fake_load_saved_task(tid):
         return stored[tid]["result"], bc.Config()
@@ -194,7 +193,8 @@ def test_the_routine_asks_the_server_for_a_task_it_has_never_stored(monkeypatch)
 
     out = asyncio.run(
         bc.run(
-            bc.Config(task_id="t-1"), SimpleNamespace(chat_id=1, user_data={}, bot=None)
+            bc.Config(task_id="t-1"),
+            SimpleNamespace(chat_id=1, user_data={}, bot=None, server_name="srv"),
         )
     )
 

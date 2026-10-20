@@ -1,12 +1,7 @@
 import { useMemo } from "react";
 
-import {
-  feeAmount,
-  lpStateStyle,
-  rangeFraction,
-  readLpPosition,
-  type LpPosition,
-} from "./lp-position";
+import { feeAmount, lpStateStyle } from "@/components/dex/lp-position-presentation";
+import { rangeFraction, readLpPosition, type LpPosition } from "@/lib/dex/lp-position";
 import type { ExecutorInfo } from "@/lib/api/executors";
 import { formatPnl, formatPriceSig, isExecutorActive, pnlColor } from "@/lib/formatters";
 

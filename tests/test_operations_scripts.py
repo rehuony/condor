@@ -42,7 +42,7 @@ def test_every_make_target_dispatches_to_an_existing_script_action():
         "doctor",
         "check-update",
         "update",
-        "build-frontend",
+        "build",
         "run",
         "run-fg",
         "stop",

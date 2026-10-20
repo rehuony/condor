@@ -1,6 +1,6 @@
 import { Star } from "lucide-react";
 
-import { useMarketFavorites } from "@/lib/marketFavorites";
+import { useMarketFavorites } from "@/hooks/use-market-favorites";
 
 interface StarMarketButtonProps {
   server: string;

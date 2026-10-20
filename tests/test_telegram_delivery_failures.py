@@ -127,7 +127,7 @@ def test_progress_failure_does_not_abort_or_replay_the_turn(
 
 
 def test_failed_progress_does_not_prevent_independent_final_delivery():
-    from tests.test_telegram_layered_replies import Bot
+    from tests.support.telegram import Bot
 
     bot = Bot()
     bot.draft_failure = network_failure("simulated outage")

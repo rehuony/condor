@@ -17,7 +17,7 @@
 // key belongs to — is reachable from a test rather than only from a rendered
 // panel.
 
-import { agentBucketLabel } from "@/components/perf/agentFilter";
+import { agentBucketLabel } from "@/lib/agent-filter";
 import {
   isPseudoRunKey,
   splitRunKey,

@@ -1,10 +1,15 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { runLabel } from "@/components/agent/lab/runs";
-import { poolLabel } from "@/components/dex/format";
-import { readLpPosition } from "@/components/dex/lp-position";
-import { getDisplayCurrency } from "@/hooks/useDisplayCurrency";
-import type { ConsolidatedPosition, ConsolidatedPositionsResponse, PortfolioHistoryResponse, PortfolioResponse } from "./api/portfolio";
+import { runLabel } from "@/lib/agent-runs";
+import { poolLabel } from "@/lib/dex/pools";
+import { readLpPosition } from "@/lib/dex/lp-position";
+import { getDisplayCurrency } from "@/lib/display-currency";
+import type {
+  ConsolidatedPosition,
+  ConsolidatedPositionsResponse,
+  PortfolioHistoryResponse,
+  PortfolioResponse,
+} from "./api/portfolio";
 import type { BotDetail, BotRunsResponse, BotsPageResponse, ControllerInfo } from "./api/bots";
 import type { ExecutorInfo } from "./api/executors";
 import type { PoolSummary } from "./api/dex";
@@ -39,7 +44,7 @@ import type { ViewFacts } from "./viewFacts";
  * their state over and each a chance to go stale. Query keys are already
  * load-bearing shared contract here (`AgentChatTab` reuses `["agents"]` so
  * react-query dedupes against the fleet tab), so this adds another consumer of
- * a coupling that exists, not a new kind of it. `pageFacts.onScreen.test.ts`
+ * a coupling that exists, not a new kind of it. `tests/lib/page-facts.on-screen.test.ts`
  * seeds the real keys, so a rename breaks a test rather than an answer.
  *
  * Called at *send* time, never at render time: a cache read costs nothing

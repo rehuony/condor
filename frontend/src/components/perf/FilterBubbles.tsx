@@ -1,20 +1,8 @@
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { BubbleOption } from "@/lib/agent-filter";
 
-/**
- * One thing a bubble group can filter on, and how much of the population it
- * accounts for.
- *
- * The count is what makes a wall of bubbles readable: a fleet's terminated side
- * offers a hundred bot names, and the reader is looking for the four that
- * actually traded. It is measured over the population *before* any filter is
- * applied, so a bubble never renumbers itself as a consequence of being ticked.
- */
-export interface BubbleOption {
-  value: string;
-  label: string;
-  count: number;
-}
+
 
 /**
  * A row of togglable bubbles with `all` / `none` beside its title.

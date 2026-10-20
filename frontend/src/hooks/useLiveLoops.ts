@@ -1,10 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import {
-  declaredServerOf,
-  tickCountdownLabel,
-} from "@/components/agent/workspace/fleet";
+import { declaredServerOf, tickCountdownLabel } from "@/lib/agent-attribution";
 import { agentsApi, type AgentSummary, type StrategyUnavailable } from "@/lib/api/agents";
 import type { FleetOwner, LiveLoop } from "@/lib/agent-attribution";
 import { formatRelativeTime } from "@/lib/formatters";

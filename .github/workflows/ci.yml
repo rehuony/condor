@@ -41,7 +41,7 @@ jobs:
           shellcheck -S error -x -P scripts/shell scripts/shell/*.sh scripts/shell/lib/*.sh
 
       - name: Check Make dispatch
-        run: make --dry-run setup install check-update update build-frontend run run-fg stop restart status logs doctor test lint
+        run: make --dry-run setup install check-update update build run run-fg stop restart status logs doctor test lint
 
   backend-import-check:
     name: Backend Import Check

@@ -10,7 +10,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 
-import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toKnowledgeTab } from "@/components/agent/knowledgeTabs";
 import { AgentRunScreen } from "@/components/agent/workspace/AgentRunScreen";
 import { WorkspaceHeader } from "@/components/agent/workspace/WorkspaceHeader";
@@ -217,18 +217,18 @@ export function AgentWorkspace() {
         )}
       />
 
-      <ConfirmDialog
-        open={showDeleteConfirm}
+      {showDeleteConfirm && <ConfirmDialog
         title="Delete Agent"
-        isPending={deleteAgentMutation.isPending}
-        isError={deleteAgentMutation.isError}
-        errorText="Failed to delete agent. It may have running loops."
+        confirmLabel="Delete"
+        pendingLabel="Deleting..."
+        pending={deleteAgentMutation.isPending}
+        error={deleteAgentMutation.isError ? "Failed to delete agent. It may have running loops." : null}
         onConfirm={() => deleteAgentMutation.mutate()}
-        onClose={() => setShowDeleteConfirm(false)}
+        onCancel={() => setShowDeleteConfirm(false)}
       >
         Delete <strong className="text-[var(--color-text)]">{agent.name}</strong> and
         all its loops? This cannot be undone.
-      </ConfirmDialog>
+      </ConfirmDialog>}
     </>
   );
 }

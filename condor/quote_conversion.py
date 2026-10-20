@@ -27,7 +27,7 @@ import logging
 from typing import Any, NamedTuple
 
 from condor.dex_candles import split_pair
-from condor.fetchers.market_data import USD_QUOTES
+from condor.rates import USD_QUOTES
 
 logger = logging.getLogger(__name__)
 

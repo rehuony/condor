@@ -11,7 +11,7 @@ import { isDelegationStatus } from "@/components/agent/delegationStatus";
 import { DeploymentLedger } from "@/components/agent/lab/DeploymentLedger";
 import { ExperimentDetail } from "@/components/agent/lab/ExperimentDetail";
 import { RunRail } from "@/components/agent/lab/RunRail";
-import { actionsByTick, isLiveRun } from "@/components/agent/lab/runs";
+import { actionsByTick, isLiveRun } from "@/lib/agent-runs";
 import { SessionCanvasPanel } from "@/components/agent/session/SessionCanvasPanel";
 import { SessionExecutors } from "@/components/agent/session/SessionExecutors";
 import { OutsideWindow } from "@/components/agent/workspace/OutsideWindow";

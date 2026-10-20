@@ -2,8 +2,8 @@ import { Fragment, useRef, useState } from "react";
 import { Star, X } from "lucide-react";
 
 import { formatConnectorName } from "@/lib/formatters";
-import type { FavoriteMarket } from "@/lib/marketFavorites";
-import { useMarketFavorites } from "@/lib/marketFavorites";
+import type { FavoriteMarket } from "@/hooks/use-market-favorites";
+import { useMarketFavorites } from "@/hooks/use-market-favorites";
 import type { MarketPick } from "./MarketBrowser";
 
 interface FavoritesStripProps {

@@ -2,7 +2,8 @@ import { ArrowRight, Layers } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { feeAmount, lpStateStyle, rangeFraction, type LpPosition } from "@/components/dex/lp-position";
+import { feeAmount, lpStateStyle } from "@/components/dex/lp-position-presentation";
+import { rangeFraction, type LpPosition } from "@/lib/dex/lp-position";
 import { Card } from "@/components/ui/Card";
 import type { ConsolidatedPosition } from "@/lib/api/portfolio";
 import { formatPnl, formatPriceSig, formatUsd, pnlColor } from "@/lib/formatters";

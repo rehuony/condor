@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { venuesQueryKey } from "@/components/market/useVenues";
+import { venuesQueryKey } from "@/lib/queryClient";
 import { Card } from "@/components/ui/Card";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { EmptyState } from "@/components/ui/EmptyState";

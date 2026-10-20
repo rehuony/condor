@@ -174,7 +174,7 @@ def test_a_missing_bundle_answers_503_rather_than_an_opaque_500():
 # ── and the other place that builds it ──
 
 
-def test_make_build_frontend_swaps_too_rather_than_emptying_in_place():
+def test_make_build_swaps_too_rather_than_emptying_in_place():
     """`make run` and `make restart` stop Condor first; this target does not.
 
     It is public, and a Condor started any other way — ``run-fg``, a

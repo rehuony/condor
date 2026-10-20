@@ -3,7 +3,7 @@ import { AlertTriangle, Code2, FileText, Upload, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import yaml from "js-yaml";
 
-import { CodeEditor } from "@/components/editor/CodeEditor";
+import { CodeEditor } from "@/components/editor/code-editor";
 import { Spinner } from "@/components/ui/Spinner";
 import { SelectField } from "@/components/ui/select-field";
 import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";

@@ -17,6 +17,7 @@ from condor.runtime.confirmations import (
     ConfirmationStatus,
     build_permission_callback,
 )
+from tests.support.runtime_sessions import install_session
 
 # A tool the danger heuristic flags, and one it does not.
 DANGEROUS = {"tool": "place_order", "input": {"trading_pair": "SOL-USDC"}}
@@ -291,40 +292,13 @@ def test_broken_channel_does_not_swallow_request(registry):
 # ── Teardown denies whatever the session was still asking (SEC-094) ──
 
 
-class _DeadClient:
-    """Minimal stand-in for an agent client, for the teardown paths."""
-
-    def __init__(self, alive: bool = True):
-        self.alive = alive
-        self.stop_calls = 0
-
-    async def stop(self):
-        self.stop_calls += 1
-        self.alive = False
-
-
-def _install_session(monkeypatch, key, *, alive=True, user_id=1, **fields):
-    """Put one live-looking session behind ``key`` in the session registry."""
-    from condor.runtime import sessions as sessions_module
-
-    session = sessions_module.AgentSession(
-        key=key,
-        agent_key="claude-code",
-        client=_DeadClient(alive),
-        user_id=user_id,
-        **fields,
-    )
-    monkeypatch.setitem(sessions_module._sessions, str(key), session)
-    return session
-
-
 def test_destroying_a_session_denies_its_pending_confirmation(registry, monkeypatch):
     """Teardown answers the approval nobody is left to act on."""
     from condor.runtime import sessions as sessions_module
     from condor.runtime.keys import SessionKey
 
     key = SessionKey.telegram(42)
-    _install_session(monkeypatch, key)
+    install_session(monkeypatch, key)
     pending = registry.register(str(key), 1, "sell everything", DANGEROUS, OPTIONS, 300)
     other = registry.register("tg:99", 1, "unrelated", DANGEROUS, OPTIONS, 300)
 
@@ -348,7 +322,7 @@ def test_respawn_strands_no_tappable_approval(registry, monkeypatch):
     from condor.runtime.keys import SessionKey
 
     key = SessionKey.telegram(42)
-    _install_session(monkeypatch, key)
+    install_session(monkeypatch, key)
     channel = _RecordingChannel()
     cb = build_permission_callback(str(key), 1, [channel], timeout_seconds=300)
 
@@ -377,7 +351,7 @@ def test_reaping_a_dead_session_denies_its_pending_confirmation(registry, monkey
     from condor.runtime.keys import SessionKey
 
     key = SessionKey.telegram(7)
-    _install_session(monkeypatch, key, alive=False)
+    install_session(monkeypatch, key, alive=False)
     pending = registry.register(str(key), 1, "buy the top", DANGEROUS, OPTIONS, 300)
 
     asyncio.run(sessions_module._enforce_session_budget(1))
@@ -392,7 +366,7 @@ def test_denying_twice_is_a_no_op(registry, monkeypatch):
     from condor.runtime.keys import SessionKey
 
     key = SessionKey.telegram(42)
-    _install_session(monkeypatch, key)
+    install_session(monkeypatch, key)
     registry.register(str(key), 1, "sell everything", DANGEROUS, OPTIONS, 300)
 
     assert registry.deny_pending_for_session(str(key)) == 1
@@ -406,7 +380,7 @@ def test_confirmation_names_the_agent_and_server(registry, monkeypatch):
     from condor.telegram.approvals import TelegramChannel
 
     key = SessionKey.telegram(42)
-    _install_session(
+    install_session(
         monkeypatch,
         key,
         label="Executor Manager",

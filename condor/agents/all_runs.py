@@ -53,7 +53,7 @@ KIND_CONVERSATION = "conversation"
 LOOP_KINDS = (KIND_SESSION, KIND_EXPERIMENT)
 
 #: The letter each kind takes in a ``?run=`` value. Mirrored by
-#: ``frontend/src/components/agent/lab/runs.ts``; the two lists are four
+#: ``frontend/src/lib/agent-runs.ts``; the two lists are four
 #: characters long and are checked against each other by tests on both sides.
 KIND_LETTERS = {
     KIND_SESSION: "s",

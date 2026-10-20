@@ -1,7 +1,8 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 
-import { BubbleGroup, type BubbleOption } from "@/components/perf/FilterBubbles";
+import { BubbleGroup } from "@/components/perf/FilterBubbles";
+import { type BubbleOption } from "@/lib/agent-filter";
 import { GroupByPicker } from "@/components/perf/GroupByPicker";
 import { PopulationToggle } from "@/components/perf/PopulationToggle";
 import { IconButton } from "@/components/ui/IconButton";

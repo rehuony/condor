@@ -12,7 +12,7 @@
  * one person, and the person notices before the developer does.
  */
 
-import type { AdminPerson } from "@/lib/admin-api";
+import type { AdminPerson } from "@/lib/api/admin";
 
 /** The subset of a person this module needs — so a partial row can use it too. */
 export type Named = Pick<

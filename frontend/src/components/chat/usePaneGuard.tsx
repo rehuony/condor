@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   paneHandoffDropsPanel,
   readPane,
@@ -152,11 +152,10 @@ export function usePaneGuard({
     return () => window.removeEventListener("popstate", onPop, true);
   }, [panelDirty]);
 
-  const dialog = (
+  const dialog = pending !== null ? (
     // A pane is handed off in one click, where a page has to be navigated away
     // from — so the text an editor is holding gets a question first.
     <ConfirmDialog
-      open={pending !== null}
       title="Discard changes?"
       confirmLabel="Discard"
       pendingLabel="Discarding..."
@@ -172,12 +171,12 @@ export function usePaneGuard({
           apply(request.next);
         }
       }}
-      onClose={() => setPending(null)}
+      onCancel={() => setPending(null)}
     >
       This panel has an editor with unsaved text. Leaving it drops what you
       wrote.
     </ConfirmDialog>
-  );
+  ) : null;
 
   return { openPane, onPanelDirtyChange: setPanelDirty, dialog };
 }

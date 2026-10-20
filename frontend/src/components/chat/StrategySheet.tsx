@@ -4,7 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { AgentControls } from "@/components/agent/AgentControls";
-import { effectiveTradingContext, parseRunId } from "@/components/agent/lab/runs";
+import { effectiveTradingContext, parseRunId } from "@/lib/agent-runs";
 import { AgentRunScreen } from "@/components/agent/workspace/AgentRunScreen";
 import {
   lastPaneSection,

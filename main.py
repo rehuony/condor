@@ -51,29 +51,6 @@ logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def _get_start_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
-    """Build the start menu inline keyboard."""
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                text="🔌 Servers", callback_data="start:config_servers"
-            ),
-            InlineKeyboardButton(text="🔑 Keys", callback_data="start:config_keys"),
-            InlineKeyboardButton(
-                text="🌐 Gateway", callback_data="start:config_gateway"
-            ),
-        ],
-    ]
-    if is_admin:
-        keyboard.append(
-            [InlineKeyboardButton(text="👑 Admin", callback_data="start:admin")]
-        )
-    keyboard.append(
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="start:cancel")]
-    )
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
 def _dashboard_button_url(url: str) -> str | None:
     """The dashboard link Telegram will accept in an inline URL button, if any.
 

@@ -10,7 +10,8 @@ import { ApprovalPrompt } from "./ApprovalPrompt";
 import { ChatInput } from "./ChatInput";
 import { ChatMessageView } from "./ChatMessage";
 import { ConversationUsage } from "./ConversationUsage";
-import { Starters, type Starter } from "./Starters";
+import { Starters } from "@/components/chat/Starters";
+import { type Starter } from "@/hooks/useStarters";
 
 /** How close to the end still counts as "following the answer", in pixels. */
 const NEAR_BOTTOM_PX = 80;

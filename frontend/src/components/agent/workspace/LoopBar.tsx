@@ -1,13 +1,6 @@
-import {
-  formatDuration,
-  isLiveRun,
-  runDurationSec,
-  runLabel,
-} from "@/components/agent/lab/runs";
-import {
-  dueInSec,
-  tickCountdownLabel,
-} from "@/components/agent/workspace/fleet";
+import { formatDuration, isLiveRun, runDurationSec, runLabel } from "@/lib/agent-runs";
+import { dueInSec } from "@/components/agent/workspace/fleet";
+import { tickCountdownLabel } from "@/lib/agent-attribution";
 import { SelectField } from "@/components/ui/select-field";
 import { useSeconds } from "@/hooks/useSeconds";
 import { countdown } from "@/lib/agent-attribution";

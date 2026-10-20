@@ -32,7 +32,7 @@ from condor.agents.risk import (
     RiskState,
     auto_approve_with_risk_check,
 )
-from tests.pydantic_ai_helpers import response_model
+from tests.support.pydantic_ai import response_model
 
 NS = "brigado-ema_trend"
 

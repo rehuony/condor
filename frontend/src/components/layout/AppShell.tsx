@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Eye, Moon, Sun } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -7,6 +7,7 @@ import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ConnectKeysOverlay } from "@/components/ConnectKeysOverlay";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { RelaunchBanner } from "@/components/RelaunchBanner";
+import { SpinnerBlock } from "@/components/ui/Spinner";
 import { ChatProvider } from "@/hooks/useChat";
 import { useCredentials } from "@/hooks/useCredentials";
 import { usePrefetchData } from "@/hooks/usePrefetchData";
@@ -195,7 +196,9 @@ function AppShellBody() {
         }`}
       >
         <ErrorBoundary resetKey={pathname + server}>
-          <Outlet key={server} />
+          <Suspense fallback={<SpinnerBlock className="h-full min-h-32" label="Loading page" />}>
+            <Outlet key={server} />
+          </Suspense>
         </ErrorBoundary>
         {showKeysOverlay && <ConnectKeysOverlay />}
       </main>

@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { Disclosure } from "@/components/ui/Disclosure";
 import { Spinner } from "@/components/ui/Spinner";
-import { ADMIN_AUDIT_KEY, type AuditEntry, adminApi } from "@/lib/admin-api";
+import { ADMIN_AUDIT_KEY, type AuditEntry, adminApi } from "@/lib/api/admin";
 import { formatRelativeTime } from "@/lib/formatters";
 
 /**

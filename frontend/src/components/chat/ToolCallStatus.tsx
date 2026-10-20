@@ -1,6 +1,6 @@
 import { Check, ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
 import { Spinner } from "@/components/ui/Spinner";
-import type { RunStep, ToolCall } from "@/hooks/useChatSocket";
+import type { RunStep, ToolCall } from "@/lib/chat-transcript";
 import { useLiveDisclosure } from "@/hooks/useLiveDisclosure";
 import { formatToolName, toolCallState } from "@/lib/formatters";
 

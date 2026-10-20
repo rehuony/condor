@@ -21,14 +21,12 @@ import condor.reports as reports_mod
 from condor.backtest_store import BacktestStore
 from routines.base import RoutineContext
 from tests.conftest import load_shared_routine
-
-# The scripted client and the stubbed renderer are FEAT-039's, and this is about
-# which server they are asked for -- not about rebuilding them.
-from tests.test_backtest_one_surface import (
+from tests.support.backtests import (
     CONFIG_NAME,
     FakeBacktesting,
     FakeClient,
     FakeReportBuilder,
+    task_envelope,
 )
 
 bc = load_shared_routine("backtest_chart")
@@ -54,7 +52,7 @@ def asked(monkeypatch):
 
     async def fake_get_client(chat_id, user_id=None, *, user_data=None, server=None):
         calls.append({"chat_id": chat_id, "server": server})
-        return FakeClient(FakeBacktesting("task-1", [_completed_envelope()]))
+        return FakeClient(FakeBacktesting("task-1", [task_envelope("task-1")]))
 
     monkeypatch.setattr(bc, "get_client", fake_get_client)
     monkeypatch.setattr(
@@ -62,12 +60,6 @@ def asked(monkeypatch):
     )
     monkeypatch.setattr(reports_mod, "ReportBuilder", FakeReportBuilder)
     return calls
-
-
-def _completed_envelope() -> dict:
-    from tests.test_backtest_one_surface import _envelope
-
-    return _envelope("task-1")
 
 
 def test_a_web_run_uses_the_server_it_was_launched_against(store, asked):

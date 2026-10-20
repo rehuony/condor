@@ -9,9 +9,10 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { PoolSummary } from "@/lib/api/dex";
-import { useDexFavorites } from "@/lib/dexFavorites";
+import { useDexFavorites } from "@/hooks/use-dex-favorites";
 
-import { num, pct, poolLabel, usdCompact } from "./format";
+import { num, poolLabel } from "@/lib/dex/pools";
+import { pct, usdCompact } from "@/components/dex/format";
 
 type SortKey =
   | "name"

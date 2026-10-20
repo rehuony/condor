@@ -6,7 +6,7 @@ import { Link, useLocation } from "react-router-dom";
 import { ResearchImage, ResearchMarkdown } from "@/components/research-markdown";
 import { Spinner } from "@/components/ui/Spinner";
 import { copyText } from "@/lib/clipboard";
-import { downloadResearchFile, getResearchFile } from "@/lib/research-api";
+import { downloadResearchFile, getResearchFile } from "@/lib/api/research";
 import { researchHref, researchLink } from "@/lib/research-links";
 
 const ACTION = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-40";

@@ -3,7 +3,7 @@ import { type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { workspaceHref } from "@/components/agent/workspace/workspaceUrl";
-import { agentBucketLabel, isAgentBucket, runParam } from "@/components/perf/agentFilter";
+import { agentBucketLabel, isAgentBucket, runParam } from "@/lib/agent-filter";
 import { agentColor } from "@/lib/agentColor";
 import {
   isPseudoRunKey,

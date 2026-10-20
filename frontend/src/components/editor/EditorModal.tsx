@@ -19,7 +19,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { NoServerCard } from "@/components/NoServerCard";
-import { CodeEditor } from "@/components/editor/CodeEditor";
+import { CodeEditor } from "@/components/editor/code-editor";
 import {
   CloneConfigDialog,
   DeleteConfirmDialog,

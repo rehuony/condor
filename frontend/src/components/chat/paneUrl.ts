@@ -31,7 +31,7 @@ import {
   readPaneSection,
   type PaneSection,
 } from "@/components/agent/workspace/sections";
-import { parseRunId } from "@/components/agent/lab/runs";
+import { parseRunId } from "@/lib/agent-runs";
 import type { LibraryFocus } from "@/components/chat/DockRoutines";
 
 /**

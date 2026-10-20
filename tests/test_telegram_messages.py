@@ -12,7 +12,7 @@ import utils.auth as auth
 from config_manager import UserRole
 from handlers import agents, bots
 from tests.conftest import patch_agents
-from tests.telegram_offline import message_update, offline_app, update_from
+from tests.support.telegram_offline import message_update, offline_app, update_from
 
 
 def _update(app, content=None, *, kind="message", chat_type="private"):

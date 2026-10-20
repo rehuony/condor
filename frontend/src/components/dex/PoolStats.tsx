@@ -4,7 +4,8 @@ import { useState } from "react";
 import type { PoolSummary } from "@/lib/api/dex";
 import { copyText } from "@/lib/clipboard";
 
-import { num, pct, usdCompact } from "./format";
+import { num } from "@/lib/dex/pools";
+import { pct, usdCompact } from "@/components/dex/format";
 
 /** GeckoTerminal chain ids → the slugs the DEX web apps route on. */
 const UNISWAP_CHAINS: Record<string, string> = {

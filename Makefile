@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup install pick-model setup-chrome refresh-codex doctor check-update update build-frontend run run-fg stop restart status logs test lint
+.PHONY: help setup install pick-model setup-chrome refresh-codex doctor check-update update build run run-fg stop restart status logs test lint
 
 # Command-line Make values are exported, never interpolated into shell code.
 ifneq ($(origin CONDOR_TMUX_SESSION),undefined)
@@ -19,7 +19,7 @@ help:
 	  '  check-update    Fetch Git metadata and compare this checkout with origin/main' \
 	  '  update          Fast-forward a clean main; no dependency sync, build or restart' \
 	  'Service' \
-	  '  build-frontend  Build the dashboard and swap it in place' \
+	  '  build           Build the dashboard and swap it in place' \
 	  '  run             Build the dashboard, then start Condor in tmux session "condor"' \
 	  '  run-fg          Build the dashboard, then run Condor in the foreground' \
 	  '  stop            Stop Condor' \
@@ -47,7 +47,7 @@ check-update:
 	@bash scripts/shell/source-update.sh check
 update:
 	@bash scripts/shell/source-update.sh update
-build-frontend:
+build:
 	@bash scripts/shell/build-frontend.sh
 run:
 	@bash scripts/shell/service.sh run

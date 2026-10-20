@@ -1,7 +1,12 @@
 @import "tailwindcss";
 
 /* Phones, and short landscape tablets where a side rail leaves no room. */
-@custom-variant narrow-pane (@media (max-width: 767px), (min-width: 768px) and (max-width: 1023px) and (max-height: 500px));
+@custom-variant narrow-pane {
+  @media (max-width: 767px),
+    (min-width: 768px) and (max-width: 1023px) and (max-height: 500px) {
+    @slot;
+  }
+}
 
 /* Dialog entrances: the backdrop fades, the panel rises a little. */
 @theme {

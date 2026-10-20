@@ -7,7 +7,7 @@ import { Check, Loader2, Trash2, X } from "lucide-react";
  * It was written by hand six times over (credentials, Gateway wallets, servers,
  * LLM endpoints and the two report headers) and had drifted in every dimension
  * — Check/X here, "Yes"/"No" or "Forget" there, a pending spinner in one copy
- * and none in the rest. A modal (`components/agent/ConfirmDialog`) is the wrong
+ * and none in the rest. A modal (`components/ui/ConfirmDialog`) is the wrong
  * control inside a table row, which is why they were hand-rolled; this is that
  * control, once.
  *

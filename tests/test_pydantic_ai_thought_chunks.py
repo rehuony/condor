@@ -20,7 +20,7 @@ from pydantic_ai.models.function import AgentInfo
 
 from condor.acp.client import TextChunk, ThoughtChunk
 from condor.acp.pydantic_ai_client import PydanticAIClient
-from tests.pydantic_ai_helpers import response_model
+from tests.support.pydantic_ai import response_model
 
 
 def _client_returning(parts: list) -> PydanticAIClient:

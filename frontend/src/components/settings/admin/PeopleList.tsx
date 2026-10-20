@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
-import { ADMIN_PEOPLE_KEY, type AdminPerson, adminApi } from "@/lib/admin-api";
+import { ADMIN_PEOPLE_KEY, type AdminPerson, adminApi } from "@/lib/api/admin";
 
 import { displayName } from "./identity";
 import { PersonRow } from "./PersonRow";

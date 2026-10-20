@@ -2,7 +2,7 @@ import { AlertTriangle, FlaskConical, MessageSquare, Send, Zap } from "lucide-re
 import { useState } from "react";
 
 import { MODE_STYLES } from "@/components/agent/modeStyles";
-import { isLiveRun, isLoopRun, runFacts, runLabel } from "@/components/agent/lab/runs";
+import { isLiveRun, isLoopRun, runFacts, runLabel } from "@/lib/agent-runs";
 import { useSeconds } from "@/hooks/useSeconds";
 import type { AgentRunRow } from "@/lib/api/agents";
 import { formatAge } from "@/lib/formatters";

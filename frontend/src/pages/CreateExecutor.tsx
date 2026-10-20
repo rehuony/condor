@@ -15,8 +15,8 @@ import {
 } from "lucide-react";
 
 import { NoServerCard } from "@/components/NoServerCard";
-import { useTradingRules } from "@/components/market/useTradingRules";
-import { useVenues } from "@/components/market/useVenues";
+import { useTradingRules } from "@/hooks/market/use-trading-rules";
+import { useVenues } from "@/hooks/market/use-venues";
 import { PriceTicker } from "@/components/market/PriceTicker";
 import { MarketDepthPanel } from "@/components/market/MarketDepthPanel";
 import { MarketBrowser, type MarketPick } from "@/components/market/MarketBrowser";
@@ -55,7 +55,8 @@ import { candleStore } from "@/lib/candle-store";
 import { connectorCapabilities, orderBookVenues } from "@/lib/connector-capabilities";
 import { executorsQuery } from "@/lib/queryClient";
 import { BROWSE_HINT_KEY } from "@/lib/sessionState";
-import type { ChartPriceMapping, ExecutorType, PickSlot } from "@/components/executor/types";
+import type { ChartPriceMapping, PickSlot } from "@/components/executor/types";
+import type { ExecutorType } from "@/lib/connector-capabilities";
 import {
   hasRememberedMarket,
   isSpotConnector,

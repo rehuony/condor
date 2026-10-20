@@ -1,6 +1,6 @@
 
 import { Spinner } from "@/components/ui/Spinner";
-import type { AdminPerson } from "@/lib/admin-api";
+import type { AdminPerson } from "@/lib/api/admin";
 
 /**
  * One person's access to every registered server (FEAT-088).

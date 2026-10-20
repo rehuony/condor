@@ -12,9 +12,9 @@ import {
   changeWindowTitle,
   formatChange,
 } from "@/lib/marketChange";
-import { useMarketFavorites } from "@/lib/marketFavorites";
+import { useMarketFavorites } from "@/hooks/use-market-favorites";
 import { useTickers } from "./useTickers";
-import { useTradingRules } from "./useTradingRules";
+import { useTradingRules } from "@/hooks/market/use-trading-rules";
 import { VenueRail } from "./VenueRail";
 
 export interface MarketPick {

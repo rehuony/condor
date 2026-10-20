@@ -3,10 +3,10 @@ import { Activity } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { isLoopRun, liveControllerIds } from "@/components/agent/lab/runs";
+import { isLoopRun, liveControllerIds } from "@/lib/agent-runs";
 import { TickSpine } from "@/components/agent/lab/TickSpine";
 import { AgentFleet } from "@/components/agent/workspace/AgentFleet";
-import { declaredServerOf } from "@/components/agent/workspace/fleet";
+import { declaredServerOf } from "@/lib/agent-attribution";
 import { LoopBar } from "@/components/agent/workspace/LoopBar";
 import { NowView } from "@/components/agent/workspace/NowView";
 import { PlaybookView } from "@/components/agent/workspace/PlaybookView";

@@ -1,10 +1,8 @@
 import { Brain, ChevronDown, Lock, Server } from "lucide-react";
 import { useState } from "react";
 
-import {
-  BrainMenuBody,
-  type BrainSelection,
-} from "@/components/chat/BrainPicker";
+import { BrainMenuBody } from "@/components/chat/BrainPicker";
+import { type BrainSelection } from "@/lib/api/chat";
 import { ServerMenuBody } from "@/components/chat/ServerMenu";
 import {
   BUSY_MODEL,

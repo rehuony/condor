@@ -5,23 +5,18 @@ import { Bot, ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-reac
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { Spinner } from "@/components/ui/Spinner";
 import { useBrainLabel } from "@/hooks/useBrainLabel";
-import { chatApi, customAgentKey, parseCustomAgentKey, type AgentBindingOption, type ChatAgentOption, type CustomProvider, type OpenRouterModelOption } from "@/lib/api/chat";
+import {
+  chatApi,
+  customAgentKey,
+  parseCustomAgentKey,
+  type AgentBindingOption,
+  type ChatAgentOption,
+  type CustomProvider,
+  type OpenRouterModelOption,
+} from "@/lib/api/chat";
+import type { BrainSelection } from "@/lib/api/chat";
 
-/**
- * Who is answering. The two fields are orthogonal — a bound Agent brings its
- * own model, and picking a model while one is bound overrides just the model —
- * so a selection names whichever one the user actually changed.
- *
- * `BrainPicker` only ever sets `agentKey`; `agentSlug` stays on the type
- * because the switch endpoint takes both, and rebinding is still what the
- * rail's rows do when they start a conversation.
- */
-export interface BrainSelection {
-  /** Bind a domain Agent. `""` unbinds, back to the plain assistant. */
-  agentSlug?: string;
-  /** The model. Leaves any bound Agent alone. */
-  agentKey?: string;
-}
+
 
 /** Stable empties, so the label memo is not rebuilt by a default literal. */
 const NO_PROVIDERS: CustomProvider[] = [];

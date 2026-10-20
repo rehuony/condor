@@ -2,8 +2,8 @@ import { RotateCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { useReloadAfterRelaunch } from "@/hooks/useRelaunch";
-import { isForbidden } from "@/lib/admin-api";
-import { updatesApi } from "@/lib/updates-api";
+import { isForbidden } from "@/lib/api/admin";
+import { updatesApi } from "@/lib/api/updates";
 
 /**
  * "You updated; apply it" — and then it applies it.

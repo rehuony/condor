@@ -13,7 +13,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { AgentControls } from "@/components/agent/AgentControls";
-import { effectiveTradingContext } from "@/components/agent/lab/runs";
+import { effectiveTradingContext } from "@/lib/agent-runs";
 import { BrainPicker } from "@/components/chat/BrainPicker";
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { useSessionOptions } from "@/hooks/useChat";

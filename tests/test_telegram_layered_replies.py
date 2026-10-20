@@ -1,7 +1,6 @@
 """Synthetic events only: no Telegram, model, exchange or account connections."""
 
 import asyncio
-from types import SimpleNamespace
 
 import aiohttp
 import pytest
@@ -10,66 +9,10 @@ from condor.runtime.events import EventType, RuntimeEvent
 from condor.telegram.errors import bad_request, network_failure, rate_limited
 from condor.telegram.output.renderer import RICH_MAX_LEN
 from handlers.agents.stream import QUEUED_LABEL, TelegramStreamer
-from tests.telegram_offline import offline_app
+from tests.support.telegram import Bot, feed, message_text
+from tests.support.telegram_offline import offline_app
 
 OVERFLOW = "x" * RICH_MAX_LEN + "tail"
-
-
-def _markdown(kwargs):
-    rich = kwargs.get("rich_message")
-    return getattr(rich, "markdown", None) or kwargs.get("text")
-
-
-class Bot:
-    def __init__(self):
-        self.messages = []
-        self.drafts = []
-        self.edits = []
-        self.deleted = []
-        self.actions = []
-        self.draft_failure = None
-        self.send_failure = None
-
-    async def send_message(self, **kwargs):
-        if self.send_failure:
-            raise self.send_failure
-        self.messages.append(kwargs)
-        return SimpleNamespace(message_id=100 + len(self.messages))
-
-    async def send_rich_message(self, **kwargs):
-        if self.send_failure:
-            raise self.send_failure
-        payload = dict(kwargs)
-        payload["text"] = _markdown(kwargs)
-        self.messages.append(payload)
-        return SimpleNamespace(message_id=100 + len(self.messages))
-
-    async def send_rich_message_draft(self, **kwargs):
-        if self.draft_failure:
-            raise self.draft_failure
-        payload = dict(kwargs)
-        payload["text"] = _markdown(kwargs)
-        self.drafts.append(payload)
-        return True
-
-    async def edit_message_text(self, **kwargs):
-        self.edits.append(kwargs)
-        return True
-
-    async def delete_message(self, **kwargs):
-        self.deleted.append(kwargs)
-        return True
-
-    async def send_chat_action(self, **kwargs):
-        self.actions.append(kwargs)
-        return True
-
-    async def edit_message_reply_markup(self, **kwargs):
-        return True
-
-
-async def feed(target, text):
-    await target.process_event(RuntimeEvent(type=EventType.TEXT, data={"text": text}))
 
 
 def connect_error(message="synthetic"):
@@ -452,7 +395,7 @@ async def test_rate_limited_draft_uses_latest_snapshot(monkeypatch):
     await feed(target, "old")
     await until(lambda: attempts)
     await feed(target, " latest")
-    await until(lambda: any(_markdown(a) == "old latest" for a in attempts))
+    await until(lambda: any(message_text(a) == "old latest" for a in attempts))
     await target.process_event(RuntimeEvent.done())
     await target.finalize()
 

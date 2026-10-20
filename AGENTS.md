@@ -22,3 +22,10 @@
 - Keep generated reports, datasets, and execution evidence in ignored `.condor/research/`, following the [artifact standard](agents/_defaults/research-artifacts.md) and [report template](agents/_defaults/research-report.md). Source code, tests, and maintained documentation use their normal locations.
 - Pass the allocated directory and standard to delegated researchers. Preserve contents and relative references when moving existing artifacts.
 - Share descriptive `/research/<relative-path>/report.md` links, without local absolute paths in labels or targets.
+
+## File ownership
+
+- Keep frontend tests in `frontend/src/tests/`, mirroring the source directory hierarchy. Use kebab-case test filenames; shared test doubles and fixtures belong in `frontend/src/tests/support/`. Do not create a parallel `test/`, `__tests__/`, or colocated test tree.
+- Put shared UI in `components/ui/`, shared hooks in `hooks/`, and shared non-UI contracts and helpers in `lib/`. Keep private component code with its owner. Inspect existing public entries before adding another implementation or moving code across these boundaries.
+- Domain API clients belong in `lib/api/`; preserve their response and error contracts when consolidating ownership. Shared data and hooks must not import UI modules, and `lib/` must not import hooks; ESLint enforces this dependency direction.
+- Keep backend tests in the repository's `tests/`; their Python runner and fixtures are independent of the frontend suite. Shared Python doubles and fixture factories belong in `tests/support/`, not in another test module. Keep pytest registration and suite-wide isolation in `conftest.py`. See [the frontend guide](frontend/README.md) for test commands and ownership examples.

@@ -4,11 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRates } from "@/hooks/useRates";
 import { useCondorWebSocket } from "@/hooks/useWebSocket";
 import { botsApi, type BotRunInfo, type BotSummary, type ControllerInfo } from "@/lib/api/bots";
-import { performanceApi, type ControllerPerformanceHistoryAllResponse, type ControllerPerformanceSnapshot } from "@/lib/api/performance";
+import {
+  performanceApi,
+  type ControllerPerformanceHistoryAllResponse,
+  type ControllerPerformanceSnapshot,
+} from "@/lib/api/performance";
 import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
 import { agentsApi } from "@/lib/api/agents";
 import type { DeedIndex, FleetOwner } from "@/lib/agent-attribution";
-import type { ExecutorPaging } from "@/components/perf/browser/ScopeTreePane";
+
 import type { Population } from "@/lib/perf-tree";
 import { controllerKey } from "@/lib/controller-identity";
 import { useActiveSnapshots } from "@/hooks/useActiveSnapshots";
@@ -375,4 +379,21 @@ export function useFleetData(
     serverOnline: data?.server_online !== false,
     errorHint: data?.error_hint,
   };
+}
+
+/**
+ * How much of the executor history is actually loaded.
+ *
+ * The walk is capped, so the tree built from it can be a partial view of the
+ * fleet — and a tree that is missing branches looks exactly like a fleet that
+ * never had them. The pane says which it is (see the loaded/cap notice).
+ */
+export interface ExecutorPaging {
+  loaded: number;
+  loading: boolean;
+  /** The walk reached the end of the history. */
+  done: boolean;
+  /** The walk stopped at its page cap with more still to come. */
+  capped: boolean;
+  loadMore: () => void;
 }

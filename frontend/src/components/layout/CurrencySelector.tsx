@@ -2,12 +2,12 @@ import { ChevronDown, DollarSign } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
+import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import {
-  useDisplayCurrency,
   CURRENCY_OPTIONS,
   CURRENCY_SYMBOLS,
   type DisplayCurrency,
-} from "@/hooks/useDisplayCurrency";
+} from "@/lib/display-currency";
 
 export function CurrencySelector() {
   const { currency, setCurrency } = useDisplayCurrency();

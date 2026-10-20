@@ -1,5 +1,5 @@
 import { useAuthedImage } from "@/hooks/useAuthedImage";
-import type { AdminPerson } from "@/lib/admin-api";
+import type { AdminPerson } from "@/lib/api/admin";
 
 import { initials } from "./identity";
 

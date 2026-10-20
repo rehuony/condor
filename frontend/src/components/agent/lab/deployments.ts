@@ -11,7 +11,7 @@
 // thing this side must not get wrong: an unknown tick is a dash, never a zero
 // and never a guess.
 
-import { runParam } from "@/components/perf/agentFilter";
+import { runParam } from "@/lib/agent-filter";
 import type { DeploymentRow } from "@/lib/api/agents";
 
 /**

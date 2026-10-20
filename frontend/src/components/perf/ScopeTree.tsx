@@ -1,7 +1,7 @@
 import { Activity, Bot, ChevronDown, ChevronRight, Circle, Layers, Server } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
-import { agentBucketLabel } from "@/components/perf/agentFilter";
+import { agentBucketLabel } from "@/lib/agent-filter";
 import { DEED_TITLE, provenanceOf, type FleetOwner } from "@/lib/agent-attribution";
 import { agentColor } from "@/lib/agentColor";
 import { formatCurrencyPnl, formatCurrencyVolume, pnlColor, shortBotName } from "@/lib/formatters";

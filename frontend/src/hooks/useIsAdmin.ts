@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { ADMIN_PEOPLE_KEY, adminApi } from "@/lib/admin-api";
+import { ADMIN_PEOPLE_KEY, adminApi } from "@/lib/api/admin";
 
 /**
  * Whether this seat is an admin, learned by asking an admin-only route.

@@ -1,7 +1,7 @@
 // ── Grid executor state machine (shared by CreateExecutor, GridConfigPanel and DexPool) ──
 
 import { roundToPricePrecision } from "@/lib/formatters";
-import { loadPersistedDefaults, savePersistedDefaults } from "@/components/executor/persisted-defaults";
+import { loadPersistedDefaults, savePersistedDefaults } from "@/lib/executor-defaults";
 import { GRID_STORAGE_KEY, LAST_MARKET_KEY } from "@/lib/sessionState";
 
 export interface GridState {

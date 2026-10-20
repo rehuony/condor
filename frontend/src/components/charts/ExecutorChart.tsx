@@ -20,13 +20,7 @@ import { tsToSeconds } from "@/lib/formatters";
 import { geckoIntervalForSpan } from "@/lib/gecko-candles";
 import { candlesQuery } from "@/lib/queryClient";
 import { getThemeColors } from "@/lib/theme-colors";
-
-export interface SnapshotBubble {
-  tick: number;
-  timestamp: string; // human-readable, e.g. "2024-01-15 14:30:22"
-  agentResponse?: string;
-  toolCallCount?: number;
-}
+import type { SnapshotBubble } from "@/hooks/useSnapshotBubbles";
 
 interface ExecutorChartProps {
   server: string;

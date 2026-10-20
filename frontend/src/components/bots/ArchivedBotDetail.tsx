@@ -15,7 +15,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { Spinner } from "@/components/ui/Spinner";
 import { TABLE_HEAD_ROW, TH, TH_NUM } from "@/components/ui/table";
 import { useArchivedReport } from "@/hooks/useArchivedReport";
-import { CURRENCY_SYMBOLS, type DisplayCurrency } from "@/hooks/useDisplayCurrency";
+import { CURRENCY_SYMBOLS, type DisplayCurrency } from "@/lib/display-currency";
 import { useServer } from "@/hooks/useServer";
 import type { ArchivedExecutor } from "@/lib/api/executors";
 import { archivedApi, type ArchivedBotPerformance, type ArchivedControllerRollup } from "@/lib/api/archived";

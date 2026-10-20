@@ -3,13 +3,8 @@ import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import {
-  decisionHref,
-  fleetRows,
-  dueInSec,
-  tickCountdownLabel,
-  type FleetRow,
-} from "@/components/agent/workspace/fleet";
+import { decisionHref, fleetRows, dueInSec, type FleetRow } from "@/components/agent/workspace/fleet";
+import { tickCountdownLabel } from "@/lib/agent-attribution";
 import { ControllerToggle } from "@/components/perf/ControllerToggle";
 import {
   executionCounts,

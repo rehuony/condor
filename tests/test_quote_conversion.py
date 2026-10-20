@@ -11,13 +11,16 @@ off as dollars at parity.
 """
 
 import asyncio
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from condor import quote_conversion as qc
 from condor.archived_chart_series import build_chart_series
 from condor.archived_pnl import calculate_pnl_from_executors
-from tests.test_archived_chart_series import _ex
+from tests.support.executors import executor_sample
 
 BRL_RATE = 0.19136741587009978
 
@@ -37,6 +40,32 @@ def _stub_rates(monkeypatch, table: dict[str, float | None]):
         return {p: table.get(p) for p in trading_pairs}
 
     monkeypatch.setattr("condor.market_rates.get_rates", _fake)
+
+
+@pytest.mark.parametrize(
+    "modules",
+    [
+        ("condor.quote_conversion", "condor.fetchers.market_data"),
+        ("condor.fetchers.market_data", "condor.quote_conversion"),
+    ],
+)
+def test_quote_conversion_imports_in_a_fresh_process(modules):
+    """Full-suite module caching must not hide an import-order dependency."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib, sys\n"
+            "for module in sys.argv[1:]:\n"
+            "    importlib.import_module(module)\n",
+            *modules,
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_quote_of_reads_the_quote_side():
@@ -145,7 +174,9 @@ def test_converting_trades_skips_an_unresolved_quote():
 
 def test_executor_summary_converts_pnl_fees_and_volume():
     executors = [
-        _ex(opened=100, closed=200, pnl=10.0, fees=1.0, volume=500.0, pair="BTC-BRL")
+        executor_sample(
+            opened=100, closed=200, pnl=10.0, fees=1.0, volume=500.0, pair="BTC-BRL"
+        )
     ]
     rates = qc.QuoteRates({"BRL": 0.2}, True)
 
@@ -161,8 +192,10 @@ def test_executor_summary_converts_pnl_fees_and_volume():
 def test_mixed_quote_run_totals_in_one_currency():
     """Adding BRL to USDT without conversion is how a total becomes nonsense."""
     executors = [
-        _ex(opened=100, closed=200, pnl=10.0, volume=100.0, pair="BTC-BRL"),
-        _ex(opened=100, closed=300, pnl=10.0, volume=100.0, pair="BTC-USDT"),
+        executor_sample(opened=100, closed=200, pnl=10.0, volume=100.0, pair="BTC-BRL"),
+        executor_sample(
+            opened=100, closed=300, pnl=10.0, volume=100.0, pair="BTC-USDT"
+        ),
     ]
     rates = qc.QuoteRates({"BRL": 0.2, "USDT": 1.0}, True)
 
@@ -174,7 +207,7 @@ def test_mixed_quote_run_totals_in_one_currency():
 
 def test_chart_series_money_is_converted_but_position_is_not():
     executors = [
-        _ex(
+        executor_sample(
             opened=100,
             closed=200,
             side="BUY",
@@ -197,7 +230,9 @@ def test_chart_series_money_is_converted_but_position_is_not():
 
 
 def test_chart_series_without_rates_stays_native():
-    executors = [_ex(opened=100, closed=200, pnl=10.0, volume=500.0, pair="BTC-BRL")]
+    executors = [
+        executor_sample(opened=100, closed=200, pnl=10.0, volume=500.0, pair="BTC-BRL")
+    ]
 
     series = build_chart_series(executors)["binance:BTC-BRL"]
 

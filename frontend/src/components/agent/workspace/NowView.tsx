@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { DeploymentLedger } from "@/components/agent/lab/DeploymentLedger";
-import { hasPricedMoney } from "@/components/agent/lab/runs";
+import { hasPricedMoney } from "@/lib/agent-runs";
 import { SessionKpis } from "@/components/agent/session/SessionKpis";
 import { SessionOverview } from "@/components/agent/session/SessionOverview";
 import { sessionPnlPoints } from "@/components/agent/session/pnlPoints";

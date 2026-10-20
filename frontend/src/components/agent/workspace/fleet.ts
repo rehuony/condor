@@ -16,7 +16,7 @@ import {
   type WorkspaceAlert,
 } from "@/components/agent/workspace/views";
 import { workspaceHref } from "@/components/agent/workspace/workspaceUrl";
-import { countdown, type AgentActionRow } from "@/lib/agent-attribution";
+import { declaredServerOf, type AgentActionRow } from "@/lib/agent-attribution";
 import type { AgentSummary, RunningInstance, StrategySummary } from "@/lib/api/agents";
 import { positionQuoteValue } from "@/lib/pnl-chart";
 import type { ConvertQuote, PerfLeaf } from "@/lib/perf-tree";
@@ -94,21 +94,6 @@ export function scopeStrategy(agent: AgentSummary): {
   return { strategy: ran ?? strategies[0] ?? null, live: null };
 }
 
-/**
- * The server a row declares, before any ambient fallback (ARCH-324).
- *
- * `AgentWorkspace`'s rule, to the letter: the strategy's own configured server,
- * else the agent's pin. Both can be empty — an agent that declares no pin
- * follows whichever server the chat is on, which is what most of them do — and
- * empty is passed on as empty rather than substituted here, because this file
- * does not know what the app is currently pointed at.
- */
-export function declaredServerOf(
-  agent: Pick<AgentSummary, "server_name">,
-  strategy: Pick<StrategySummary, "server_name"> | null,
-): string {
-  return strategy?.server_name || agent.server_name || "";
-}
 
 /**
  * What this agent's **runs** earned — or nothing, honestly.
@@ -186,14 +171,6 @@ export function dueInSec(
   return live.last_tick_at + live.frequency_sec - nowSec;
 }
 
-/**
- * The words that go with `dueInSec`, so the four surfaces that print a
- * countdown cannot word the same state differently. A tick due exactly now is
- * overdue, not "next in 0s" — the beat has already slipped.
- */
-export function tickCountdownLabel(due: number): string {
-  return due > 0 ? `next in ${countdown(due)}` : `overdue ${countdown(-due)}`;
-}
 
 /** Running, then paused, then everything idle — the sort's first key. */
 function loopRank(live: RunningInstance | null): number {

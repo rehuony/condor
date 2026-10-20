@@ -8,12 +8,12 @@ import { LpPositions } from "@/components/dex/LpPositions";
 import { PoolBrowser } from "@/components/dex/PoolBrowser";
 import { PoolSourceTabs } from "@/components/dex/PoolSourceTabs";
 import { UpstreamNotice } from "@/components/dex/UpstreamNotice";
-import { poolLabel } from "@/components/dex/format";
+import { poolLabel } from "@/lib/dex/pools";
 import { GATEWAY_TAB_CHAIN, type PoolSource } from "@/components/dex/pool-source";
 import { useDexUpstream } from "@/hooks/useDexUpstream";
 import { useServer } from "@/hooks/useServer";
 import { dexApi, type PoolSummary } from "@/lib/api/dex";
-import { useDexFavorites } from "@/lib/dexFavorites";
+import { useDexFavorites } from "@/hooks/use-dex-favorites";
 import { DEX_NETWORK_KEY } from "@/lib/sessionState";
 
 /** GeckoTerminal rate-limits per IP across every viewer and every polling chart. */

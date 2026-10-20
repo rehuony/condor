@@ -1,9 +1,7 @@
 import { ChevronRight, Repeat } from "lucide-react";
 
-import {
-  dueInSec,
-  tickCountdownLabel,
-} from "@/components/agent/workspace/fleet";
+import { dueInSec } from "@/components/agent/workspace/fleet";
+import { tickCountdownLabel } from "@/lib/agent-attribution";
 import { useSeconds } from "@/hooks/useSeconds";
 import type { StrategySummary } from "@/lib/api/agents";
 

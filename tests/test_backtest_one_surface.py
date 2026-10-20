@@ -17,7 +17,6 @@ and both are slow (kaleido) or write to the repo.
 
 import asyncio
 import io
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -26,142 +25,20 @@ import condor.backtesting as core
 import condor.reports as reports_mod
 from condor.backtest_store import BacktestStore
 from tests.conftest import load_shared_routine
+from tests.support.backtests import (
+    CONFIG_NAME,
+    PAYLOAD,
+    SERVER,
+    FakeBacktesting,
+    FakeBot,
+    FakeClient,
+    FakeContext,
+    FakeReportBuilder,
+    task_envelope,
+)
 
 bc = load_shared_routine("backtest_chart")
-
-CONFIG_NAME = "ema_eth_20_100"
-SERVER = "srv-a"
-
-# The exact envelope GET /backtesting/tasks/{id} returns — BacktestTask.to_dict():
-# the payload sits under "result" (singular), the parameters under "config".
-_PAYLOAD = {
-    "executors": [],
-    "processed_data": {
-        "timestamp": [1745280000, 1745280060],
-        "open": [1800.0, 1801.0],
-        "high": [1802.0, 1803.0],
-        "low": [1799.0, 1800.0],
-        "close": [1801.0, 1802.5],
-    },
-    "results": {
-        "net_pnl_quote": 12.5,
-        "net_pnl": 0.0125,
-        "total_fees_quote": 1.25,
-        "max_drawdown_usd": -3.0,
-        "max_drawdown_pct": -0.0147,
-        "total_volume": 5000.0,
-        "sharpe_ratio": 1.42,
-        "profit_factor": 1.31,
-        "total_executors": 74,
-        "accuracy": 0.4459,
-        "win_signals": 33,
-        "loss_signals": 41,
-    },
-    "pnl_timeseries": [],
-    "position_held_timeseries": [],
-}
-
-
-# Inside the store's payload retention window by construction
-# (``DEFAULT_RETENTION_DAYS`` in condor/backtest_store.py). This was a literal
-# date until it aged past that window and turned every test in this file red
-# exactly 30 days after it was written — a date that is always "yesterday"
-# cannot expire.
-_CREATED_AT = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-
-
-def _envelope(task_id: str, status: str = "completed", error=None) -> dict:
-    return {
-        "task_id": task_id,
-        "status": status,
-        "config": {
-            "start_time": 1745280000,  # 2025-04-22
-            "end_time": 1745366400,  # 2025-04-23
-            "backtesting_resolution": "1m",
-            "trade_cost": 0.0002,
-            "config": {"id": CONFIG_NAME, "controller_name": "ema_trend_v1"},
-        },
-        "created_at": _CREATED_AT,
-        "error": error,
-        **({"result": _PAYLOAD} if status == "completed" else {}),
-    }
-
-
-class FakeBacktesting:
-    """Submit/poll against a scripted sequence of task states."""
-
-    def __init__(self, task_id: str, states: list[dict]):
-        self.task_id = task_id
-        self.states = list(states)
-        self.submitted: dict | None = None
-        self.polls = 0
-
-    async def submit_task(self, **kwargs):
-        self.submitted = kwargs
-        return {"task_id": self.task_id, "status": "pending"}
-
-    async def get_task(self, task_id):
-        self.polls += 1
-        return self.states.pop(0) if len(self.states) > 1 else self.states[0]
-
-
-class FakeControllers:
-    async def get_controller_config(self, name):
-        # A YAML-loaded config: the numbers arrive as strings.
-        return {
-            "id": name,
-            "controller_name": "ema_trend_v1",
-            "total_amount_quote": "100",
-        }
-
-
-class FakeClient:
-    def __init__(self, backtesting):
-        self.backtesting = backtesting
-        self.controllers = FakeControllers()
-
-
-class FakeBot:
-    def __init__(self):
-        self.photos = 0
-
-    async def send_photo(self, **kwargs):
-        self.photos += 1
-
-
-class FakeContext:
-    """A Telegram chat: the server comes from the active-server preference."""
-
-    def __init__(self, chat_id=42):
-        self.chat_id = chat_id
-        self.owner_id = chat_id
-        self.instance_id = ""
-        self.server_name = ""
-        self.bot = FakeBot()
-        self.user_data = {"user_preferences": {"general": {"active_server": SERVER}}}
-
-
-class FakeReportBuilder:
-    saved: list[str] = []
-
-    def __init__(self, title="Report"):
-        self.title = title
-
-    def source(self, *a, **k):
-        return self
-
-    def tags(self, *a, **k):
-        return self
-
-    def markdown(self, *a, **k):
-        return self
-
-    def plotly(self, *a, **k):
-        return self
-
-    async def save(self, report_id=None):
-        FakeReportBuilder.saved.append(self.title)
-        return "report-1"
+backtest_compare = load_shared_routine("backtest_compare")
 
 
 @pytest.fixture
@@ -211,7 +88,7 @@ def routine(monkeypatch, store, stubs):
 
 
 def _completed(task_id="task-1") -> FakeClient:
-    return FakeClient(FakeBacktesting(task_id, [_envelope(task_id)]))
+    return FakeClient(FakeBacktesting(task_id, [task_envelope(task_id)]))
 
 
 # ── One surface, reachable from every seat ────────────────────────────────────
@@ -272,7 +149,7 @@ def test_a_run_lands_in_the_store_with_the_web_routes_envelope(store, routine):
     saved = store.get_result("task-1")
     assert saved is not None, "nobody had to open the dashboard for this"
     # Exactly {"server": ..., **task} — what web/routes/backtesting.py persists.
-    assert saved == {"server": SERVER, **_envelope("task-1")}
+    assert saved == {"server": SERVER, **task_envelope("task-1")}
     assert saved["status"] == "completed"
     assert saved["result"]["results"]["sharpe_ratio"] == 1.42
 
@@ -295,15 +172,13 @@ def test_a_stored_run_re_renders_with_its_original_parameters(routine):
 
 def test_backtest_compare_picks_up_routine_runs(store, routine):
     """The whole point of saving: ranking saved runs now sees them."""
-    cmp = load_shared_routine("backtest_compare")
-
     routine(_completed("task-1"))
     routine(_completed("task-2"))
 
-    latest = cmp._latest_ids(store, 2, SERVER)
+    latest = backtest_compare._latest_ids(store, 2, SERVER)
     assert set(latest) == {"task-1", "task-2"}
 
-    runs = [asyncio.run(cmp._load_run(store, tid)) for tid in latest]
+    runs = [asyncio.run(backtest_compare._load_run(store, tid)) for tid in latest]
     assert all(r is not None for r in runs)
     assert {r.metrics["net_pnl_quote"] for r in runs} == {12.5}
 
@@ -336,9 +211,9 @@ def test_a_pending_task_is_polled_until_it_completes(store, routine, monkeypatch
         FakeBacktesting(
             task_id,
             [
-                _envelope(task_id, status="pending"),
-                _envelope(task_id, status="running"),
-                _envelope(task_id),
+                task_envelope(task_id, status="pending"),
+                task_envelope(task_id, status="running"),
+                task_envelope(task_id),
             ],
         )
     )
@@ -359,7 +234,7 @@ def test_a_failed_task_explains_itself(store, routine):
     failure it was just handed. Raising is what keeps all three honest.
     """
     task_id = "task-bad"
-    envelope = _envelope(task_id, status="failed", error="No candles for ETH-USDT")
+    envelope = task_envelope(task_id, status="failed", error="No candles for ETH-USDT")
 
     with pytest.raises(core.BacktestError, match="No candles for ETH-USDT"):
         routine(FakeClient(FakeBacktesting(task_id, [envelope])))
@@ -372,7 +247,7 @@ def test_polling_gives_up_with_the_task_id_in_hand(routine, monkeypatch):
     monkeypatch.setattr(core, "DEFAULT_TIMEOUT", 0.0)
     task_id = "task-forever"
     client = FakeClient(
-        FakeBacktesting(task_id, [_envelope(task_id, status="running")])
+        FakeBacktesting(task_id, [task_envelope(task_id, status="running")])
     )
 
     with pytest.raises(core.BacktestError) as excinfo:
@@ -387,10 +262,10 @@ def test_polling_gives_up_with_the_task_id_in_hand(routine, monkeypatch):
 
 def test_the_renderer_can_skip_the_png():
     """The real contract behind chart=False: a figure, no image bytes."""
-    candle_df = bc._build_candle_df(_PAYLOAD["processed_data"])
+    candle_df = bc._build_candle_df(PAYLOAD["processed_data"])
 
     buf, fig = bc.generate_chart(
-        candle_df, [], [], _PAYLOAD["results"], bc.Config(), render_png=False
+        candle_df, [], [], PAYLOAD["results"], bc.Config(), render_png=False
     )
 
     assert buf is None
@@ -507,10 +382,10 @@ def test_a_re_rendered_run_reports_its_own_parameters_not_the_form_defaults(
 
 def _thin(task_id="task-thin", executors=8) -> FakeClient:
     """A run with too few executors for any metric to mean anything."""
-    envelope = _envelope(task_id)
+    envelope = task_envelope(task_id)
     envelope["result"] = {
-        **_PAYLOAD,
-        "results": {**_PAYLOAD["results"], "total_executors": executors},
+        **PAYLOAD,
+        "results": {**PAYLOAD["results"], "total_executors": executors},
     }
     return FakeClient(FakeBacktesting(task_id, [envelope]))
 

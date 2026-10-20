@@ -50,7 +50,7 @@ import {
   type PnlChartPoint,
   type TimeRange,
 } from "@/lib/pnl-chart";
-import { useActivityPane } from "@/lib/pnl-chart-pane";
+import { useActivityPane } from "@/components/charts/use-activity-pane";
 import { getThemeColors } from "@/lib/theme-colors";
 
 /**

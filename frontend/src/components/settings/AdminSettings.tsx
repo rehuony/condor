@@ -3,7 +3,7 @@ import { RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
 import { Spinner } from "@/components/ui/Spinner";
-import { ADMIN_PEOPLE_KEY, adminApi } from "@/lib/admin-api";
+import { ADMIN_PEOPLE_KEY, adminApi } from "@/lib/api/admin";
 
 import { AuditTrail } from "./admin/AuditTrail";
 import { ConnectedPeopleList } from "./admin/PeopleList";

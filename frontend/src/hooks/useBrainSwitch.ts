@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { BrainSelection } from "@/components/chat/BrainPicker";
+import type { BrainSelection } from "@/lib/api/chat";
 import { useChat } from "@/hooks/useChat";
 
 /**

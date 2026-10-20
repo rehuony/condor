@@ -1,13 +1,5 @@
-import type { LucideIcon } from "lucide-react";
+import type { Starter } from "@/hooks/useStarters";
 
-/** One opener: what it does, why you'd click it, and what it actually sends. */
-export type Starter = {
-  icon: LucideIcon;
-  title: string;
-  hint: string;
-  /** The message sent on click. Defaults to `title`. */
-  prompt?: string;
-};
 
 /**
  * What you can ask, while there is nothing to read.

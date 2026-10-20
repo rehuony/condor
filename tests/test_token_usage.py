@@ -42,7 +42,7 @@ from condor.runtime.conversations import (
     read_transcript,
 )
 from condor.runtime.events import EventType, RuntimeEvent
-from tests.pydantic_ai_helpers import response_model
+from tests.support.pydantic_ai import response_model
 
 USER = 4120
 

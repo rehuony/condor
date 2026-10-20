@@ -1,7 +1,7 @@
 import { FlaskConical } from "lucide-react";
 
 import { Fact, LastDeedLine } from "@/components/agent/EntityCard";
-import { tickCountdownLabel } from "@/components/agent/workspace/fleet";
+import { tickCountdownLabel } from "@/lib/agent-attribution";
 import { WorkspaceSheet } from "@/components/chat/WorkspaceSheet";
 import { useSeconds } from "@/hooks/useSeconds";
 import {

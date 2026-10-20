@@ -1,7 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import { useCallback } from "react";
 
-import type { SnapshotBubble } from "@/components/charts/ExecutorChart";
 import { agentsApi, type SnapshotSummary } from "@/lib/api/agents";
 import { parseSnapshot } from "@/lib/parse-agent";
 
@@ -90,4 +89,11 @@ export function useSnapshotBubbles(
     })),
     combine,
   });
+}
+
+export interface SnapshotBubble {
+  tick: number;
+  timestamp: string; // human-readable, e.g. "2024-01-15 14:30:22"
+  agentResponse?: string;
+  toolCallCount?: number;
 }

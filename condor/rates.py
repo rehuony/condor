@@ -7,6 +7,12 @@ locally cached ticker pool instead of paying a round trip to the API's
 
 from typing import Dict, Iterable, List, Optional
 
+# Quote assets valued at approximately USD parity when no market is available.
+# Shared by ticker normalization and archived-run conversion.
+USD_QUOTES = frozenset(
+    {"USDT", "USDC", "USD", "BUSD", "FDUSD", "TUSD", "DAI", "USDE", "PYUSD"}
+)
+
 # Symbols the exchanges quote interchangeably with USDT (mirrors the rate oracle's
 # `USD_EQUIVALENT_TOKENS`), so USD-denominated values price off USDT markets.
 _USD_EQUIVALENT = frozenset({"USD"})

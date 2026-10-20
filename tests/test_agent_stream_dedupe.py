@@ -5,7 +5,7 @@ import pytest
 from condor.runtime.events import RuntimeEvent
 from condor.telegram.errors import bad_request
 from condor.telegram.output.renderer import RICH_MAX_LEN, TelegramStreamer
-from tests.test_telegram_layered_replies import Bot, feed
+from tests.support.telegram import Bot, feed
 
 
 @pytest.mark.asyncio

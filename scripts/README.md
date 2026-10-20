@@ -10,7 +10,7 @@ scripts/
     ├── setup.sh             # Interactive setup wizard (make setup)
     ├── dev.sh               # install, setup-chrome, doctor, pick-model, refresh-codex
     ├── service.sh           # run, run-fg, stop, restart, status, logs (tmux session)
-    ├── build-frontend.sh    # Build the dashboard and swap it into frontend/dist
+    ├── build-frontend.sh    # Build the dashboard and swap it into frontend/dist (make build)
     ├── source-update.sh     # check / update against origin/main; Git only
     └── lib/
         ├── common.sh        # Repository root, output, prompts, .env reading and writing

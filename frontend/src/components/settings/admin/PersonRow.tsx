@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useState } from "react";
 
-import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { IconButton } from "@/components/ui/IconButton";
 import {
   ADMIN_AUDIT_KEY,
@@ -10,7 +10,7 @@ import {
   type AdminPerson,
   type RoleTarget,
   adminApi,
-} from "@/lib/admin-api";
+} from "@/lib/api/admin";
 import { copyText } from "@/lib/clipboard";
 
 import { displayName, handle, roleLabel } from "./identity";
@@ -197,38 +197,34 @@ export function PersonRow({
         />
       )}
 
-      <ConfirmDialog
-        open={confirmBlock}
+      {confirmBlock && <ConfirmDialog
         title={`Block ${name}?`}
         confirmLabel="Block"
         pendingLabel="Blocking..."
-        isPending={roleMut.isPending}
-        isError={roleMut.isError}
-        errorText={(roleMut.error as Error | null)?.message}
+        pending={roleMut.isPending}
+        error={roleMut.isError ? (roleMut.error as Error | null)?.message : null}
         onConfirm={() => roleMut.mutate("blocked")}
-        onClose={() => setConfirmBlock(false)}
+        onCancel={() => setConfirmBlock(false)}
       >
         They lose access to the bot and the dashboard immediately. Their server
         grants are kept, but unblocking returns them to <em>pending</em> — you will
         have to approve them again.
-      </ConfirmDialog>
+      </ConfirmDialog>}
 
-      <ConfirmDialog
-        open={confirmCodeRun}
+      {confirmCodeRun && <ConfirmDialog
         title={`Grant code_run to ${name}?`}
         confirmLabel="Grant"
         pendingLabel="Granting..."
-        isPending={codeRunMut.isPending}
-        isError={codeRunMut.isError}
-        errorText={(codeRunMut.error as Error | null)?.message}
+        pending={codeRunMut.isPending}
+        error={codeRunMut.isError ? (codeRunMut.error as Error | null)?.message : null}
         onConfirm={() => codeRunMut.mutate(true)}
-        onClose={() => setConfirmCodeRun(false)}
+        onCancel={() => setConfirmCodeRun(false)}
       >
         This lets them execute arbitrary Python in the bot process: every configured
         server&apos;s credentials, the dashboard&apos;s JWT secret and the environment
         are readable, and the process is writable. It is admin-equivalent in practice.
         Only grant it to someone you would make an admin.
-      </ConfirmDialog>
+      </ConfirmDialog>}
     </div>
   );
 }

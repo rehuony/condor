@@ -49,7 +49,13 @@ import {
   YAxis,
 } from "recharts";
 
-import { formatAxisCurrency, formatAxisTime, formatCurrencyVolume, formatCurrencyPnl, pnlColor } from "@/lib/formatters";
+import {
+  formatAxisCurrency,
+  formatAxisTime,
+  formatCurrencyVolume,
+  formatCurrencyPnl,
+  pnlColor,
+} from "@/lib/formatters";
 import {
   AXIS_WIDTH,
   PANE_MARGIN_RIGHT,
@@ -71,7 +77,7 @@ import {
   type PnlSeriesKey,
   type TimeRange,
 } from "@/lib/pnl-chart";
-import { useActivityPane } from "@/lib/pnl-chart-pane";
+import { useActivityPane } from "@/components/charts/use-activity-pane";
 import { getThemeColors } from "@/lib/theme-colors";
 import { PnlEvolutionTooltip } from "./PnlChartTooltips";
 import { PnlRangeStrip } from "./PnlRangeStrip";

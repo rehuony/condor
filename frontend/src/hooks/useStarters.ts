@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 
-import type { Starter } from "@/components/chat/Starters";
 import { agentsApi, CHAT_SLUG, type StarterRow } from "@/lib/api/agents";
 
 /**
@@ -109,3 +108,12 @@ export function useStarters(
     [learned, fallback],
   );
 }
+
+/** One opener: what it does, why you'd click it, and what it actually sends. */
+export type Starter = {
+  icon: LucideIcon;
+  title: string;
+  hint: string;
+  /** The message sent on click. Defaults to `title`. */
+  prompt?: string;
+};

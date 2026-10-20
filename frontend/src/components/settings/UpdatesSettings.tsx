@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { RELAUNCH_KEY, useRelaunch } from "@/hooks/useRelaunch";
@@ -27,7 +27,7 @@ import {
   UPDATES_STATUS_KEY,
   isLive,
   updatesApi,
-} from "@/lib/updates-api";
+} from "@/lib/api/updates";
 
 /**
  * Everything `/update` can do in Telegram, for an admin in the browser (FEAT-071).
@@ -167,14 +167,12 @@ export function UpdatesSettings() {
           onStart={() => startMut.mutate(preflight.components)}
           onCancel={() => setPreflight(null)}
         />
-        <ConfirmDialog
-          open={confirmDiscard !== null}
+        {confirmDiscard !== null && <ConfirmDialog
           title="Discard local changes?"
           confirmLabel="Discard"
           pendingLabel="Discarding..."
-          isPending={resolveMut.isPending}
-          isError={resolveMut.isError}
-          errorText={(resolveMut.error as Error | null)?.message}
+          pending={resolveMut.isPending}
+          error={resolveMut.isError ? (resolveMut.error as Error | null)?.message : null}
           onConfirm={() =>
             confirmDiscard &&
             resolveMut.mutate({
@@ -182,7 +180,7 @@ export function UpdatesSettings() {
               action: "discard",
             })
           }
-          onClose={() => setConfirmDiscard(null)}
+          onCancel={() => setConfirmDiscard(null)}
         >
           <p>
             Your changes to these files will be thrown away and the files reset
@@ -201,7 +199,7 @@ export function UpdatesSettings() {
           <ul className="mt-3 max-h-40 space-y-0.5 overflow-y-auto font-mono text-xs">
             {confirmDiscard?.paths.map((p) => <li key={p}>{p}</li>)}
           </ul>
-        </ConfirmDialog>
+        </ConfirmDialog>}
       </>
     );
   }

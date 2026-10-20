@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 
-import { runChipLabel } from "@/components/perf/agentFilter";
+import { runChipLabel } from "@/lib/agent-filter";
 import { ControllerToggle } from "@/components/perf/ControllerToggle";
 import type { ExecutorDelete, ExecutorStop } from "@/components/perf/executorActions";
 import { Spinner } from "@/components/ui/Spinner";

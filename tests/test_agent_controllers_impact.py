@@ -29,7 +29,8 @@ from condor.runtime.confirmations import (
     ConfirmationRegistry,
     build_permission_callback,
 )
-from tests.test_agent_controllers_sync import MM_SOURCE, FakeControllers
+from tests.support.controllers import MM_SOURCE, FakeControllers
+from tests.support.runtime_sessions import install_session
 
 
 class FakeBots:
@@ -396,12 +397,6 @@ def registry(monkeypatch):
     return fresh
 
 
-def _session(monkeypatch, key, **fields):
-    from tests.runtime.test_confirmations import _install_session
-
-    return _install_session(monkeypatch, key, **fields)
-
-
 def _ask(registry, session_key, tool_call):
     """Run one call through the gate, deny it, and return what the human saw."""
     channel = _RecordingChannel()
@@ -436,7 +431,7 @@ def test_an_overwrite_confirmation_carries_the_recorded_impact(
     client = _drifted({"king-btc": [PMM_CONFIG]})
     _run(sync_controller(client, "mm", _src(), "brigado"))
     key = SessionKey.telegram(42)
-    _session(monkeypatch, key, agent_slug="mm", server_name="brigado")
+    install_session(monkeypatch, key, agent_slug="mm", server_name="brigado")
 
     pending = _ask(registry, str(key), _overwrite_call())
 
@@ -465,7 +460,7 @@ def test_condor_targeting_another_agent_reads_that_agents_preview(
 
     _run(sync_controller(_drifted(), "mm", _src(), "brigado"))
     key = SessionKey.telegram(43)
-    _session(monkeypatch, key, agent_slug="", server_name="brigado")
+    install_session(monkeypatch, key, agent_slug="", server_name="brigado")
 
     pending = _ask(registry, str(key), _overwrite_call(agent="mm"))
     assert pending.detail.startswith("This replaces the SERVER copy of 'pmm_king'")
@@ -477,7 +472,7 @@ def test_with_no_preview_the_confirmation_says_it_will_be_refused(
     from condor.runtime.keys import SessionKey
 
     key = SessionKey.telegram(44)
-    _session(monkeypatch, key, agent_slug="mm", server_name="brigado")
+    install_session(monkeypatch, key, agent_slug="mm", server_name="brigado")
 
     pending = _ask(registry, str(key), _overwrite_call())
     assert pending.detail == NO_PREVIEW_DETAIL
@@ -493,7 +488,7 @@ def test_a_detail_that_raises_still_registers_the_confirmation(
 
     monkeypatch.setattr(sync_mod, "preview_for", boom)
     key = SessionKey.telegram(45)
-    _session(monkeypatch, key, agent_slug="mm", server_name="brigado")
+    install_session(monkeypatch, key, agent_slug="mm", server_name="brigado")
 
     pending = _ask(registry, str(key), _overwrite_call())
     assert pending.detail == confirmations_module.DETAIL_UNAVAILABLE

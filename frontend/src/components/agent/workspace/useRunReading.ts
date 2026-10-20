@@ -1,13 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { isLiveRun } from "@/components/agent/lab/runs";
+import { isLiveRun } from "@/lib/agent-runs";
 import {
   alertsFor,
   journalNamesDeploy,
   type WorkspaceAlert,
 } from "@/components/agent/workspace/views";
-import { agentsApi, type AgentPerformance, type AgentRunRow, type DeploymentRow, type StrategyUnavailable } from "@/lib/api/agents";
+import {
+  agentsApi,
+  type AgentPerformance,
+  type AgentRunRow,
+  type DeploymentRow,
+  type StrategyUnavailable,
+} from "@/lib/api/agents";
 import { parseJournal, type Decision, type ParsedJournal } from "@/lib/parse-agent";
 
 /**

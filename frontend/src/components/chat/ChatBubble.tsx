@@ -11,7 +11,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatThread } from "@/components/chat/ChatThread";
-import { Starters, type Starter } from "@/components/chat/Starters";
+import { Starters } from "@/components/chat/Starters";
+import { type Starter } from "@/hooks/useStarters";
 import { IconButton } from "@/components/ui/IconButton";
 import { useBubbleResume } from "@/hooks/useBubbleResume";
 import { useChat, useSessionOptions } from "@/hooks/useChat";

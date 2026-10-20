@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
-import { adjacentTicks } from "@/components/agent/lab/runs";
+import { adjacentTicks } from "@/lib/agent-runs";
 import { SnapshotDetail } from "@/components/agent/session/Snapshot";
 import { IconButton } from "@/components/ui/IconButton";
 import { snapshotQueryOptions } from "@/hooks/useSnapshotBubbles";

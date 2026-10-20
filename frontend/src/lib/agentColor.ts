@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@/hooks/useChatSocket";
+import type { ChatMessage } from "@/lib/chat-transcript";
 
 /**
  * Who is speaking in a transcript, and in what colour.

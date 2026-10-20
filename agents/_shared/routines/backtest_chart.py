@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from condor.backtesting import fetch_and_save, run_and_save
 from condor.telegram.transport import as_input_file
 from config_manager import get_client
-from routines.base import RoutineContext, RoutineResult
+from routines.base import RoutineContext, RoutineResult, resolve_server_name
 
 logger = logging.getLogger(__name__)
 
@@ -1231,30 +1231,6 @@ def format_summary(results: dict, config: Config) -> str:
     return "\n".join(lines)
 
 
-def _server_name(chat_id: int | None, context: RoutineContext) -> str:
-    """The server this run belongs to — the key the store files the result under.
-
-    Works from every seat: web and agent runs arrive on a ``WebRoutineContext``, which
-    names the server it was launched against; a Telegram chat resolves through its
-    active server preference instead.
-    """
-    from config_manager import get_config_manager, get_effective_server
-
-    launched_with = getattr(context, "server_name", None)
-    if launched_with:
-        return launched_with
-
-    user_data = context.user_data
-
-    try:
-        name = get_effective_server(chat_id, user_data)
-    except Exception:
-        logger.debug("Could not resolve the active server", exc_info=True)
-        name = None
-
-    return name or get_config_manager().get_default_server() or ""
-
-
 async def run(config: Config, context: RoutineContext) -> RoutineResult:
     chat_id = context.chat_id
 
@@ -1265,7 +1241,7 @@ async def run(config: Config, context: RoutineContext) -> RoutineResult:
     # which carries no chat, could execute on the default server and be
     # recorded under the one it was launched against. Naming the server to
     # ``get_client`` is what makes the two the same server by construction.
-    server = _server_name(chat_id, context)
+    server = resolve_server_name(context)
 
     # Rendering a stored run needs neither the API nor the controller config --
     # unless the run is not stored. A backtest whose result read timed out finished

@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from condor.rates import find_rate, merge_price_pool
+from condor.rates import USD_QUOTES, find_rate, merge_price_pool
 
 logger = logging.getLogger(__name__)
 
@@ -294,15 +294,6 @@ async def fetch_rates(
     return {pair: rates.get(pair) for pair in trading_pairs}
 
 
-# Quote assets already denominated in (approximately) USD, used when the pool has
-# no market to price them off. Public because quote-to-USD conversion elsewhere
-# needs the same list, and a second copy of it would drift.
-USD_QUOTES = frozenset(
-    {"USDT", "USDC", "USD", "BUSD", "FDUSD", "TUSD", "DAI", "USDE", "PYUSD"}
-)
-_USD_QUOTES = USD_QUOTES
-
-
 def _usd_rate(quote: str, prices: Dict[str, float]) -> Optional[float]:
     """USD value of one unit of `quote`, resolved off `prices`.
 
@@ -322,7 +313,7 @@ def _usd_rate(quote: str, prices: Dict[str, float]) -> Optional[float]:
         if base_usd:
             return base_usd / price
 
-    return 1.0 if quote in _USD_QUOTES else None
+    return 1.0 if quote in USD_QUOTES else None
 
 
 def _normalize_tickers(

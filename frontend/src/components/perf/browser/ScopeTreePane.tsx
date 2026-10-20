@@ -6,23 +6,7 @@ import type { FleetOwner } from "@/lib/agent-attribution";
 import type { ConvertQuote, PerfNode } from "@/lib/perf-tree";
 
 import { plural } from "./text";
-
-/**
- * How much of the executor history is actually loaded.
- *
- * The walk is capped, so the tree built from it can be a partial view of the
- * fleet — and a tree that is missing branches looks exactly like a fleet that
- * never had them. The pane says which it is (see the loaded/cap notice).
- */
-export interface ExecutorPaging {
-  loaded: number;
-  loading: boolean;
-  /** The walk reached the end of the history. */
-  done: boolean;
-  /** The walk stopped at its page cap with more still to come. */
-  capped: boolean;
-  loadMore: () => void;
-}
+import type { ExecutorPaging } from "@/hooks/useFleetData";
 
 interface ScopeTreePaneProps {
   sidebarRef: RefObject<HTMLDivElement | null>;

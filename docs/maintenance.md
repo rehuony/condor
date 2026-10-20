@@ -72,7 +72,7 @@ npm --prefix frontend test
 npm --prefix frontend run lint:ci
 for script in scripts/shell/*.sh scripts/shell/lib/*.sh; do bash -n "$script"; done
 shellcheck -S error -x -P scripts/shell scripts/shell/*.sh scripts/shell/lib/*.sh
-make --dry-run setup install check-update update build-frontend run stop doctor
+make --dry-run setup install check-update update build run stop doctor
 ```
 
 Also run the frontend production build. On a checkout that serves a dashboard,

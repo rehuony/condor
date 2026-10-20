@@ -13,7 +13,7 @@ import { LiquidityDepthColumn } from "@/components/dex/LiquidityDepthColumn";
 import { LpPositionBar } from "@/components/dex/LpPositionBar";
 import { PoolAddress, PoolStats } from "@/components/dex/PoolStats";
 import { UpstreamNotice } from "@/components/dex/UpstreamNotice";
-import { poolLabel, poolSymbols } from "@/components/dex/format";
+import { poolLabel, poolSymbols } from "@/lib/dex/pools";
 import {
   ErrorToast,
   ExecutorSuccessModal,
@@ -22,7 +22,7 @@ import { LPConfigPanel } from "@/components/executor/LPConfigPanel";
 import { useLpConfig } from "@/components/executor/lp-config";
 import { OrderConfigPanel } from "@/components/executor/OrderConfigPanel";
 import { useOrderConfig } from "@/components/executor/order-config";
-import { useVenues } from "@/components/market/useVenues";
+import { useVenues } from "@/hooks/market/use-venues";
 import { ChartRangeToolbar } from "@/components/trade/ChartRangeToolbar";
 import { TradeBottomPane } from "@/components/trade/TradeBottomPane";
 import { TradeChart, type ChartPriceAxis } from "@/components/trade/TradeChart";

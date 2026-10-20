@@ -202,3 +202,19 @@ export const chatApi = {
   getPendingConfirmations: () =>
     apiFetch<PendingConfirmation[]>("/api/v1/confirmations"),
 };
+
+/**
+ * Who is answering. The two fields are orthogonal — a bound Agent brings its
+ * own model, and picking a model while one is bound overrides just the model —
+ * so a selection names whichever one the user actually changed.
+ *
+ * `BrainPicker` only ever sets `agentKey`; `agentSlug` stays on the type
+ * because the switch endpoint takes both, and rebinding is still what the
+ * rail's rows do when they start a conversation.
+ */
+export interface BrainSelection {
+  /** Bind a domain Agent. `""` unbinds, back to the plain assistant. */
+  agentSlug?: string;
+  /** The model. Leaves any bound Agent alone. */
+  agentKey?: string;
+}

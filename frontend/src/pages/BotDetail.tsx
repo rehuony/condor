@@ -11,7 +11,7 @@ import {
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { CodeEditor } from "@/components/editor/CodeEditor";
+import { CodeEditor } from "@/components/editor/code-editor";
 import { Card } from "@/components/ui/Card";
 import { FallbackSpinner } from "@/components/ui/FallbackSpinner";
 import { Spinner } from "@/components/ui/Spinner";

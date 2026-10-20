@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { poolLabel } from "@/components/dex/format";
+import { poolLabel } from "@/lib/dex/pools";
 import {
   LP_EXECUTOR_TYPE,
   LP_REFRESH_MS,
   RECENT_LP_EXECUTORS,
   readLpPosition,
   type LpPosition,
-} from "@/components/dex/lp-position";
+} from "@/lib/dex/lp-position";
 import { executorsApi } from "@/lib/api/executors";
 import { dexApi, type PoolSummary } from "@/lib/api/dex";
 import { isExecutorActive } from "@/lib/formatters";

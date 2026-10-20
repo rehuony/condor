@@ -20,7 +20,7 @@ import { ActivityFeed } from "@/components/agent/ActivityFeed";
 import { MarkdownEditor } from "@/components/agent/MarkdownEditor";
 import { AgentStrategies } from "@/components/agent/AgentStrategies";
 import { LoopBanner } from "@/components/agent/LoopBanner";
-import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { KnowledgeTabId } from "@/components/agent/knowledgeTabs";
 import {
   BodyReader,
@@ -591,18 +591,18 @@ export const AgentKnowledge = memo(function AgentKnowledge({
           </>
         ))}
 
-      <ConfirmDialog
-        open={!!deleting}
+      {!!deleting && <ConfirmDialog
         title={deleting?.kind === "memory" ? "Forget this" : "Delete Playbook"}
-        isPending={deleteMut.isPending}
-        isError={deleteMut.isError}
-        errorText={
+        confirmLabel="Delete"
+        pendingLabel="Deleting..."
+        pending={deleteMut.isPending}
+        error={deleteMut.isError ? (
           deleteMut.error instanceof Error
             ? deleteMut.error.message
             : "Could not delete this."
-        }
+        ) : null}
         onConfirm={() => deleting && deleteMut.mutate(deleting)}
-        onClose={() => setDeleting(null)}
+        onCancel={() => setDeleting(null)}
       >
         {deleting?.kind === "memory" ? (
           <>
@@ -621,7 +621,7 @@ export const AgentKnowledge = memo(function AgentKnowledge({
             ? The agent stops reading it. This cannot be undone.
           </>
         )}
-      </ConfirmDialog>
+      </ConfirmDialog>}
 
       {/* An unsaved editor is worth flagging even where the host cannot guard
           its own close — a tab click drops the text without ceremony. */}

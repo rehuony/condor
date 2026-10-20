@@ -3,7 +3,7 @@ import { ChevronRight, RotateCcw, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import yamlLib from "js-yaml";
 
-import { CodeEditor } from "@/components/editor/CodeEditor";
+import { CodeEditor } from "@/components/editor/code-editor";
 import { IconButton } from "@/components/ui/IconButton";
 import { Spinner } from "@/components/ui/Spinner";
 import { botsApi } from "@/lib/api/bots";

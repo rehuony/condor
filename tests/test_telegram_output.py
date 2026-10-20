@@ -8,7 +8,7 @@ from condor.runtime.events import RuntimeEvent
 from condor.telegram.output import lease as output_lease
 from condor.telegram.output.lease import OutputLease
 from handlers.agents.stream import TelegramStreamer
-from tests.test_telegram_layered_replies import Bot, feed
+from tests.support.telegram import Bot, feed
 
 
 @pytest.mark.asyncio

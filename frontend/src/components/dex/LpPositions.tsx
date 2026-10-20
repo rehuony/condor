@@ -1,7 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { feeAmount, lpStateStyle } from "./lp-position";
+import { feeAmount, lpStateStyle } from "@/components/dex/lp-position-presentation";
 import { useLpPositions } from "@/hooks/useLpPositions";
 import { formatPnl, formatUsd, pnlColor } from "@/lib/formatters";
 

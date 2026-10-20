@@ -16,10 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/Spinner";
-import type {
-  ChatAttachment,
-  ChatMessage as ChatMessageType,
-} from "@/hooks/useChatSocket";
+import type { ChatAttachment, ChatMessage as ChatMessageType } from "@/lib/chat-transcript";
 import { useAuthedImage } from "@/hooks/useAuthedImage";
 import { agentColor } from "@/lib/agentColor";
 import { copyText } from "@/lib/clipboard";

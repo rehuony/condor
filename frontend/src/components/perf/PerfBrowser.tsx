@@ -18,8 +18,8 @@ import {
   runChipLabel,
   runOwner,
   runRecords,
-} from "@/components/perf/agentFilter";
-import type { BubbleOption } from "@/components/perf/FilterBubbles";
+} from "@/lib/agent-filter";
+import type { BubbleOption } from "@/lib/agent-filter";
 import { ownerNoun, scopeOwners } from "@/components/perf/scopeOwners";
 import { ArchivedBotDetail } from "@/components/bots/ArchivedBotDetail";
 import { IconButton } from "@/components/ui/IconButton";
@@ -106,7 +106,8 @@ import { PERIODS, type PeriodKey } from "./browser/options";
 import { ScopeFilters } from "./browser/ScopeFilters";
 import { ScopeNotices } from "./browser/ScopeNotices";
 import { ScopeSheet, ScopeSheetToggle } from "./browser/ScopeSheet";
-import { ScopeTreePane, type ExecutorPaging } from "./browser/ScopeTreePane";
+import { ScopeTreePane } from "@/components/perf/browser/ScopeTreePane";
+import { type ExecutorPaging } from "@/hooks/useFleetData";
 import { plural } from "./browser/text";
 import { useScopeSheet } from "./browser/useScopeSheet";
 

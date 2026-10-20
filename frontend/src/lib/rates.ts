@@ -15,7 +15,7 @@
  * with the *quote's* symbol, and mark it `⚠`.
  */
 
-import { CURRENCY_SYMBOLS, type DisplayCurrency } from "@/hooks/useDisplayCurrency";
+import { CURRENCY_SYMBOLS, type DisplayCurrency } from "@/lib/display-currency";
 
 /**
  * `useRates().convert`: a value in `quoteCurrency` moved into the display

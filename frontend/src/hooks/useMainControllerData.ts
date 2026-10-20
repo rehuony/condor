@@ -1,11 +1,7 @@
 import { useMemo } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 
-import {
-  LP_EXECUTOR_TYPE,
-  LP_REFRESH_MS,
-  RECENT_LP_EXECUTORS,
-} from "@/components/dex/lp-position";
+import { LP_EXECUTOR_TYPE, LP_REFRESH_MS, RECENT_LP_EXECUTORS } from "@/lib/dex/lp-position";
 import { portfolioApi } from "@/lib/api/portfolio";
 import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
 import { computeMultiOverlays } from "@/lib/executor-overlays";

@@ -51,10 +51,7 @@ def _get_start_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
 
 
 async def _show_start_menu(query, context: Context) -> None:
-    """
-    Show the /start menu (replaces config menu for Back navigation).
-    Mirrors the logic from main.py start() but for callback query context.
-    """
+    """Show the configuration menu used by Back navigation."""
     import asyncio
 
     from config_manager import get_config_manager, get_effective_server

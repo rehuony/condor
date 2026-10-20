@@ -1,6 +1,5 @@
 import { type Query, QueryClient } from "@tanstack/react-query";
 
-import { venuesQueryKey } from "@/components/market/useVenues";
 import { agentsApi, type AgentDetail } from "@/lib/api/agents";
 
 /**
@@ -387,7 +386,7 @@ export const CONTROLLER_PERF_ROOTS = [
  * Recover a per-controller history key, or `null` if the key is not one.
  *
  * The inverse of `controllerPerfHistoryQuery`, and the reason a reorder cannot
- * pass unnoticed: the round trip is asserted in `queryClient.test.ts`, so
+ * pass unnoticed: the round trip is asserted in `tests/lib/query-client.test.ts`, so
  * moving `bot_name` off index 2 or the interval off the end fails a test
  * rather than quietly unplugging the socket.
  */
@@ -472,4 +471,13 @@ export function invalidateCredentialQueries(
   client.invalidateQueries({ queryKey: credentialsQuery(server).queryKey });
   client.invalidateQueries({ queryKey: venuesQueryKey(server) });
   client.invalidateQueries({ queryKey: ["connected-exchanges", server] });
+}
+
+/**
+ * The `["venues", server]` key, single-sourced (ARCH-355) so a caller that
+ * only needs to invalidate the entry — a credential mutation, not a render —
+ * does not have to copy the literal (CORR-353).
+ */
+export function venuesQueryKey(server: string | null | undefined) {
+  return ["venues", server] as const;
 }

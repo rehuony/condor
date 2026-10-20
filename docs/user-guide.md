@@ -23,6 +23,7 @@ Condor runs in a **tmux** session named `condor`:
 
 | Command | Purpose |
 | --- | --- |
+| `make build` | Build the dashboard and swap the bundle in place |
 | `make run` | Build the dashboard, then start Condor in the session |
 | `make run-fg` | Same, in the foreground, for a startup error that needs debugging |
 | `make stop` / `make restart` | Stop, or stop and start again |

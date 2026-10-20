@@ -17,8 +17,8 @@ import remarkGfm from "remark-gfm";
 
 import { MarkdownEditor } from "@/components/agent/MarkdownEditor";
 import { invalidateStrategyCatalog } from "@/components/agent/agentQueries";
-import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
-import { effectiveTradingContext, formatRunId } from "@/components/agent/lab/runs";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { effectiveTradingContext, formatRunId } from "@/lib/agent-runs";
 import { DiscardChangesDialog } from "@/components/editor/EditorDialogs";
 import { ReportBrowser } from "@/components/routines/ReportBrowser";
 import { countdown } from "@/lib/agent-attribution";
@@ -225,22 +225,22 @@ export function PlaybookView({
         />
       )}
 
-      <ConfirmDialog
-        open={showDeleteConfirm}
+      {showDeleteConfirm && <ConfirmDialog
         title="Delete Loop"
-        isPending={deleteMutation.isPending}
-        isError={deleteMutation.isError}
-        errorText={
+        confirmLabel="Delete"
+        pendingLabel="Deleting..."
+        pending={deleteMutation.isPending}
+        error={deleteMutation.isError ? (
           deleteMutation.error instanceof Error
             ? deleteMutation.error.message
             : "Failed to delete loop. It may be running."
-        }
+        ) : null}
         onConfirm={() => deleteMutation.mutate()}
-        onClose={() => setShowDeleteConfirm(false)}
+        onCancel={() => setShowDeleteConfirm(false)}
       >
         Delete <strong className="text-[var(--color-text)]">{strategy.name}</strong>?
         This cannot be undone.
-      </ConfirmDialog>
+      </ConfirmDialog>}
     </div>
   );
 }

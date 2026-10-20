@@ -5,7 +5,7 @@
 // screen's disclosures are open. Four pages, three tab strips and five URL-less
 // panels collapsed onto that grammar, so the rules that read it have to be
 // reachable from a test rather than only from a rendered page. Same split
-// `lab/runs.ts` made, and the same reason: this route reads more parameters
+// `lib/agent-runs.ts` made, and the same reason: this route reads more parameters
 // than any page before it, and none of the reading happens in JSX.
 //
 // `?view=` used to be the first of them and named the body on screen. It is not
@@ -17,7 +17,7 @@
 //
 // Nothing here fetches and nothing here renders.
 
-import { isLoopRun, parseRunId, type RunRef } from "@/components/agent/lab/runs";
+import { isLoopRun, parseRunId, type RunRef } from "@/lib/agent-runs";
 import { OPEN_PARAM } from "@/components/agent/workspace/sections";
 import { workspaceHref } from "@/components/agent/workspace/workspaceUrl";
 import { countdown } from "@/lib/agent-attribution";

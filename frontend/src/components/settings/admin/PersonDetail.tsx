@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 
 import { Spinner } from "@/components/ui/Spinner";
-import type { AdminPerson, RoleTarget } from "@/lib/admin-api";
+import type { AdminPerson, RoleTarget } from "@/lib/api/admin";
 import { formatRelativeTime } from "@/lib/formatters";
 
 import { formatDate } from "./identity";

@@ -42,7 +42,7 @@
  * logout clears them unconditionally, and auth-token.ts stays dependency-free
  * so the API client can read a token without pulling this module in.
  *
- * `sessionState.keys.test.ts` enforces both halves of that: no other module may
+ * `tests/lib/session-state.keys.test.ts` enforces both halves of that: no other module may
  * spell a storage key of its own, and that exception list is the only one.
  */
 
@@ -93,7 +93,7 @@ export const CHAT_DRAFT_KEY_PREFIX = "condor.chat.draft:";
 /** The chosen theme, or absent for "follow the system" (hooks/useTheme). */
 export const THEME_KEY = "condor_theme";
 
-/** Which currency amounts are rendered in (hooks/useDisplayCurrency). */
+/** Which currency amounts are rendered in (lib/display-currency). */
 export const DISPLAY_CURRENCY_KEY = "condor_display_currency";
 
 /**

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { invalidateStrategyCatalog } from "@/components/agent/agentQueries";
-import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EntityCard } from "@/components/agent/EntityCard";
 import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import { workspaceHref } from "@/components/agent/workspace/workspaceUrl";
@@ -196,25 +196,25 @@ export function AgentStrategies({
         onClose={() => setShowCreate(false)}
       />
 
-      <ConfirmDialog
-        open={!!deleteStrategy}
+      {!!deleteStrategy && <ConfirmDialog
         title="Delete Loop"
-        isPending={deleteMut.isPending}
-        isError={deleteMut.isError}
-        errorText={
+        confirmLabel="Delete"
+        pendingLabel="Deleting..."
+        pending={deleteMut.isPending}
+        error={deleteMut.isError ? (
           deleteMut.error instanceof Error
             ? deleteMut.error.message
             : "Failed to delete loop. It may be running."
-        }
+        ) : null}
         onConfirm={() => deleteStrategy && deleteMut.mutate(deleteStrategy)}
-        onClose={() => setDeleteStrategy(null)}
+        onCancel={() => setDeleteStrategy(null)}
       >
         Delete{" "}
         <strong className="text-[var(--color-text)]">
           {deleteStrategy?.name}
         </strong>
         ? This cannot be undone.
-      </ConfirmDialog>
+      </ConfirmDialog>}
     </>
   );
 }

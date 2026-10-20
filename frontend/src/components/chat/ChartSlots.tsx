@@ -24,6 +24,8 @@
 
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useMemo,
@@ -32,8 +34,27 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { SpinnerBlock } from "@/components/ui/Spinner";
 import { chartFences } from "@/lib/chartFences";
-import { ChartBlock } from "./ChartBlock";
+
+const ChartBlock = lazy(() =>
+  import("./ChartBlock").then((module) => ({ default: module.ChartBlock })),
+);
+
+function DeferredChart({ raw, live }: { raw: string; live: boolean }) {
+  return (
+    <Suspense
+      fallback={
+        <SpinnerBlock
+          className="my-2 h-[250px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+          label="Loading chart"
+        />
+      }
+    >
+      <ChartBlock raw={raw} live={live} />
+    </Suspense>
+  );
+}
 
 /** Where a chart's instance lives, looked up by the fence body it was drawn
  *  from. `null` when the answer's fences cannot name one unambiguously. */
@@ -95,7 +116,7 @@ export function ChartSlotHost({
         i === -1
           ? null
           : createPortal(
-              <ChartBlock raw={body} live={live} />,
+              <DeferredChart raw={body} live={live} />,
               containers[i],
               String(i),
             ),
@@ -128,6 +149,6 @@ export function ChartSlot({ raw, live }: { raw: string; live: boolean }) {
     [container],
   );
 
-  if (!container) return <ChartBlock raw={raw} live={live} />;
+  if (!container) return <DeferredChart raw={raw} live={live} />;
   return <div ref={park} />;
 }

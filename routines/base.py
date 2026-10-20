@@ -76,6 +76,27 @@ class RoutineContext:
         )
 
 
+def resolve_server_name(context: RoutineContext) -> str:
+    """Resolve the run's server for both client access and stored report identity.
+
+    An explicit launch server outranks the Telegram chat's current preference.
+    Missing or unavailable chat preferences fall back to the configured default.
+    """
+    from config_manager import get_config_manager, get_effective_server
+
+    launched_with = getattr(context, "server_name", None)
+    if launched_with:
+        return launched_with
+
+    try:
+        name = get_effective_server(context.chat_id, context.user_data)
+    except Exception:
+        logger.debug("Could not resolve the active server", exc_info=True)
+        name = None
+
+    return name or get_config_manager().get_default_server() or ""
+
+
 def library_dir() -> Path:
     """The general routine library on disk: the directory this module lives in.
 

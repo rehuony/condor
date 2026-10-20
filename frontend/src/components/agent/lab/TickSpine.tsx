@@ -2,12 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import {
-  BEAT_TITLES,
-  actionsByTick,
-  beatState,
-  type BeatState,
-} from "@/components/agent/lab/runs";
+import { BEAT_TITLES, actionsByTick, beatState, type BeatState } from "@/lib/agent-runs";
 import type { AgentActionRow } from "@/lib/agent-attribution";
 import { agentsApi } from "@/lib/api/agents";
 import { parseJournal, type TickEntry } from "@/lib/parse-agent";
@@ -19,7 +14,7 @@ import { parseJournal, type TickEntry } from "@/lib/parse-agent";
  * name, so a row of beats is the whole history of a run and the fastest way
  * into any moment of it — including a run that may have ended weeks ago.
  *
- * The colour rule lives in `lab/runs.ts` so it is testable without a DOM. Its
+ * The colour rule lives in `lib/agent-runs.ts` so it is testable without a DOM. Its
  * fourth state is the one that matters: a run written before the action log
  * existed has no record of what any tick did, and is drawn grey with a tooltip
  * that says so — never hollow, which would claim every tick did nothing.

@@ -24,10 +24,8 @@ import {
 } from "@/components/agent/knowledgeTabs";
 import { AgentPanel } from "@/components/chat/AgentPanel";
 import { AgentWiring } from "@/components/chat/AgentWiring";
-import {
-  BrainPicker,
-  type BrainSelection,
-} from "@/components/chat/BrainPicker";
+import { BrainPicker } from "@/components/chat/BrainPicker";
+import { type BrainSelection } from "@/lib/api/chat";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatRail } from "@/components/chat/ChatRail";
 import { ChatThread } from "@/components/chat/ChatThread";
@@ -49,7 +47,8 @@ import {
   WorkspacePaneOutlet,
   WorkspacePaneProvider,
 } from "@/components/chat/WorkspacePane";
-import { Starters, type Starter } from "@/components/chat/Starters";
+import { Starters } from "@/components/chat/Starters";
+import { type Starter } from "@/hooks/useStarters";
 import { WORKSPACE_BAR } from "@/components/chat/workspaceBar";
 import { IconButton } from "@/components/ui/IconButton";
 import { useBrainSwitch } from "@/hooks/useBrainSwitch";
