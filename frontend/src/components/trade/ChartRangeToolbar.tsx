@@ -16,7 +16,13 @@ interface ChartRangeToolbarProps {
   onRangeChange: (seconds: number) => void;
   /** What the window control is called on this surface. */
   rangeLabel?: string;
+  /** The measured box: placement and size, never the visible chrome. */
   className?: string;
+  /**
+   * The visible controls' own box. A divider or padding that should sit against
+   * the controls goes here, not on `className`, which may be far wider.
+   */
+  contentClassName?: string;
 }
 
 const CUSTOM = "custom";
@@ -24,8 +30,13 @@ const CUSTOM = "custom";
 /**
  * Candle interval and chart window for the CEX and DEX trade workspaces.
  *
- * Wide layouts show every preset as a light segmented row; narrow layouts fold
- * both into two compact menus so the chart keeps its height.
+ * With room for it every preset shows as a light segmented row; with less, both
+ * fold into two compact menus. The switch follows the toolbar's own width (a
+ * container query), not the viewport's, so it also folds when it shares a row
+ * with the market chip and ticker on a wide screen. Callers size it: as a flex
+ * item it needs `flex-1` (or a basis) and a minimum width, because a container
+ * cannot take its width from its own contents. The controls hug the end the
+ * caller justifies them to, and `contentClassName` styles just their box.
  */
 export function ChartRangeToolbar({
   intervals,
@@ -37,6 +48,7 @@ export function ChartRangeToolbar({
   onRangeChange,
   rangeLabel = "Range",
   className = "",
+  contentClassName = "",
 }: ChartRangeToolbarProps) {
   const rangeValue = isCustomRange ? CUSTOM : String(rangeSeconds);
   const rangeOptions = [
@@ -48,31 +60,33 @@ export function ChartRangeToolbar({
   };
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      {/* One fixed-width segmented control, the height of a market chip, so
-          picking a longer label never resizes the bar around it. */}
-      <div className="flex h-7 w-36 items-center divide-x divide-[var(--color-border)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-px md:hidden">
-        <SelectField size="inline" label="Candle interval" title="Candle interval" className="h-full shrink-0 basis-14"
-          value={interval} onChange={onIntervalChange}
-          options={intervals.map((iv) => ({ value: iv, label: iv }))} />
-        <SelectField size="inline" label="Chart range" title={`Chart ${rangeLabel.toLowerCase()}`} className="h-full flex-1"
-          value={rangeValue} onChange={pickRange} options={rangeOptions} />
-      </div>
+    <div className={`@container flex items-center ${className}`}>
+      <div className={`flex items-center self-stretch ${contentClassName}`}>
+        {/* One fixed-width segmented control, the height of a market chip, so
+            picking a longer label never resizes the bar around it. */}
+        <div className="flex h-7 w-32 shrink-0 items-center divide-x divide-[var(--color-border)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-px @min-[32rem]:hidden">
+          <SelectField size="inline" label="Candle interval" title="Candle interval" className="h-full shrink-0 basis-14"
+            value={interval} onChange={onIntervalChange}
+            options={intervals.map((iv) => ({ value: iv, label: iv }))} />
+          <SelectField size="inline" label="Chart range" title={`Chart ${rangeLabel.toLowerCase()}`} className="h-full flex-1"
+            value={rangeValue} onChange={pickRange} options={rangeOptions} />
+        </div>
 
-      <div className="hidden items-center gap-3 md:flex">
-        <Segment label="Interval" ariaLabel="Candle interval">
-          {intervals.map((iv) => (
-            <Pill key={iv} active={interval === iv} onClick={() => onIntervalChange(iv)}>{iv}</Pill>
-          ))}
-        </Segment>
-        <div className="h-4 w-px bg-[var(--color-border)]" />
-        <Segment label={rangeLabel} ariaLabel="Chart range">
-          {isCustomRange && <span className="px-1 text-[11px] text-[var(--color-primary)]">Custom</span>}
-          {ranges.map((r) => (
-            <Pill key={r.label} active={!isCustomRange && rangeSeconds === r.seconds}
-              onClick={() => onRangeChange(r.seconds)}>{r.label}</Pill>
-          ))}
-        </Segment>
+        <div className="hidden items-center gap-3 whitespace-nowrap @min-[32rem]:flex">
+          <Segment label="Interval" ariaLabel="Candle interval">
+            {intervals.map((iv) => (
+              <Pill key={iv} active={interval === iv} onClick={() => onIntervalChange(iv)}>{iv}</Pill>
+            ))}
+          </Segment>
+          <div className="h-4 w-px bg-[var(--color-border)]" />
+          <Segment label={rangeLabel} ariaLabel="Chart range">
+            {isCustomRange && <span className="px-1 text-[11px] text-[var(--color-primary)]">Custom</span>}
+            {ranges.map((r) => (
+              <Pill key={r.label} active={!isCustomRange && rangeSeconds === r.seconds}
+                onClick={() => onRangeChange(r.seconds)}>{r.label}</Pill>
+            ))}
+          </Segment>
+        </div>
       </div>
     </div>
   );

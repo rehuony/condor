@@ -610,14 +610,16 @@ export function CreateExecutor() {
 
   return (
     <div className="-m-3 flex min-h-full flex-col sm:-m-6 lg:h-[calc(100%+3rem)]">
-      {/* Top Bar. `--chart-tools` is the width the chart controls reserve:
-          they stay on this row while it has room for them, and otherwise wrap
-          onto the starred markets' row, which takes whatever they leave. */}
-      <div className="flex shrink-0 flex-wrap items-stretch border-b border-[var(--color-border)] bg-[var(--color-surface)] [--chart-tools:10.5rem] md:[--chart-tools:35rem]">
-        {/* Back button */}
+      {/* Top Bar: one row at every width. Nothing wraps; each part gives way
+          instead — the ticker drops its 24h stats, the starred markets scroll,
+          and the chart controls fold into two menus when their share is too
+          narrow for the full row of presets. */}
+      <div className="flex shrink-0 items-stretch overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+        {/* Back button. Phones have their own back gesture, and the row
+            needs the room more there. */}
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-1 border-r border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+          className="hidden items-center gap-1 border-r border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] sm:flex"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
@@ -628,7 +630,7 @@ export function CreateExecutor() {
             on its own, dropping the page onto the new venue's default pair
             before you had chosen one. The chip states the market and opens the
             browser, which is where both halves are now chosen together. */}
-        <div className="relative flex min-w-0 items-stretch border-r border-[var(--color-border)]">
+        <div className="relative flex min-w-[8rem] shrink items-stretch border-r border-[var(--color-border)]">
           <button
             onClick={() => setBrowserOpen((v) => !v)}
             aria-pressed={browserOpen}
@@ -673,8 +675,11 @@ export function CreateExecutor() {
             />
           </button>
           {/* Star the pair in the header, without a round trip through Browse.
-              Reads as a mark on the pair name, so it trails it. */}
-          <StarMarketButton server={server} connector={connector} pair={pair} />
+              Reads as a mark on the pair name, so it trails it. Phones leave it
+              to the market list: on one row the pair name needs the room. */}
+          <span className="hidden sm:contents">
+            <StarMarketButton server={server} connector={connector} pair={pair} />
+          </span>
           {/* The shortcut, in words, on the first hover only. Suppressed while
               the list is open, where the key it teaches would do nothing. */}
           {browseHint.visible && !browserOpen && (
@@ -688,9 +693,10 @@ export function CreateExecutor() {
           )}
         </div>
 
-        {/* Price ticker. Its minimum keeps the price (and from md the change)
-            in view: the chart controls wrap to the next row before taking it. */}
-        <div className="flex min-w-[7.5rem] flex-1 items-center px-3 py-1.5 md:min-w-48 md:py-2">
+        {/* Price ticker, sized by what it shows and allowed to shrink to the
+            price alone: its stats sit on a clipped second line, so whatever
+            no longer fits simply drops out of view. */}
+        <div className="flex min-w-[5.5rem] shrink items-center px-3 py-1.5 md:py-2">
           <PriceTicker
             server={server}
             connector={connector}
@@ -700,9 +706,19 @@ export function CreateExecutor() {
           />
         </div>
 
-        {/* Each divider is a left border and a top shadow pulled 1px outside
-            the item, so it only shows where a neighbour or a row sits on that
-            side: the page edge and the bar's top edge clip the rest. */}
+        {/* Starred markets ride in the row and scroll within whatever it
+            leaves them. Kept above the browser so toggling it never resizes
+            the workspace. */}
+        {caps.hasOrderBook && (
+          <FavoritesStrip
+            server={server}
+            connector={connector}
+            pair={pair}
+            onPick={applyMarket}
+            className="min-w-0 shrink border-l border-[var(--color-border)] px-2 py-1"
+          />
+        )}
+
         <ChartRangeToolbar
           intervals={INTERVALS}
           interval={gridState.interval}
@@ -715,20 +731,11 @@ export function CreateExecutor() {
             setRangeRequestId((id) => id + 1);
             gridDispatch({ type: "SET_FIELD", field: "lookbackSeconds", value: seconds });
           }}
-          className="-ml-px min-w-fit shrink-0 basis-[var(--chart-tools)] border-l border-[var(--color-border)] px-3 py-1 shadow-[0_-1px_0_var(--color-border)] md:py-2"
+          // The divider belongs to the controls, not to the slack the row
+          // leaves before them, so it sits against whichever form is showing.
+          className="min-w-[9rem] flex-1 justify-end"
+          contentClassName="border-l border-[var(--color-border)] px-2 py-1 md:px-3"
         />
-        {/* Kept above the browser so toggling it never resizes the workspace.
-            Its basis leaves exactly the chart controls' room, so it never fits
-            beside them on the top row but always does on the row below. */}
-        {caps.hasOrderBook && (
-          <FavoritesStrip
-            server={server}
-            connector={connector}
-            pair={pair}
-            onPick={applyMarket}
-            className="-ml-px min-w-0 grow basis-[calc(100%-var(--chart-tools))] border-l border-[var(--color-border)] px-2 py-1 shadow-[0_-1px_0_var(--color-border)]"
-          />
-        )}
       </div>
 
       {/* Main Area: Chart + Right Panel */}

@@ -81,19 +81,17 @@ export function MarketBrowser({
   );
 
   // The keyboard cursor belongs to the venue it was moved in. A venue switch is
-  // a whole new list, so the cursor simply stops matching and reads 0 again — no
-  // effect, and no render where Enter points into the old venue.
-  const [cursorAt, setCursorAt] = useState({ venue, index: 0 });
-  const activeIndex = cursorAt.venue === venue ? cursorAt.index : 0;
+  // a whole new list, so the cursor simply stops matching — no effect, and no
+  // render where Enter points into the old venue. `null` means "not moved yet",
+  // which rests the cursor on the market the surface is on (resolved below,
+  // once the rows exist), so opening the list starts where you already are.
+  const [cursorAt, setCursorAt] = useState<{ venue: string; index: number | null }>({
+    venue,
+    index: null,
+  });
+  const movedIndex = cursorAt.venue === venue ? cursorAt.index : null;
   const setActiveIndex = useCallback(
-    (next: number | ((i: number) => number)) =>
-      setCursorAt((c) => {
-        const base = c.venue === venue ? c.index : 0;
-        return {
-          venue,
-          index: typeof next === "function" ? next(base) : next,
-        };
-      }),
+    (index: number) => setCursorAt({ venue, index }),
     [venue],
   );
 
@@ -211,9 +209,14 @@ export function MarketBrowser({
   ]);
 
   const visible = rows.slice(0, MAX_ROWS);
+  const currentIndex =
+    venue === connector ? visible.findIndex((t) => t.trading_pair === pair) : -1;
   // A list that shrank under the cursor (a slower query resolving, a star being
   // removed under a filter) must not leave Enter pointing at nothing.
-  const cursor = Math.min(activeIndex, Math.max(0, visible.length - 1));
+  const cursor =
+    movedIndex === null
+      ? Math.max(0, currentIndex)
+      : Math.min(movedIndex, Math.max(0, visible.length - 1));
 
   // The label comes from the widest window on screen: a pair listed three hours
   // ago is the exception, not the column's promise.
@@ -251,10 +254,10 @@ export function MarketBrowser({
     if (e.target instanceof Element && e.target.closest("select, button")) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, visible.length - 1));
+      setActiveIndex(Math.min(cursor + 1, visible.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActiveIndex((i) => Math.max(i - 1, 0));
+      setActiveIndex(Math.max(cursor - 1, 0));
     } else if (e.key === "Enter" && visible[cursor]) {
       e.preventDefault();
       pick(visible[cursor]);
@@ -450,16 +453,23 @@ export function MarketBrowser({
               const [base, quoteAsset] = t.trading_pair.split("-");
               // Only "the market you are on" when both halves match: the same
               // pair on the venue you are browsing is a different market.
-              const selected = t.trading_pair === pair && venue === connector;
+              const selected = i === currentIndex;
               const starred = isFavorite({ connector: venue, pair: t.trading_pair });
               return (
                 <div
                   key={t.trading_pair}
                   data-market-row
+                  aria-current={selected ? "true" : undefined}
+                  data-cursor={i === cursor ? "true" : undefined}
+                  // The tint marks the market you are on — the same thing the
+                  // gold pair name says. The keyboard cursor only borrows the
+                  // hover grey, so the two can never be mistaken for each other.
                   className={`grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2 px-3 text-xs md:grid-cols-[1.5rem_minmax(0,1fr)_7rem_6rem_5rem] ${
-                    i === cursor
+                    selected
                       ? "bg-[var(--color-primary)]/10"
-                      : "hover:bg-[var(--color-surface-hover)]"
+                      : i === cursor
+                        ? "bg-[var(--color-surface-hover)]"
+                        : "hover:bg-[var(--color-surface-hover)]"
                   }`}
                 >
                   <button

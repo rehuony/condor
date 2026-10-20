@@ -137,6 +137,9 @@ function rowCells(pair: string): HTMLElement[] {
 }
 
 beforeEach(() => {
+  // jsdom has no layout, so no `scrollIntoView`; the list calls it to keep the
+  // cursor row in view.
+  Element.prototype.scrollIntoView = () => {};
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   picked.length = 0;
@@ -214,7 +217,7 @@ describe("picking a row", () => {
     const control = container.querySelector(selector)!;
     const cursorRow = () =>
       [...document.querySelectorAll("[data-market-row]")].findIndex((r) =>
-        r.className.includes("bg-[var(--color-primary)]/10"),
+        r.hasAttribute("data-cursor"),
       );
     for (const key of ["ArrowDown", "ArrowUp", "Enter"]) {
       const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
@@ -222,6 +225,29 @@ describe("picking a row", () => {
       expect(cursorRow()).toBe(0);
     }
     expect(picked).toEqual([]);
+  });
+
+  it("opens on the market you are on, wherever it sorts", async () => {
+    // Sorted by volume, the chart's BTC-USDT is the second row, not the first.
+    TICKERS = [
+      ticker({ trading_pair: "ETH-USDT", usd_volume: 900 }),
+      ticker({ trading_pair: "BTC-USDT", usd_volume: 100 }),
+    ];
+    await render();
+
+    const rows = [...document.querySelectorAll("[data-market-row]")];
+    // The tint, the cursor and aria-current all name the same row.
+    expect(rows.map((r) => r.getAttribute("aria-current"))).toEqual([null, "true"]);
+    expect(rows.map((r) => r.hasAttribute("data-cursor"))).toEqual([false, true]);
+
+    const list = rows[0].parentElement!;
+    await act(async () =>
+      list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })),
+    );
+    await act(async () =>
+      list.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+    );
+    expect(picked).toEqual([{ connector: "binance", pair: "ETH-USDT" }]);
   });
 
   it("carries the pair and the venue it was scoped to back to the trade surface", async () => {
