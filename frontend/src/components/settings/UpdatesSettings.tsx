@@ -13,7 +13,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { ApiUpdateSection } from "@/components/settings/ApiUpdateSection";
-import { SECTION_ACTION_CLASS, UpdatesSection } from "@/components/settings/UpdatesSection";
+import { RepoRevision, SECTION_ACTION_CLASS, UpdatesSection } from "@/components/settings/UpdatesSection";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
@@ -302,18 +302,14 @@ function ComponentCard({
           !facet ? null : (
             <div key={kind} className="text-xs">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="w-12 shrink-0 uppercase tracking-wide text-[var(--color-text-muted)]">
+                <span className="w-10 shrink-0 uppercase tracking-wide text-[var(--color-text-muted)]">
                   {kind}
                 </span>
-                <span className="font-mono text-[var(--color-text)]">
-                  {facet.current}
-                </span>
+                <FacetValue value={facet.current} />
                 {facet.available && !facet.up_to_date && (
                   <>
                     <span className="text-[var(--color-text-muted)]">→</span>
-                    <span className="font-mono text-[var(--color-primary)]">
-                      {facet.available}
-                    </span>
+                    <FacetValue value={facet.available} className="text-[var(--color-primary)]" />
                   </>
                 )}
                 {facet.behind > 0 && (
@@ -323,10 +319,10 @@ function ComponentCard({
                 )}
               </div>
               {facet.error && (
-                <p className="mt-1 pl-14 text-[var(--color-red)]">{facet.error}</p>
+                <p className="mt-1 pl-12 text-[var(--color-red)]">{facet.error}</p>
               )}
               {facet.detail.length > 0 && (
-                <details className="mt-1 pl-14">
+                <details className="mt-1 pl-12">
                   <summary className="cursor-pointer text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                     What&apos;s new
                   </summary>
@@ -345,6 +341,17 @@ function ComponentCard({
       </div>
     </Card>
   );
+}
+
+/**
+ * A facet's version. A `branch@commit` (the repo facet's shape) is drawn by the
+ * shared `RepoRevision`, so it matches the Hummingbot API card; anything else —
+ * "unknown", a tag — is shown as it came.
+ */
+function FacetValue({ value, className }: { value: string; className?: string }) {
+  const match = /^(.+?)\s*@\s*(\S+)$/.exec(value);
+  if (match) return <RepoRevision branch={match[1]} commit={match[2]} className={className} />;
+  return <span className={`font-mono ${className ?? "text-[var(--color-text)]"}`}>{value}</span>;
 }
 
 /** The plan, what it will cost, and anything standing in the way. */

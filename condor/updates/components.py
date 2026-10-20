@@ -170,7 +170,7 @@ async def _repo_facet(repo_dir: str) -> Facet:
     if info.get("error"):
         return Facet(
             kind="repo",
-            current=f"{branch} @ {local}",
+            current=f"{branch}@{local}",
             up_to_date=False,
             error=str(info["error"]),
         )
@@ -185,8 +185,8 @@ async def _repo_facet(repo_dir: str) -> Facet:
 
     return Facet(
         kind="repo",
-        current=f"{branch} @ {local}",
-        available=f"{branch} @ {info['remote_commit']}" if behind else None,
+        current=f"{branch}@{local}",
+        available=f"{branch}@{info['remote_commit']}" if behind else None,
         behind=behind,
         up_to_date=behind == 0,
         detail=detail,

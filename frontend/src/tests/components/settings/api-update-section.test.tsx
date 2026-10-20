@@ -18,6 +18,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const checkApiUpdate = vi.fn();
+const getApiServerInfo = vi.fn();
 const serverHolder = { current: "alpha" as string | null };
 
 vi.mock("@/lib/api", () => ({
@@ -26,6 +27,7 @@ vi.mock("@/lib/api", () => ({
 vi.mock("@/lib/api/settings", () => ({
   settingsApi: {
     checkApiUpdate: (s: string) => checkApiUpdate(s),
+    getApiServerInfo: (s: string) => getApiServerInfo(s),
   },
 }));
 vi.mock("@/hooks/useServer", () => ({
@@ -89,6 +91,7 @@ beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   serverHolder.current = "alpha";
   checkApiUpdate.mockReset().mockResolvedValue(verdict("up_to_date", "The running source matches main."));
+  getApiServerInfo.mockReset().mockResolvedValue({ container: { build: { branch: "main" } } });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -112,6 +115,15 @@ describe("ApiUpdateSection", () => {
     expect(container.textContent).toContain("make deploy");
   });
 
+  it("shows the bare commit when the image does not record its branch", async () => {
+    getApiServerInfo.mockResolvedValue({ container: { build: null } });
+    await mount();
+    await click(checkButton());
+
+    expect(container.textContent).toContain("repo768e7c1f");
+    expect(container.textContent).not.toContain("@768e7c1f");
+  });
+
   it("checks once per press, for the selected server", async () => {
     let answer: (value: unknown) => void = () => {};
     checkApiUpdate.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
@@ -126,8 +138,9 @@ describe("ApiUpdateSection", () => {
     await act(async () => answer(verdict("update_available", "main has newer changes.")));
     await click(document.body);
     expect(container.textContent).toContain("Update available");
-    // Running → main, eight digits each, with the comparison one click away.
-    expect(container.textContent).toContain("768e7c1f→e8991393");
+    // branch@commit on both sides, eight digits each, like Condor's own card,
+    // with the comparison one click away.
+    expect(container.textContent).toContain("main@768e7c1f→main@e8991393");
     expect(container.querySelector(`a[href*="/compare/"]`)).not.toBeNull();
   });
 

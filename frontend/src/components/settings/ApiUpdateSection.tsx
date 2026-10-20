@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { Problem, TOO_OLD } from "@/components/settings/ApiServerParts";
-import { SECTION_ACTION_CLASS, UpdatesSection } from "@/components/settings/UpdatesSection";
+import { RepoRevision, SECTION_ACTION_CLASS, UpdatesSection } from "@/components/settings/UpdatesSection";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useServer } from "@/hooks/useServer";
@@ -43,12 +43,16 @@ const UPDATE_STEPS: { command?: string; text: string }[] = [
 const CODE = "rounded bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--color-text)]";
 
 /** A revision the way Condor's card prints one: eight hex digits, the whole SHA on hover. */
-function Revision({ value, className }: { value: string; className: string }) {
-  return (
-    <span className={`font-mono ${className}`} title={value}>
-      {value.slice(0, 8)}
-    </span>
-  );
+function Revision({
+  value,
+  branch,
+  className,
+}: {
+  value: string;
+  branch?: string | null;
+  className: string;
+}) {
+  return <RepoRevision branch={branch} commit={value.slice(0, 8)} title={value} className={className} />;
 }
 
 /**
@@ -109,7 +113,7 @@ export function ApiUpdateSection() {
           ) : check.error != null ? (
             <Problem error={check.error} />
           ) : (
-            result && <RevisionRow result={result} />
+            result && <RevisionRow result={result} server={server} />
           )}
 
           {/* Collapsed like the "What's new" on Condor's card. */}
@@ -153,22 +157,30 @@ function StatusBadge({ result }: { result: ApiUpdateCheck | undefined }) {
 }
 
 /** `repo  running → main`, the line Condor's card prints for its own checkout. */
-function RevisionRow({ result }: { result: ApiUpdateCheck }) {
+function RevisionRow({ result, server }: { result: ApiUpdateCheck; server: string }) {
   const { current_revision: current, latest_revision: latest } = result;
+  // The running image's branch, from the same query the Hummingbot API page
+  // reads (shared cache, so no second request). The check itself compares
+  // against `main`, which is therefore the branch on the right of the arrow.
+  const { data: info } = useQuery({
+    queryKey: ["api-server-info", server],
+    queryFn: () => settingsApi.getApiServerInfo(server),
+  });
+  const branch = info?.container?.build?.branch ?? null;
   const differs = current != null && latest != null && current !== latest;
   return (
     <div>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="w-12 shrink-0 uppercase tracking-wide text-[var(--color-text-muted)]">repo</span>
+        <span className="w-10 shrink-0 uppercase tracking-wide text-[var(--color-text-muted)]">repo</span>
         {current ? (
-          <Revision value={current} className="text-[var(--color-text)]" />
+          <Revision value={current} branch={branch} className="text-[var(--color-text)]" />
         ) : (
           <span className="text-[var(--color-text-muted)]">unknown</span>
         )}
         {differs && (
           <>
             <span className="text-[var(--color-text-muted)]">→</span>
-            <Revision value={latest} className="text-[var(--color-primary)]" />
+            <Revision value={latest} branch="main" className="text-[var(--color-primary)]" />
           </>
         )}
         {differs && result.compare_url && (
@@ -185,7 +197,7 @@ function RevisionRow({ result }: { result: ApiUpdateCheck }) {
       </div>
       {result.reason && !SELF_EXPLANATORY.has(result.status) && (
         <p
-          className={`mt-1 pl-14 ${
+          className={`mt-1 pl-12 ${
             result.status === "error" ? "text-[var(--color-red)]" : "text-[var(--color-text-muted)]"
           }`}
         >

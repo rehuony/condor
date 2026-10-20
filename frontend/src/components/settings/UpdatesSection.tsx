@@ -35,3 +35,34 @@ export function UpdatesSection({
     </section>
   );
 }
+
+/**
+ * A checkout's revision as both update cards print it: `branch @ commit`, three
+ * monospace pieces a fixed gap apart, so the two cards line up character for
+ * character whatever spacing their source strings came with. The branch and the
+ * `@` are left off when the branch is not known.
+ */
+export function RepoRevision({
+  branch,
+  commit,
+  title,
+  className = "text-[var(--color-text)]",
+}: {
+  branch?: string | null;
+  commit: string;
+  /** The full revision, on hover. */
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <span className={`inline-flex items-baseline gap-1 font-mono ${className}`} title={title}>
+      {branch && (
+        <>
+          <span>{branch}</span>
+          <span className="text-[var(--color-text-muted)]">@</span>
+        </>
+      )}
+      <span>{commit}</span>
+    </span>
+  );
+}

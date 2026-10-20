@@ -23,8 +23,9 @@ Three rules, and they are the whole design:
 ## Writing one
 
 A shared routine runs under **agents too**, which have no chat. It must
-therefore work with no `context._chat_id` and no `get_client(chat_id)` — the
-assumption most routines in root `routines/` freely make. Prefer returning a
+therefore work without one — `context.chat_id` may be 0, so no chat-scoped
+`get_client(context.chat_id, ...)` — the assumption most routines in root
+`routines/` freely make. Prefer returning a
 `RoutineResult` (or building a report) over an unconditional `send_photo` /
 `send_message`, and gate any chat-only side effect on the chat actually being
 there.

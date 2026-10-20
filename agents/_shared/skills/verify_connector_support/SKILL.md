@@ -27,7 +27,7 @@ Never guess connector capabilities from memory. Always pull the authoritative so
 | **AMM / CLMM / DLMM pools, swap routers** | `meteora`, `raydium`, `orca`, `jupiter`, `uniswap`, `pancakeswap` | **Gateway** — `connector_name` is the network (`solana-mainnet-beta`); the DEX rides in `lp_provider` / `swap_provider` | `explore_dex_pools`, `manage_amm`, `manage_clmm`, `quote_swap` / `execute_swap`, `create_lp_executor`, `manage_gateway_config` |
 | **CLOB (order-book) DEXs** | `hyperliquid`, `hyperliquid_perpetual`, `xrpl`, `dydx_v4_perpetual`, `injective_v2`, `injective_v2_perpetual`, `derive`, `derive_perpetual`, `dexalot` | **Hummingbot directly**, through the Hummingbot API — exactly like a CEX | `get_prices`, `get_portfolio_overview`, order book / trading rules via `run_code`, every executor, controllers and bots |
 
-A CLOB DEX is a plain Hummingbot connector: its credentials go in Settings → Keys (not a
+A CLOB DEX is a plain Hummingbot connector: its credentials go in Settings → Keys and Wallets (not a
 Gateway wallet), it has no pools, and Gateway knows nothing about it. Never reach for
 `manage_gateway_config`, `explore_dex_pools`, `manage_amm` / `manage_clmm` or
 `quote_swap` / `execute_swap` for one. Rule of thumb: if you place limit orders on an

@@ -50,8 +50,8 @@ manage_bots(action="status")   # no bot_name — returns all active bots
 **Record the deployment timestamp.** It is the start of the live comparison window
 and cannot be recovered later.
 
-For a single lightweight controller, an executor may fit better than a bot —
-delegate to the `executor_manager` agent.
+For a single lightweight position, an executor may fit better than a bot — deploy
+it yourself with `create_position_executor` (the same confirmation applies).
 
 ## Step 3 — Early monitoring
 

@@ -20,7 +20,7 @@ templating + anomaly detection on top of the structured logs.
 
 ## Where logs come from (data sources)
 
-All via `client = await get_client(context._chat_id, context=context)`:
+All via `client = await get_client(context.chat_id, user_data=context.user_data)`:
 
 | Source | Call | What you get |
 |--------|------|--------------|
