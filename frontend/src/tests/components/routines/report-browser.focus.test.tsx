@@ -169,7 +169,7 @@ describe("the library's scope picker", () => {
 
     // Hosted, the routine list is a 48px rail — the filter it used to live in
     // is unreachable there, which made it no filter at all.
-    expect(container.querySelector('[class~="md:w-12"]')).toBeTruthy();
+    expect(container.querySelector('[class~="md:w-sidebar-rail"]')).toBeTruthy();
     expect(scope()).toBeTruthy();
     expect(scope().textContent).toBe("All routines");
   });

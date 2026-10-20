@@ -60,7 +60,7 @@ export function ScopeSheet({
         aria-modal={open ? true : undefined}
         aria-label={open ? "Scope and filters" : undefined}
         className={`flex min-h-0 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
-          compact ? "w-12" : "w-72"
+          compact ? "w-sidebar-rail" : "w-sidebar"
         } ${
           // Narrow panes show the scope as a bottom sheet, only while asked for.
           open

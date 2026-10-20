@@ -230,7 +230,7 @@ describe("ReportBrowser hosted in the pane", () => {
     expect(browser().className).not.toContain("fixed");
     expect(browser().className).not.toContain("inset-0");
     // The sidebar opens on its rail, which is what makes it fit at pane width.
-    expect(container.querySelector('[class~="md:w-12"]')).toBeTruthy();
+    expect(container.querySelector('[class~="md:w-sidebar-rail"]')).toBeTruthy();
     expect(container.querySelector('[class~="md:w-64"]')).toBeNull();
   });
 

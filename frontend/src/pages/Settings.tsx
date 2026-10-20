@@ -61,8 +61,8 @@ function buildGroups(server: string | null, isAdmin: boolean): TabGroup[] {
     {
       label: server ? `Server · ${server}` : "Server",
       tabs: [
-        { key: "api", label: "Hummingbot API", icon: ServerCog },
         { key: "gateway", label: "Gateway", icon: Network },
+        { key: "api", label: "Hummingbot API", icon: ServerCog },
         { key: "keys", label: "Keys and Wallets", icon: KeyRound },
       ],
     },
@@ -70,8 +70,8 @@ function buildGroups(server: string | null, isAdmin: boolean): TabGroup[] {
       label: "Condor",
       tabs: [
         { key: "servers", label: "Servers", icon: Server },
-        { key: "llm", label: "LLM Endpoints", icon: Sparkles },
         { key: "voice", label: "Voice & AI", icon: Mic },
+        { key: "llm", label: "LLM Endpoints", icon: Sparkles },
       ],
     },
     {

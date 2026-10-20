@@ -135,9 +135,9 @@ export function RoutineLibrarySidebar({
       aria-label="Routine library"
       className={`${page ? "hidden md:flex @max-[639px]/routine-browser:hidden" : "flex"} min-h-0 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] ${
         compact
-          ? "w-full max-h-32 md:w-12 md:max-h-none"
+          ? "w-full max-h-32 md:w-sidebar-rail md:max-h-none"
           : page
-            ? "w-full md:w-[300px]"
+            ? "w-full md:w-sidebar"
             : "w-full max-h-[35%] md:w-64 md:max-h-none"
       }`}
     >
@@ -148,7 +148,8 @@ export function RoutineLibrarySidebar({
             Routines
           </span>
         )}
-        {headerAction}
+        {/* The rail leads with the way back out; the full header ends with it. */}
+        {!compact && headerAction}
         <IconButton
           label={compact ? "Expand the library" : "Collapse to the rail"}
           size="sm"
@@ -157,6 +158,7 @@ export function RoutineLibrarySidebar({
         >
           {compact ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
         </IconButton>
+        {compact && headerAction}
       </div>
 
       {!compact && (

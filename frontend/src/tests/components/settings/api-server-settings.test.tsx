@@ -13,8 +13,6 @@
  *   changed.
  * * **A 501 is not a red error.** The server is healthy and older than this panel, so
  *   the operator's action is "deploy a newer build", not "find the outage".
- * * **The update check contacts GitHub only when asked.** Mounting, focus and switching
- *   servers never fire it, and an answer belongs to the server it was asked about.
  *
  * @vitest-environment jsdom
  */
@@ -27,7 +25,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const getApiServerInfo = vi.fn();
 const getApiClientConfig = vi.fn();
 const updateApiClientConfig = vi.fn();
-const checkApiUpdate = vi.fn();
 const serverHolder = { current: "alpha" as string | null };
 const ownerHolder = { current: true };
 
@@ -39,7 +36,6 @@ vi.mock("@/lib/api/settings", () => ({
     getApiServerInfo: (s: string) => getApiServerInfo(s),
     getApiClientConfig: (s: string) => getApiClientConfig(s),
     updateApiClientConfig: (s: string, c: unknown) => updateApiClientConfig(s, c),
-    checkApiUpdate: (s: string) => checkApiUpdate(s),
   },
 }));
 vi.mock("@/hooks/useServer", () => ({
@@ -57,7 +53,6 @@ declare global {
 }
 
 const REVISION = "768e7c1f96fb1f21d91ff2313c0de0f8afa1cd3e";
-const LATEST = "e899139394d27c6bfed099073e5933b721a80664";
 
 const INFO = {
   api_version: "1.0.1",
@@ -83,17 +78,6 @@ const INFO = {
     compose_config_files: "/srv/hummingbot-api/docker-compose.yml",
   },
 };
-
-function verdict(status: string, reason: string | null = null) {
-  return {
-    status,
-    current_revision: REVISION,
-    latest_revision: LATEST,
-    checked_at: "2026-10-20T09:00:00Z",
-    reason,
-    compare_url: `https://github.com/rehuony/hummingbot-api/compare/${REVISION}...${LATEST}`,
-  };
-}
 
 const CONFIG = {
   account_name: "master_account",
@@ -137,24 +121,6 @@ async function menuValues(label: string): Promise<string[]> {
   return values;
 }
 
-/** "Check for updates", or "Retry check" after a failure. */
-function checkButton(): HTMLButtonElement {
-  const button = [...container.querySelectorAll("button")].find((b) => /check/i.test(b.textContent ?? ""));
-  if (!button) throw new Error("no update-check button");
-  return button as HTMLButtonElement;
-}
-
-async function click(el: Element) {
-  await act(async () => {
-    (el as HTMLElement).click();
-  });
-  for (let i = 0; i < 10; i++) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    });
-  }
-}
-
 function saveButton(): HTMLButtonElement {
   const button = [...container.querySelectorAll("button")].find((b) =>
     b.textContent?.includes("Save"),
@@ -187,7 +153,6 @@ beforeEach(() => {
   getApiServerInfo.mockReset().mockResolvedValue(INFO);
   getApiClientConfig.mockReset().mockResolvedValue(CONFIG);
   updateApiClientConfig.mockReset().mockResolvedValue({ success: true, message: "ok" });
-  checkApiUpdate.mockReset().mockResolvedValue(verdict("up_to_date", "The running source matches main."));
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -427,129 +392,5 @@ describe("ApiServerSettings", () => {
 
     expect(container.textContent).toContain("timed out");
     expect(container.querySelector(".border-red-500\\/30")).not.toBeNull();
-  });
-  // ── Source update check ──
-
-  it("never checks for updates on its own", async () => {
-    await mount();
-    await act(async () => {
-      window.dispatchEvent(new Event("focus"));
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-
-    expect(checkApiUpdate).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("make check-update");
-    expect(container.textContent).toContain("make deploy");
-  });
-
-  it("checks once per press, for the selected server", async () => {
-    let answer: (value: unknown) => void = () => {};
-    checkApiUpdate.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
-    await mount();
-
-    await click(checkButton());
-    expect(checkButton().disabled).toBe(true);
-    await click(checkButton());
-    expect(checkApiUpdate).toHaveBeenCalledTimes(1);
-    expect(checkApiUpdate).toHaveBeenCalledWith("alpha");
-
-    await act(async () => answer(verdict("update_available", "main has newer changes.")));
-    await click(document.body);
-    expect(container.textContent).toContain("Update available");
-    expect(container.textContent).toContain("Compare on GitHub");
-  });
-
-  it.each([
-    ["up_to_date", "Up to date"],
-    ["update_available", "Update available"],
-    ["ahead", "Ahead of main"],
-    ["diverged", "Diverged from main"],
-    ["unknown", "Cannot compare"],
-    ["error", "Check failed"],
-  ])("labels %s distinctly", async (status, label) => {
-    checkApiUpdate.mockResolvedValue(verdict(status, `because ${status}`));
-    await mount();
-    await click(checkButton());
-
-    expect(container.textContent).toContain(label);
-    expect(container.textContent).toContain(`because ${status}`);
-  });
-
-  it("offers a retry when the API reports a failed check", async () => {
-    checkApiUpdate.mockResolvedValue({
-      ...verdict("error", "GitHub rate limit reached; try the update check later."),
-      latest_revision: null,
-      compare_url: null,
-    });
-    await mount();
-    await click(checkButton());
-
-    expect(container.textContent).toContain("GitHub rate limit reached");
-    expect(checkButton().textContent).toContain("Retry check");
-    await click(checkButton());
-    expect(checkApiUpdate).toHaveBeenCalledTimes(2);
-  });
-
-  it("says a server without the route cannot check yet, not that it is down", async () => {
-    checkApiUpdate.mockRejectedValue(
-      Object.assign(new Error("This server's hummingbot-api cannot check its source for updates yet."), {
-        status: 501,
-      }),
-    );
-    await mount();
-    await click(checkButton());
-
-    expect(container.textContent).toContain("cannot check its source for updates yet");
-    expect(container.querySelector(".border-red-500\\/30")).toBeNull();
-  });
-
-  it("shows an unreachable server as a failure with a retry", async () => {
-    checkApiUpdate.mockRejectedValue(
-      Object.assign(new Error("Failed to check for updates: connection refused"), { status: 502 }),
-    );
-    await mount();
-    await click(checkButton());
-
-    expect(container.textContent).toContain("connection refused");
-    expect(container.querySelector(".border-red-500\\/30")).not.toBeNull();
-    expect(checkButton().textContent).toContain("Retry check");
-  });
-
-  it("keeps each server's result to itself, even when it arrives late", async () => {
-    let answerAlpha: (value: unknown) => void = () => {};
-    checkApiUpdate.mockImplementation((s: string) =>
-      s === "alpha"
-        ? new Promise((resolve) => (answerAlpha = resolve))
-        : Promise.resolve(verdict("up_to_date")),
-    );
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const render = async () => {
-      await act(async () => {
-        root.render(
-          <QueryClientProvider client={client}>
-            <ApiServerSettings />
-          </QueryClientProvider>,
-        );
-      });
-      await click(document.body);
-    };
-
-    await render();
-    await click(checkButton());
-
-    serverHolder.current = "beta";
-    await render();
-    // Switching does not check beta on its own, and alpha's pending check is not beta's.
-    expect(checkApiUpdate).toHaveBeenCalledTimes(1);
-    expect(checkButton().disabled).toBe(false);
-
-    await act(async () => answerAlpha(verdict("update_available", "alpha is behind")));
-    await click(document.body);
-    expect(container.textContent).not.toContain("alpha is behind");
-    expect(container.textContent).not.toContain("Update available");
-
-    serverHolder.current = "alpha";
-    await render();
-    expect(container.textContent).toContain("alpha is behind");
   });
 });

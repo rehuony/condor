@@ -491,3 +491,21 @@ export function formatConnectorName(name: string) {
 export function shortBotName(name: string): string {
   return name.replace(/(-\d{8}-\d{6})\1$/, "$1");
 }
+
+/**
+ * An ISO timestamp as epoch ms, or null when absent or unparseable. Docker reports
+ * nanoseconds, which `Date.parse` does not accept everywhere, so the fraction is cut to
+ * milliseconds first.
+ */
+export function parseIsoTime(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value.replace(/(\.\d{3})\d+/, "$1"));
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** An ISO timestamp as `YYYY-MM-DD HH:MM:SS UTC`; unparseable input is returned as given. */
+export function formatUtc(value: string | null | undefined): string {
+  const ms = parseIsoTime(value);
+  if (ms === null) return value || "unknown";
+  return `${new Date(ms).toISOString().replace("T", " ").slice(0, 19)} UTC`;
+}

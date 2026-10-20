@@ -1,29 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, Copy, RefreshCw, Save } from "lucide-react";
+import { Info, Save } from "lucide-react";
 import { useState } from "react";
 
+import { Identifier, Problem, UtcTime } from "@/components/settings/ApiServerParts";
 import { Card as Panel } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { IconButton } from "@/components/ui/IconButton";
 import { Spinner } from "@/components/ui/Spinner";
 import { SelectField } from "@/components/ui/select-field";
 import { useServer } from "@/hooks/useServer";
 import { OWNER_ONLY_HINT, useServerPermission } from "@/hooks/useServerPermission";
-import { errorStatus } from "@/lib/api";
 import {
   settingsApi,
   type ApiClientConfigUpdate,
   type ApiServerInfo,
-  type ApiUpdateCheck,
-  type ApiUpdateStatus,
 } from "@/lib/api/settings";
-import { copyText } from "@/lib/clipboard";
 
 /**
- * Settings → Hummingbot API: what the navbar-selected server runs, an on-demand check of
- * its source against `main`, and the client defaults every bot deployed from it next
- * will inherit (FEAT-121). Updating the API is a manual build and deploy on its host;
- * nothing here changes the deployment.
+ * Settings → Hummingbot API: what the navbar-selected server runs and the client
+ * defaults every bot deployed from it next will inherit (FEAT-121). Checking its source
+ * for updates lives with the other updates, on Settings → Updates.
  *
  * Scoped by `useServer()` alone, like the Gateway and Keys panels beside it — the navbar
  * select is the only picker, so this panel and the rest of the app can never disagree
@@ -31,13 +26,22 @@ import { copyText } from "@/lib/clipboard";
  * servers refetches rather than showing the previous one's answers.
  */
 
-/** 501: this server's API predates these routes. A newer build, not an outage. */
-const TOO_OLD = 501;
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+/** `hint` is background a reader rarely needs, so it waits behind an icon's tooltip. */
+function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <Panel>
-      <h3 className="mb-3 text-sm font-medium text-[var(--color-text)]">{title}</h3>
+      <h3 className="mb-3 flex items-center gap-1.5 text-sm font-medium text-[var(--color-text)]">
+        {title}
+        {hint && (
+          <Info
+            role="img"
+            aria-label={hint}
+            className="h-3.5 w-3.5 cursor-help text-[var(--color-text-muted)]"
+          >
+            <title>{hint}</title>
+          </Info>
+        )}
+      </h3>
       {children}
     </Panel>
   );
@@ -54,63 +58,10 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-/**
- * Why a request failed, in the operator's terms.
- *
- * A 501 is the one failure that is not a failure: the server is healthy and this panel
- * is newer than it, so it gets a neutral notice naming the fix. Everything else is red.
- */
-function Problem({ error }: { error: unknown }) {
-  const tooOld = errorStatus(error) === TOO_OLD;
-  const message = error instanceof Error ? error.message : "Request failed";
-  return (
-    <div
-      className={`flex items-start gap-2 rounded-md border p-3 text-xs ${
-        tooOld
-          ? "border-[var(--color-border)] text-[var(--color-text-muted)]"
-          : "border-red-500/30 text-[var(--color-red)]"
-      }`}
-    >
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>{message}</span>
-    </div>
-  );
-}
-
 /** A human label for a MARKET_DATA_* key: `ticker_max_age` → `Ticker max age`. */
 function humanize(key: string): string {
   const words = key.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/**
- * An ISO timestamp as `YYYY-MM-DD HH:MM:SS UTC`, with the viewer's local time as the
- * tooltip. Docker reports nanoseconds, which `Date.parse` does not accept everywhere,
- * so the fraction is cut to milliseconds first. Unparseable input is shown as given.
- */
-function UtcTime({ value }: { value: string | null | undefined }) {
-  if (!value) return <>unknown</>;
-  const ms = Date.parse(value.replace(/(\.\d{3})\d+/, "$1"));
-  if (Number.isNaN(ms)) return <>{value}</>;
-  const utc = new Date(ms).toISOString().replace("T", " ").slice(0, 19);
-  return <span title={new Date(ms).toLocaleString()}>{utc} UTC</span>;
-}
-
-/** A long identifier shown short, with the full value on hover and a copy button. */
-function Identifier({ value, length }: { value: string; length: number }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span title={value}>{value.slice(0, length)}</span>
-      <IconButton
-        label={copied ? "Copied" : "Copy full value"}
-        size="xs"
-        onClick={async () => setCopied(await copyText(value))}
-      >
-        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-      </IconButton>
-    </span>
-  );
 }
 
 /** `sha256:` plus the first 12 hex digits, the length `docker images` shows. */
@@ -200,16 +151,15 @@ function VersionCard({ server }: { server: string }) {
   if (!data) return null;
 
   return (
-    <Card title="Version">
+    <Card
+      title="Version"
+      hint="Describes the image of the running container. Rebuilding on the host changes it only after the next deploy."
+    >
       <div className="divide-y divide-[var(--color-border)]">
         <Row label="hummingbot-api">{data.api_version}</Row>
         <Row label="hummingbot">{data.hummingbot_version ?? "not installed"}</Row>
         <ContainerRows info={data} />
       </div>
-      <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-        Describes the image of the running container. Rebuilding on the host changes it
-        only after the next deploy.
-      </p>
     </Card>
   );
 }
@@ -390,111 +340,6 @@ function BotDefaultsCard({ server }: { server: string }) {
   );
 }
 
-const UPDATE_STATUS: Record<ApiUpdateStatus, { label: string; tone: string }> = {
-  up_to_date: { label: "Up to date", tone: "text-[var(--color-green)]" },
-  update_available: { label: "Update available", tone: "text-[var(--color-primary)]" },
-  ahead: { label: "Ahead of main", tone: "text-amber-500" },
-  diverged: { label: "Diverged from main", tone: "text-amber-500" },
-  unknown: { label: "Cannot compare", tone: "text-[var(--color-text-muted)]" },
-  error: { label: "Check failed", tone: "text-[var(--color-red)]" },
-};
-
-function UpdateResult({ result }: { result: ApiUpdateCheck }) {
-  const { label, tone } = UPDATE_STATUS[result.status] ?? UPDATE_STATUS.unknown;
-  return (
-    <div className="mt-3 space-y-1 rounded-md border border-[var(--color-border)] p-3 text-xs">
-      <p className={`font-medium ${tone}`}>{label}</p>
-      {result.reason && <p className="text-[var(--color-text-muted)]">{result.reason}</p>}
-      <div className="divide-y divide-[var(--color-border)]">
-        <Row label="Running">
-          {result.current_revision ? <Identifier value={result.current_revision} length={12} /> : "unknown"}
-        </Row>
-        <Row label="main">
-          {result.latest_revision ? <Identifier value={result.latest_revision} length={12} /> : "unknown"}
-        </Row>
-        <Row label="Checked">
-          <UtcTime value={result.checked_at} />
-        </Row>
-      </div>
-      {result.compare_url && (
-        <a
-          href={result.compare_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-block text-[var(--color-primary)] underline"
-        >
-          Compare on GitHub
-        </a>
-      )}
-    </div>
-  );
-}
-
-/**
- * Comparing the running API's source revision with `main` (via the API's own
- * `/system/update-check`).
- *
- * The check contacts GitHub, so it runs only when the button is pressed: the query is
- * disabled, which also keeps mounting, window focus and invalidation from firing it.
- * `server` is in the key, so a result — or a late answer — belongs to the server it was
- * asked about and never shows under another one.
- */
-function UpdateCheckCard({ server }: { server: string }) {
-  const check = useQuery({
-    queryKey: ["api-update-check", server],
-    queryFn: () => settingsApi.checkApiUpdate(server),
-    enabled: false,
-    retry: false,
-    gcTime: Infinity,
-  });
-
-  const unsupported = errorStatus(check.error) === TOO_OLD;
-  const failed = (check.error != null && !unsupported) || check.data?.status === "error";
-
-  return (
-    <Card title="Source updates">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Compares the running source revision with <code>main</code> of
-          rehuony/hummingbot-api. Runs only when you ask.
-        </p>
-        <button
-          onClick={() => void check.refetch()}
-          disabled={check.isFetching || unsupported}
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {check.isFetching ? <Spinner size="xs" /> : <RefreshCw className="h-3 w-3" />}
-          {failed ? "Retry check" : "Check for updates"}
-        </button>
-      </div>
-
-      {check.error != null && (
-        <div className="mt-3">
-          <Problem error={check.error} />
-        </div>
-      )}
-      {check.data && check.error == null && <UpdateResult result={check.data} />}
-
-      <div className="mt-3 text-xs text-[var(--color-text-muted)]">
-        <p>To update, on the API host in the hummingbot-api checkout:</p>
-        <ol className="mt-1 list-decimal space-y-0.5 pl-5">
-          <li>
-            <code>make check-update</code>
-          </li>
-          <li>
-            <code>make update</code>
-          </li>
-          <li>Back up the database and configuration as its maintenance guide describes.</li>
-          <li>
-            <code>make deploy</code> — builds the current source, then deploys it.
-          </li>
-        </ol>
-        <p className="mt-1">Condor does not update, deploy or restart the API.</p>
-      </div>
-    </Card>
-  );
-}
-
 function MarketDataCard({ server }: { server: string }) {
   const { data, error } = useQuery({
     queryKey: ["api-server-info", server],
@@ -539,7 +384,6 @@ export function ApiServerSettings() {
   return (
     <div className="space-y-4">
       <VersionCard server={server} />
-      <UpdateCheckCard server={server} />
       {/* Keyed by server: a draft typed for one server must not survive a switch to
           another, where it would read as that server's current values. */}
       <BotDefaultsCard key={server} server={server} />

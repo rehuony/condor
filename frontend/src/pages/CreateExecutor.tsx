@@ -58,7 +58,6 @@ import { BROWSE_HINT_KEY } from "@/lib/sessionState";
 import type { ChartPriceMapping, PickSlot } from "@/components/executor/types";
 import type { ExecutorType } from "@/lib/connector-capabilities";
 import {
-  hasRememberedMarket,
   isSpotConnector,
   LAST_MARKET_KEY,
   INTERVALS,
@@ -158,13 +157,9 @@ export function CreateExecutor() {
 
   const [successInfo, setSuccessInfo] = useState<{ id: string; type: ExecutorType; connector: string; pair: string } | null>(null);
   const [rightPanel, setRightPanel] = useState<"config" | "depth">("config");
-  // Cold start lands on the market list (FEAT-053): with no remembered market
-  // there is nothing to come back to, and the alternative is a chart on a pair
-  // the reset effect picked. A URL that names a pair *is* a choice, so it skips
-  // the list — the effect above has not stripped the param yet on this render.
-  const [browserOpen, setBrowserOpen] = useState(
-    () => !searchParams.get("pair") && !hasRememberedMarket(),
-  );
+  // The market list opens only when asked for (the chip or `/`), so the page
+  // always lands on its chart.
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(288);
   const [mobileResultsOpen, setMobileResultsOpen] = useState(false);
   const [bottomPaneHeight, setBottomPaneHeight] = useState(200);
@@ -633,7 +628,7 @@ export function CreateExecutor() {
             on its own, dropping the page onto the new venue's default pair
             before you had chosen one. The chip states the market and opens the
             browser, which is where both halves are now chosen together. */}
-        <div className="relative flex min-w-0 items-center border-r border-[var(--color-border)]">
+        <div className="relative flex min-w-0 items-stretch border-r border-[var(--color-border)]">
           <button
             onClick={() => setBrowserOpen((v) => !v)}
             aria-pressed={browserOpen}

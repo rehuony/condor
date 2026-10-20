@@ -117,7 +117,7 @@ export const ChatRail = memo(function ChatRail({
   // overlay you dismiss, and a strip of icons there would be a third mode
   // nobody asked for.
   const collapsedRail = (
-    <aside className="hidden w-10 shrink-0 flex-col items-center gap-3 border-r border-[var(--color-border)] bg-[var(--color-bg)] py-2 md:flex">
+    <aside className="hidden w-sidebar-rail shrink-0 flex-col items-center gap-3 border-r border-[var(--color-border)] bg-[var(--color-bg)] py-2 md:flex">
       <IconButton
         label="Show agents and conversations"
         size="sm"
@@ -154,7 +154,7 @@ export const ChatRail = memo(function ChatRail({
       <aside
         className={`${
           open ? "flex" : "hidden"
-        } absolute inset-y-0 left-0 z-30 w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)] md:relative ${expanded ? "md:flex" : "md:hidden"}`}
+        } absolute inset-y-0 left-0 z-30 w-sidebar shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)] md:relative ${expanded ? "md:flex" : "md:hidden"}`}
       >
         {/* What is looping right now, the way into it, and the way out of the
             column — the mirror of the dock's own collapse. */}

@@ -38,6 +38,7 @@ from pathlib import Path
 import condor.reports as reports
 from condor import primitives, routine_hooks
 from condor.memory.paths import (
+    CHAT_SLUG,
     agent_home_layers,
     iter_agent_slugs,
     shared_routines_roots,
@@ -228,8 +229,12 @@ class RoutineStore:
         # Scan <root>/*/routines/ across both agent roots (FEAT-115): the
         # `_`-prefixed library dirs are skipped by ``iter_agent_slugs``, so one
         # can never surface here as a routine owner named `_shared/...`, and a
-        # local routine shadows the shipped one of the same name.
+        # local routine shadows the shipped one of the same name. The chat's own
+        # `condor/routines` is skipped: `discover_routines` already lists it as
+        # the general library, so prefixing it too would list each one twice.
         for slug in iter_agent_slugs():
+            if slug == CHAT_SLUG:
+                continue
             agent_routines = _merged_from(_agent_routine_dirs(slug), agent_slug=slug)
             for rname, rinfo in agent_routines.items():
                 # Shallow-copy before prefixing: the RoutineInfo is shared

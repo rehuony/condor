@@ -268,6 +268,16 @@ function TokenBarChart({
   );
 }
 
+// ── Assets Table ──
+
+const ASSET_COLUMNS: { label: string; align: "left" | "right"; width?: string }[] = [
+  { label: "Token", align: "left" },
+  { label: "Amount", align: "right", width: "15%" },
+  { label: "Price", align: "right", width: "15%" },
+  { label: "Wallet value", align: "right", width: "20%" },
+  { label: "Allocation", align: "right", width: "22%" },
+];
+
 // ── Allocation Bar ──
 
 function AllocationBar({ pct }: { pct: number }) {
@@ -1225,24 +1235,25 @@ export function Portfolio() {
           <>
           <MobileAssets connectors={connectors} totalPortfolio={totalUsd} convertFromUsd={convertFromUsd} currencySymbol={currencySymbol} />
           <div className="hidden overflow-hidden rounded-lg border border-[var(--color-border)] md:block">
-            <table className="w-full text-sm">
+            {/* Fixed layout: column widths come from the colgroup, not from
+                whichever rows are expanded, so collapsing an account does not
+                reshuffle the columns. Token takes the remaining width. */}
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                {ASSET_COLUMNS.map((col) => (
+                  <col key={col.label} style={col.width ? { width: col.width } : undefined} />
+                ))}
+              </colgroup>
               <thead>
                 <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Token
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Amount
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Price
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Wallet value
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Allocation
-                  </th>
+                  {ASSET_COLUMNS.map((col) => (
+                    <th
+                      key={col.label}
+                      className={`px-4 py-3 ${col.align === "left" ? "text-left" : "text-right"} text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>

@@ -131,7 +131,10 @@ export function useAuthState(): AuthState {
     fetch("/api/v1/auth/me", {
       headers: authHeaders(),
     }).then((res) => {
-      if (!res.ok) {
+      // Only the server's verdict on the token ends the session (401 invalid,
+      // 403 revoked). A 5xx from a proxy whose backend is restarting says
+      // nothing about the token, so it is treated like the network failure below.
+      if (res.status === 401 || res.status === 403) {
         logout();
       }
     }).catch(() => {

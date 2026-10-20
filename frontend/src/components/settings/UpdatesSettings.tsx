@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { ApiUpdateSection } from "@/components/settings/ApiUpdateSection";
+import { SECTION_ACTION_CLASS, UpdatesSection } from "@/components/settings/UpdatesSection";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
@@ -123,14 +125,6 @@ export function UpdatesSettings() {
     qc.invalidateQueries({ queryKey: RELAUNCH_KEY });
   }, [finishedId, qc]);
 
-  if (status.isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
   if (active && isLive(active)) {
     return <RunningView run={active} offline={runQuery.isError} />;
   }
@@ -208,55 +202,60 @@ export function UpdatesSettings() {
   const stale = components.filter((c) => !c.up_to_date);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs leading-relaxed text-[var(--color-text-muted)]">
-          Updating Condor does not restart it: the new code lands on disk and
-          you relaunch when it suits you. Hummingbot API is updated on its own
-          host; see Settings → Hummingbot API.
-        </p>
-        <button
-          onClick={() => checkMut.mutate()}
-          disabled={checkMut.isPending}
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${checkMut.isPending ? "animate-spin" : ""}`}
+    <div className="space-y-6">
+      <UpdatesSection
+        title="Condor"
+        description="Updating Condor does not restart it: the new code lands on disk and you relaunch when it suits you."
+        action={
+          <button
+            onClick={() => checkMut.mutate()}
+            disabled={checkMut.isPending}
+            className={SECTION_ACTION_CLASS}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${checkMut.isPending ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        }
+      >
+        {status.isLoading && (
+          <div className="flex items-center justify-center py-8 text-[var(--color-text-muted)]">
+            <Spinner size="lg" />
+          </div>
+        )}
+
+        {status.isError && (
+          <p className="text-xs text-[var(--color-red)]">
+            {(status.error as Error).message}
+          </p>
+        )}
+
+        {components.map((c) => (
+          <ComponentCard
+            key={c.key}
+            component={c}
+            isPending={preflightMut.isPending}
+            onUpdate={() => preflightMut.mutate([c.key])}
           />
-          Refresh
-        </button>
-      </div>
+        ))}
 
-      {status.isError && (
-        <p className="text-xs text-[var(--color-red)]">
-          {(status.error as Error).message}
-        </p>
-      )}
+        {stale.length > 1 && (
+          <button
+            onClick={() => preflightMut.mutate(stale.map((c) => c.key))}
+            disabled={preflightMut.isPending}
+            className="w-full rounded-lg bg-[var(--color-primary)]/15 px-3 py-2 text-sm font-medium text-[var(--color-primary)] transition-opacity hover:opacity-80 disabled:opacity-50"
+          >
+            Update all ({stale.length})
+          </button>
+        )}
 
-      {components.map((c) => (
-        <ComponentCard
-          key={c.key}
-          component={c}
-          isPending={preflightMut.isPending}
-          onUpdate={() => preflightMut.mutate([c.key])}
-        />
-      ))}
+        {preflightMut.isError && (
+          <p className="text-xs text-[var(--color-red)]">
+            {(preflightMut.error as Error).message}
+          </p>
+        )}
+      </UpdatesSection>
 
-      {stale.length > 1 && (
-        <button
-          onClick={() => preflightMut.mutate(stale.map((c) => c.key))}
-          disabled={preflightMut.isPending}
-          className="w-full rounded-lg bg-[var(--color-primary)]/15 px-3 py-2 text-sm font-medium text-[var(--color-primary)] transition-opacity hover:opacity-80 disabled:opacity-50"
-        >
-          Update all ({stale.length})
-        </button>
-      )}
-
-      {preflightMut.isError && (
-        <p className="text-xs text-[var(--color-red)]">
-          {(preflightMut.error as Error).message}
-        </p>
-      )}
+      <ApiUpdateSection />
     </div>
   );
 }

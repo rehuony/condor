@@ -112,26 +112,6 @@ export function loadGridDefaults(applyLastMarket = false): GridState {
   return merged;
 }
 
-/**
- * Whether this browser has a market to come back to.
- *
- * The trade page opens on the market list when it does not: with nothing
- * remembered the panel would otherwise land on whichever venue happens to sort
- * first, on `BTC-USDT` by default — a market chosen by the code rather than by
- * anyone. A returning user goes straight to their chart, which is why this asks
- * about the *stored* market and not about the state already merged over it.
- */
-export function hasRememberedMarket(): boolean {
-  try {
-    const raw = localStorage.getItem(LAST_MARKET_KEY);
-    if (!raw) return false;
-    const { connector, pair } = JSON.parse(raw);
-    return !!connector && !!pair;
-  } catch {
-    return false;
-  }
-}
-
 export function saveGridDefaults(state: GridState) {
   savePersistedDefaults(GRID_STORAGE_KEY, state, GRID_PERSISTED_FIELDS);
 }

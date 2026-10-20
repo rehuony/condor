@@ -111,7 +111,7 @@ export function RunRail({
   const anyChats = presentKinds.has("conversation");
 
   return (
-    <div className="flex h-full w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="flex h-full w-sidebar shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="border-b border-[var(--color-border)] px-3 py-2.5">
         <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
           Runs

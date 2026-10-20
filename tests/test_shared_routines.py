@@ -194,6 +194,17 @@ class TestSharedIsNotAnAgent:
         # A shared routine arrives through the general library instead — un-prefixed.
         assert "published" in names
 
+    def test_discover_all_lists_a_chat_routine_once(self, isolated):
+        """The chat's local routines are the general library, not also an agent's."""
+        from condor.routine_store import RoutineStore
+
+        _write(paths_mod.local_agents_root() / CHAT_SLUG / "routines", "mine")
+
+        names = set(RoutineStore()._discover_all())
+
+        assert "mine" in names
+        assert f"{CHAT_SLUG}/mine" not in names
+
     def test_store_resolves_a_shared_routine_by_its_bare_name(self, isolated):
         from condor.routine_store import RoutineStore
 
