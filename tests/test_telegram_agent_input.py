@@ -2,6 +2,8 @@
 
 import asyncio
 import io
+import time
+from contextlib import aclosing
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -14,6 +16,7 @@ from condor.acp.client import PromptDone, TextChunk
 from condor.runtime import SessionKey, SessionSpec, attachments
 from condor.runtime import client as runtime
 from condor.runtime import conversations, sessions
+from condor.runtime.events import EventType
 from condor.telegram.ingress import get_ingress
 from condor.telegram.input import InputError, TelegramInputResolver
 from condor.telegram.update import TgUpdate
@@ -442,12 +445,37 @@ def test_caption_secret_is_handled_even_if_attachment_is_rejected(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("accept_delay", [0, 0.05], ids=["normal-write", "slow-write"])
 def test_access_revoked_after_queue_acceptance_prevents_model_execution(
-    world, monkeypatch
+    world, monkeypatch, accept_delay
 ):
+    request_id = f"telegram:{USER}:2"
+    accept = conversations.Recorder.accept
+
+    def delayed_accept(recorder):
+        if recorder.request_id == request_id:
+            # Simulate slow durable IO in the runtime's worker thread.
+            time.sleep(accept_delay)
+        accept(recorder)
+
+    if accept_delay:
+        monkeypatch.setattr(conversations.Recorder, "accept", delayed_accept)
+
     async def run():
         info = await world.start()
         entered, release = asyncio.Event(), asyncio.Event()
+        queued = asyncio.Event()
+        queued_events = []
+        prompt = runtime.prompt
+
+        async def observe_prompt(key, request, **kwargs):
+            async with aclosing(prompt(key, request, **kwargs)) as events:
+                async for event in events:
+                    if request.request_id == request_id:
+                        queued_events.append(event)
+                        if event.type == EventType.QUEUED:
+                            queued.set()
+                    yield event
 
         async def prompt_stream(self, text, **kwargs):
             world.calls.append({"text": text, **kwargs})
@@ -457,26 +485,42 @@ def test_access_revoked_after_queue_acceptance_prevents_model_execution(
             yield TextChunk(text="Done")
             yield PromptDone(stop_reason="end_turn")
 
+        monkeypatch.setattr(runtime, "prompt", observe_prompt)
         monkeypatch.setattr(world.client, "prompt_stream", prompt_stream)
 
-        active = asyncio.create_task(
-            agents.agent_message_handler(update(1, text="First"), world.context)
-        )
-        await entered.wait()
-        queued = asyncio.create_task(
-            agents.agent_message_handler(update(2, text="Second"), world.context)
-        )
-        for _ in range(100):
-            if conversations.has_request(USER, f"telegram:{USER}:2"):
-                break
-            await asyncio.sleep(0)
-        assert conversations.has_request(USER, f"telegram:{USER}:2")
-        world.role[0] = config_manager.UserRole.BLOCKED
-        release.set()
-        await asyncio.gather(active, queued)
-        assert len(world.calls) == 1
-        assert "Second" not in conversations.replay_context(USER, info.conversation_id)
-        await world.finish()
+        tasks = []
+        try:
+            tasks.append(
+                asyncio.create_task(
+                    agents.agent_message_handler(update(1, text="First"), world.context)
+                )
+            )
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            tasks.append(
+                asyncio.create_task(
+                    agents.agent_message_handler(
+                        update(2, text="Second"), world.context
+                    )
+                )
+            )
+            # Event-loop yields cannot guarantee a worker's durable write is done.
+            await asyncio.wait_for(queued.wait(), timeout=5)
+            assert conversations.has_request(USER, request_id)
+            assert len(world.calls) == 1
+            world.role[0] = config_manager.UserRole.BLOCKED
+            release.set()
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+            assert queued_events[-1].stop_reason == "access_denied"
+            assert len(world.calls) == 1
+            assert "Second" not in conversations.replay_context(
+                USER, info.conversation_id
+            )
+        finally:
+            release.set()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await world.finish()
 
     asyncio.run(run())
 
