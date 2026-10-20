@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Loader2, Search, Star, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Search, Star, X } from "lucide-react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import { formatConnectorName } from "@/lib/formatters";
 import { SelectField } from "@/components/ui/select-field";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import type { Ticker } from "@/lib/api";
+import type { Ticker } from "@/lib/api/market";
 import { formatCompactVolume, formatPrice } from "@/lib/formatters";
 import {
   changeColumnLabel,
@@ -321,7 +322,7 @@ export function MarketBrowser({
               className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
             />
             {isFetching && (
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--color-text-muted)]" />
+              <Spinner size="sm" tone="muted" />
             )}
           </label>
 

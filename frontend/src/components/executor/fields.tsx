@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
+import { Label } from "@/components/ui/Field";
 
 import { PERCENT_PRESETS, SIDE_OPTIONS } from "./field-options";
 
@@ -248,7 +249,7 @@ export function SelectField({
 
   return (
     <div>
-      <label className="mb-1 block text-xs text-[var(--color-text-muted)]">{label}</label>
+      <Label>{label}</Label>
       <button
         ref={setAnchor}
         type="button"
@@ -470,9 +471,9 @@ export function AmountField({
 
   return (
     <div>
-      <label htmlFor={id} className="mb-1 block text-xs text-[var(--color-text-muted)]">
+      <Label htmlFor={id}>
         Amount ({inQuote ? quoteAsset : baseAsset})
-      </label>
+      </Label>
       <div className="flex items-center gap-1">
         <input
           id={id}
@@ -516,7 +517,7 @@ export function LeverageField({
   if (isSpot) {
     return (
       <div>
-        <label htmlFor={id} className="mb-1 block text-xs text-[var(--color-text-muted)]">Leverage</label>
+        <Label htmlFor={id}>Leverage</Label>
         <div className="flex items-center gap-1">
           <input
             id={id}

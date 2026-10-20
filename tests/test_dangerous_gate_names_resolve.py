@@ -175,7 +175,7 @@ def test_the_executor_family_is_gated_by_name():
 
 def test_a_gated_executor_call_names_what_it_will_do():
     """The confirmation prompt must show the size, not the bare tool name."""
-    from handlers.agents.confirmation import format_tool_summary
+    from condor.runtime.danger import format_tool_summary
 
     for call, expected in (
         (
@@ -246,7 +246,7 @@ def test_gated_calls_render_a_specific_confirmation_summary():
     asked the user to approve the bare string "manage_clmm" — a confirmation
     that shows nothing to confirm.
     """
-    from handlers.agents.confirmation import format_tool_summary
+    from condor.runtime.danger import format_tool_summary
 
     for tool_name, action, expected in (
         ("manage_clmm", "open", "Open CLMM position"),
@@ -361,7 +361,7 @@ def test_a_dca_ladder_of_numeric_strings_still_states_its_size():
     rendered. Summing the raw list raised, and a raise inside the permission
     callback is a silent cancellation of a funds call nobody ever saw.
     """
-    from handlers.agents.confirmation import format_tool_summary
+    from condor.runtime.danger import format_tool_summary
 
     summary = format_tool_summary(
         {
@@ -388,7 +388,7 @@ def test_an_unreadable_dca_rung_drops_the_total_instead_of_raising():
     partially summed, because a summary that understates what is being approved
     is worse than one that says less.
     """
-    from handlers.agents.confirmation import format_tool_summary
+    from condor.runtime.danger import format_tool_summary
 
     for amounts in ([100, None], ["abc", 1], [{"amount": 1}], ["nan", 1], [1, "inf"]):
         summary = format_tool_summary(
@@ -408,7 +408,7 @@ def test_every_other_summarized_number_survives_arriving_as_a_string():
     Prices, levels, spreads and percentages ride the same uncoerced wire, so the
     whole summary path is pinned against string-typed numerics at once.
     """
-    from handlers.agents.confirmation import format_tool_summary
+    from condor.runtime.danger import format_tool_summary
 
     for call, expected in (
         (
@@ -520,7 +520,7 @@ def test_control_agent_fails_closed_on_an_unreadable_action():
 
 def test_a_gated_start_names_the_strategy_it_will_run():
     """The prompt must show the loop being started, not an opaque config blob."""
-    from handlers.agents.confirmation import format_tool_summary
+    from condor.runtime.danger import format_tool_summary
 
     summary = format_tool_summary(
         {

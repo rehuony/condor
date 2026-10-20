@@ -5,7 +5,7 @@ import { StatusBadge } from "@/components/agent/StatusBadge";
 import { dueInSec } from "@/components/agent/workspace/fleet";
 import { useSeconds } from "@/hooks/useSeconds";
 import { countdown } from "@/lib/agent-attribution";
-import type { RunningInstance } from "@/lib/api";
+import type { RunningInstance } from "@/lib/api/agents";
 import { formatAge } from "@/lib/formatters";
 
 // ── Entity Card ──

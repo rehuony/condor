@@ -1,4 +1,4 @@
-import { type ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import { formatUsd } from "@/lib/formatters";
 
 import { num } from "./format";

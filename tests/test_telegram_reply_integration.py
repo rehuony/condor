@@ -5,9 +5,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from telegram import Update
 
-from condor import telegram_output
 from condor.acp.client import ACPClient, PromptDone, TextChunk
 from condor.runtime import (
     PromptRequest,
@@ -17,6 +15,8 @@ from condor.runtime import (
     sessions,
     turns,
 )
+from condor.telegram.output import lease as output_lease
+from condor.telegram.output import runs as output_runs
 from config_manager import UserRole
 from handlers import agents
 from handlers.agents import stream
@@ -56,8 +56,18 @@ class Bot:
 
     async def send_message(self, **kwargs):
         self.messages.append(kwargs)
-        if kwargs.get("reply_markup"):
-            self.progress.append(kwargs)
+        return SimpleNamespace(message_id=len(self.messages))
+
+    async def send_rich_message_draft(self, **kwargs):
+        payload = dict(kwargs)
+        payload["text"] = getattr(kwargs.get("rich_message"), "markdown", "")
+        self.progress.append(payload)
+        return True
+
+    async def send_rich_message(self, **kwargs):
+        payload = dict(kwargs)
+        payload["text"] = getattr(kwargs.get("rich_message"), "markdown", "")
+        self.messages.append(payload)
         if kwargs.get("disable_notification") is False:
             self.final_started.set()
             if self.final_release is not None:
@@ -65,8 +75,6 @@ class Bot:
         return SimpleNamespace(message_id=len(self.messages))
 
     async def edit_message_text(self, **kwargs):
-        if kwargs.get("reply_markup"):
-            self.progress.append(kwargs)
         return True
 
     async def send_chat_action(self, **kwargs):
@@ -119,8 +127,9 @@ def chat(monkeypatch):
     monkeypatch.setattr(
         confirmations, "_registry", confirmations.ConfirmationRegistry()
     )
-    monkeypatch.setattr(telegram_output, "_tails", {})
-    monkeypatch.setattr(telegram_output, "_runs", {})
+    monkeypatch.setattr(output_lease, "_tails", {})
+    monkeypatch.setattr(output_runs, "_runs", {})
+    monkeypatch.setattr(output_runs, "_by_draft", {})
     manager = SimpleNamespace(get_user_role=lambda user_id: UserRole.USER)
     monkeypatch.setattr("config_manager.get_config_manager", lambda: manager)
     monkeypatch.setattr("utils.auth.get_config_manager", lambda: manager)
@@ -163,24 +172,24 @@ def start_turn(chat, bot, request_id):
     return task, admission
 
 
-def stop_update(token):
-    from unittest.mock import AsyncMock
-
+def stop_update(draft_id):
     return SimpleNamespace(
+        stopped_message_generation=SimpleNamespace(
+            chat=SimpleNamespace(id=USER),
+            draft_id=draft_id,
+            message_thread_id=None,
+        ),
         effective_chat=SimpleNamespace(id=USER, type="private"),
         effective_user=SimpleNamespace(id=USER),
-        callback_query=SimpleNamespace(
-            data=f"agent:cancel:{token}", answer=AsyncMock()
-        ),
     )
 
 
 def token(call):
-    return call["reply_markup"].inline_keyboard[0][0].callback_data.split(":")[-1]
+    return call["draft_id"]
 
 
-async def stop(token):
-    await agents._handle_cancel(stop_update(token), None)
+async def stop(draft_id):
+    await agents.handle_stopped_generation(stop_update(draft_id), None)
 
 
 @pytest.mark.asyncio
@@ -191,7 +200,7 @@ async def test_inline_stop_preserves_partial_history_and_runs_queued_successor(c
     first_id = token(bot.progress[0])
     second, accepted = start_turn(chat, bot, "second")
     await until(lambda: accepted.accepted)
-    assert telegram_output.active_run(first_id, USER, USER).request_id == "first"
+    assert output_runs.run_for_draft(USER, first_id).request_id == "first"
     assert len(chat.client.releases) == 1
 
     await stop(first_id)
@@ -207,7 +216,7 @@ async def test_inline_stop_preserves_partial_history_and_runs_queued_successor(c
     final_texts = [
         message["text"]
         for message in bot.messages
-        if message.get("parse_mode") == "HTML"
+        if message.get("rich_message") is not None
     ]
     assert final_texts == [
         "⏹ Stopped generating.\n\nPartial result:\nanswer 0",
@@ -223,8 +232,8 @@ async def test_inline_stop_preserves_partial_history_and_runs_queued_successor(c
         ("answer 1", "end_turn"),
     ]
     assert not turns.is_busy(USER, chat.conversation_id)
-    assert not telegram_output._runs
-    assert not telegram_output._tails
+    assert not output_runs._runs
+    assert not output_lease._tails
 
 
 @pytest.mark.asyncio
@@ -238,7 +247,7 @@ async def test_done_retires_stop_target_and_next_progress_waits_for_formal_hando
     first_id = token(first_bot.progress[0])
     chat.client.releases[0].set()
     await first_bot.final_started.wait()
-    assert telegram_output.active_run(first_id, USER, USER) is None
+    assert output_runs.run_for_draft(USER, first_id) is None
     assert not turns.is_busy(USER, chat.conversation_id)
 
     second, _ = start_turn(chat, second_bot, "second")
@@ -251,8 +260,8 @@ async def test_done_retires_stop_target_and_next_progress_waits_for_formal_hando
     await until(lambda: second_bot.progress)
     chat.client.releases[1].set()
     await asyncio.wait_for(second, 1)
-    assert not telegram_output._runs
-    assert not telegram_output._tails
+    assert not output_runs._runs
+    assert not output_lease._tails
 
 
 @pytest.mark.asyncio
@@ -266,9 +275,9 @@ async def test_silent_acp_gets_immediate_inline_stop_without_queued_takeover(cha
     assert bot.progress[0]["text"] == "Processing…"
 
     second, accepted = start_turn(chat, bot, "silent-second")
-    await until(lambda: accepted.accepted and bot.messages)
+    await until(lambda: accepted.accepted)
     assert len(acp.prompt_ids) == 1
-    assert telegram_output.active_run(first_id, USER, USER).request_id == "silent-first"
+    assert output_runs.run_for_draft(USER, first_id).request_id == "silent-first"
     assert {token(call) for call in bot.progress} == {first_id}
 
     await stop(first_id)
@@ -276,9 +285,7 @@ async def test_silent_acp_gets_immediate_inline_stop_without_queued_takeover(cha
     await until(lambda: len(acp.prompt_ids) == 2)
     await until(lambda: any(token(call) != first_id for call in bot.progress))
     second_id = next(token(call) for call in bot.progress if token(call) != first_id)
-    assert (
-        telegram_output.active_run(second_id, USER, USER).request_id == "silent-second"
-    )
+    assert output_runs.run_for_draft(USER, second_id).request_id == "silent-second"
     await stop(first_id)
     assert len([m for m in acp.sent if m.get("method") == "session/cancel"]) == 1
 
@@ -287,5 +294,5 @@ async def test_silent_acp_gets_immediate_inline_stop_without_queued_takeover(cha
     assert any("Stopped" in message["text"] for message in bot.messages)
     assert not chat.is_busy
     assert not turns.is_busy(USER, chat.conversation_id)
-    assert not telegram_output._runs
-    assert not telegram_output._tails
+    assert not output_runs._runs
+    assert not output_lease._tails

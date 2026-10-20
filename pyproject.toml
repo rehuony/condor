@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "Telegram bot for Hummingbot trading via Backend API"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "python-telegram-bot[job-queue]",
+    "aiogram>=3.31,<3.32",
+    "apscheduler>=3.11,<4",
     "hummingbot-api-client==1.5.9",
     "python-dotenv",
     "PyYAML",

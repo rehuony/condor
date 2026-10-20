@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import { groupSpine, sumTotals } from "@/components/agent/floor/floor";
-import type { ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
 import type { ConvertQuote, PerfLeaf } from "@/lib/perf-tree";
 import { foldLeaves } from "@/lib/perf-tree";
 

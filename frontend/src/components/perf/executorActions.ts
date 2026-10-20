@@ -8,7 +8,7 @@
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
-import { api, type ExecutorInfo } from "@/lib/api";
+import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
 import { isExecutorTerminated } from "@/lib/formatters";
 import { collectLeaves, type PerfNode } from "@/lib/perf-tree";
 
@@ -91,7 +91,7 @@ export function useExecutorStop(server: string): ExecutorStop {
     mutationFn: async ({ ids, keepPosition }: { ids: string[]; keepPosition: boolean }) => {
       setError(null);
       setStoppingIds((prev) => new Set([...prev, ...ids]));
-      return Promise.allSettled(ids.map((id) => api.stopExecutor(server, id, keepPosition)));
+      return Promise.allSettled(ids.map((id) => executorsApi.stopExecutor(server, id, keepPosition)));
     },
     onSuccess: (results, vars) => {
       const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
@@ -164,7 +164,7 @@ export function useExecutorDelete(
       // Bound requests for large parent nodes without adding a second API.
       for (let offset = 0; offset < ids.length; offset += 4) {
         results.push(...await Promise.allSettled(
-          ids.slice(offset, offset + 4).map((id) => api.deleteExecutor(server, id)),
+          ids.slice(offset, offset + 4).map((id) => executorsApi.deleteExecutor(server, id)),
         ));
       }
       return results;

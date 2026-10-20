@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Circle } from "lucide-react";
 
-import { api, type ServerInfo } from "@/lib/api";
+import { serversApi, type ServerInfo } from "@/lib/api/servers";
 
 /**
  * Where this conversation trades — the list, without a trigger.
@@ -27,7 +27,7 @@ export function ServerMenuBody({
 }) {
   const { data: servers } = useQuery({
     queryKey: ["servers"],
-    queryFn: api.getServers,
+    queryFn: serversApi.getServers,
   });
 
   const online = servers?.filter((s) => s.online) ?? [];

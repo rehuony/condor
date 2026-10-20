@@ -1,4 +1,4 @@
-import { CHAT_SLUG } from "@/lib/api";
+import { CHAT_SLUG } from "@/lib/api/agents";
 
 /**
  * The chat's one spelling of "who is bound to this conversation".

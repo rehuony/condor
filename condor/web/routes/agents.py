@@ -2422,18 +2422,9 @@ async def delete_agent(slug: str, user: WebUser = Depends(get_current_user)):
 
 
 def _chat_member_status(member: Any) -> str | None:
-    """Normalize the two shapes ``get_chat_member`` can answer with.
-
-    A live python-telegram-bot returns a ``ChatMember`` with a ``status``
-    attribute; ``_HttpBot`` hands back Telegram's raw envelope (or ``None``
-    when it has no token). ``None`` means "could not verify".
-    """
+    """``get_chat_member`` status, or ``None`` when it could not be verified."""
     if member is None:
         return None
-    if isinstance(member, dict):
-        if not member.get("ok"):
-            return None
-        return (member.get("result") or {}).get("status")
     return getattr(member, "status", None)
 
 
@@ -2671,7 +2662,7 @@ async def notify_user(req: NotifyRequest, user: WebUser = Depends(get_current_us
         conversation_id = await _owned_conversation_for_session(
             req.session_key, user, strict_owner=True
         )
-        from condor.telegram_media import load_photo
+        from condor.telegram.media import load_photo
 
         try:
             photo = await asyncio.to_thread(load_photo, req.image_path)

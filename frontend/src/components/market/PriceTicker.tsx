@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
+import { marketApi } from "@/lib/api/market";
 import { useLastClose } from "@/hooks/useCandleStore";
 import { candleChannelKey } from "@/lib/candle-store";
 import { formatCompactVolume } from "@/lib/formatters";
@@ -74,7 +74,7 @@ export function PriceTicker({
   // REST fallback for bid/ask/spread (less frequent)
   const { data: price } = useQuery({
     queryKey: ["price", server, connector, pair],
-    queryFn: () => api.getPrice(server, connector, pair),
+    queryFn: () => marketApi.getPrice(server, connector, pair),
     enabled: !!server && !!connector && !!pair && hasRestPrice,
     refetchInterval: 15_000,
   });

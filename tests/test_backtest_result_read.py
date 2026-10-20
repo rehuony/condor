@@ -192,7 +192,11 @@ def test_the_routine_asks_the_server_for_a_task_it_has_never_stored(monkeypatch)
 
     monkeypatch.setattr(bc, "_load_saved_task", fake_load_saved_task)
 
-    out = asyncio.run(bc.run(bc.Config(task_id="t-1"), SimpleNamespace(_chat_id=1)))
+    out = asyncio.run(
+        bc.run(
+            bc.Config(task_id="t-1"), SimpleNamespace(chat_id=1, user_data={}, bot=None)
+        )
+    )
 
     assert fetched == [("srv", "t-1")]
     assert out == COMPLETED["result"]
@@ -217,5 +221,9 @@ def test_a_task_already_in_the_store_never_touches_the_server(monkeypatch):
 
     monkeypatch.setattr(bc, "_load_saved_task", fake_load_saved_task)
 
-    out = asyncio.run(bc.run(bc.Config(task_id="t-1"), SimpleNamespace(_chat_id=1)))
+    out = asyncio.run(
+        bc.run(
+            bc.Config(task_id="t-1"), SimpleNamespace(chat_id=1, user_data={}, bot=None)
+        )
+    )
     assert out == COMPLETED["result"]

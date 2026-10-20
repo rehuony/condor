@@ -7,10 +7,10 @@ import logging
 import time
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from condor.fetchers.market_data import fetch_current_price
 from config_manager import get_client
+from routines.base import RoutineContext
 from utils.telegram_formatters import escape_markdown_v2
 
 logger = logging.getLogger(__name__)
@@ -28,17 +28,17 @@ class Config(BaseModel):
     interval_sec: int = Field(default=10, description="Check interval in seconds")
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     """
     Monitor price continuously.
 
     This is a continuous routine - runs forever until cancelled.
     Sends alert messages when threshold is crossed.
     """
-    chat_id = context._chat_id if hasattr(context, "_chat_id") else None
-    instance_id = getattr(context, "_instance_id", "default")
+    chat_id = context.chat_id
+    instance_id = context.instance_id or "default"
 
-    client = await get_client(chat_id, context=context)
+    client = await get_client(chat_id, user_data=context.user_data)
     if not client:
         return "No server available"
 
@@ -80,7 +80,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         while True:
             try:
                 # Re-acquire client each iteration to avoid stale sessions
-                client = await get_client(chat_id, context=context)
+                client = await get_client(chat_id, user_data=context.user_data)
                 if not client:
                     await asyncio.sleep(config.interval_sec)
                     continue

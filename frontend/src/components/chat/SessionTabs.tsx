@@ -1,7 +1,6 @@
 import {
   AlertTriangle,
   Bot,
-  Loader2,
   MessageSquare,
   Plus,
   X,
@@ -11,8 +10,9 @@ import { useState } from "react";
 
 import { deriveAgentStatus } from "@/components/agent/agentStatus";
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
+import { Spinner } from "@/components/ui/Spinner";
 import type { ChatSlot } from "@/hooks/useChatSocket";
-import { CHAT_SLUG, type AgentSummary } from "@/lib/api";
+import { CHAT_SLUG, type AgentSummary } from "@/lib/api/agents";
 
 /**
  * The live sessions, as tabs.
@@ -362,7 +362,7 @@ function SessionTab({
         aria-label={status}
       >
         {busy ? (
-          <Loader2 className="h-3 w-3 animate-spin text-[var(--color-primary)]" />
+          <Spinner size="xs" tone="primary" />
         ) : detached ? (
           <DetachedDot />
         ) : (

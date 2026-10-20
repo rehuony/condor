@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronUp, ChevronDown, Loader2, Square, Trash2, Wallet, Clock, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ChevronUp, ChevronDown, Square, Trash2, Wallet, Clock, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { api, type ExecutorInfo, type ConsolidatedPosition } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import type { ConsolidatedPosition } from "@/lib/api/portfolio";
+import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
 import { useServer } from "@/hooks/useServer";
 import { usePairBalances } from "@/hooks/usePairBalances";
 import { useRates } from "@/hooks/useRates";
@@ -285,7 +287,7 @@ export function TradeBottomPane({
   const stopMutation = useMutation({
     mutationFn: ({ id, keep }: { id: string; keep: boolean }) => {
       setStoppingIds((prev) => new Set([...prev, id]));
-      return api.stopExecutor(server!, id, keep);
+      return executorsApi.stopExecutor(server!, id, keep);
     },
     onSettled: (_data, _error, { id }) => {
       setStoppingIds((prev) => {
@@ -306,7 +308,7 @@ export function TradeBottomPane({
     mutationFn: (pos: ConsolidatedPosition) => {
       const key = `${pos.connector_name}:${pos.trading_pair}:${pos.position_side}`;
       setClearingPositions((prev) => new Set([...prev, key]));
-      return api.clearPositionHeld(
+      return executorsApi.clearPositionHeld(
         server!,
         pos.connector_name,
         pos.trading_pair,
@@ -472,7 +474,7 @@ export function TradeBottomPane({
               }`}
             >
               Positions ({positions.length})
-              {isLoadingPositions && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
+              {isLoadingPositions && <Spinner size="xs" className="ml-1 inline" />}
             </button>
           </div>
 
@@ -596,7 +598,7 @@ export function TradeBottomPane({
                                 title="Stop executor"
                               >
                                 {stopping ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  <Spinner size="xs" />
                                 ) : (
                                   <Square className="h-3 w-3" />
                                 )}
@@ -675,7 +677,7 @@ export function TradeBottomPane({
                               title="Clear position"
                             >
                               {isClearing ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <Spinner size="xs" />
                               ) : (
                                 <Trash2 className="h-3 w-3" />
                               )}

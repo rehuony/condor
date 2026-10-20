@@ -9,10 +9,14 @@ Provides:
 import asyncio
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_all_enabled_networks, get_dex_last_swap
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from config_manager import get_client
 from utils.telegram_formatters import (
     KNOWN_TOKENS,
@@ -20,21 +24,26 @@ from utils.telegram_formatters import (
     resolve_token_symbol,
 )
 
-from ._shared import cached_call, invalidate_cache
+from ._shared import build_token_cache, cached_call, format_usd_value, invalidate_cache
 
 logger = logging.getLogger(__name__)
 
-# Key for storing the background loading task
-DEX_LOADING_TASK_KEY = "_dex_menu_loading_task"
+# The background loading task per user. Module state rather than
+# ``user_data``: an ``asyncio.Task`` in ``user_data`` reaches the persistence
+# snapshot, and a Task cannot be pickled.
+_loading_tasks: dict[int, asyncio.Task] = {}
 
 
-def cancel_dex_loading_task(context: ContextTypes.DEFAULT_TYPE) -> None:
+def _loading_owner(context: Context) -> int:
+    return context.user_data.get("_user_id") or id(context.user_data)
+
+
+def cancel_dex_loading_task(context: Context) -> None:
     """Cancel any pending DEX menu loading task"""
-    task = context.user_data.get(DEX_LOADING_TASK_KEY)
+    task = _loading_tasks.pop(_loading_owner(context), None)
     if task and not task.done():
         task.cancel()
         logger.debug("Cancelled pending DEX menu loading task")
-    context.user_data.pop(DEX_LOADING_TASK_KEY, None)
 
 
 def _format_amount(value: float) -> str:
@@ -48,16 +57,6 @@ def _format_amount(value: float) -> str:
     else:
         formatted = f"{value:.4f}".rstrip("0").rstrip(".")
         return formatted if "." in f"{value:.4f}" else f"{value:.0f}"
-
-
-def _format_value(value: float) -> str:
-    """Format USD values"""
-    if value >= 1000000:
-        return f"${value/1000000:.2f}M"
-    elif value >= 1000:
-        return f"${value/1000:.2f}K"
-    else:
-        return f"${value:.2f}"
 
 
 def _format_position_line(pos: dict, token_cache: dict = None) -> str:
@@ -320,26 +319,10 @@ async def _fetch_lp_positions(client) -> dict:
         data["lp_positions"] = active_positions[:5]
 
         # Fetch tokens for LP position networks
-        lp_networks = list(
-            set(pos.get("network", "solana-mainnet-beta") for pos in active_positions)
+        data["token_cache"] = await build_token_cache(
+            client,
+            (pos.get("network", "solana-mainnet-beta") for pos in active_positions),
         )
-        if lp_networks and hasattr(client, "gateway"):
-            for network in lp_networks:
-                try:
-                    tokens = []
-                    if hasattr(client.gateway, "get_network_tokens"):
-                        resp = await client.gateway.get_network_tokens(network)
-                        tokens = resp.get("tokens", []) if resp else []
-                    elif hasattr(client.gateway, "get_network_config"):
-                        resp = await client.gateway.get_network_config(network)
-                        tokens = resp.get("tokens", []) if resp else []
-                    for token in tokens:
-                        addr = token.get("address", "")
-                        symbol = token.get("symbol", "")
-                        if addr and symbol:
-                            data["token_cache"][addr] = symbol
-                except Exception as e:
-                    logger.debug(f"Failed to fetch tokens for {network}: {e}")
 
     except Exception as e:
         logger.error(f"Error fetching LP positions: {e}", exc_info=True)
@@ -371,15 +354,17 @@ def _build_menu_keyboard() -> InlineKeyboardMarkup:
     """Build the DEX menu keyboard"""
     keyboard = [
         [
-            InlineKeyboardButton("💱 Swap", callback_data="dex:swap"),
-            InlineKeyboardButton("💧 Liquidity Pools", callback_data="dex:liquidity"),
+            InlineKeyboardButton(text="💱 Swap", callback_data="dex:swap"),
+            InlineKeyboardButton(
+                text="💧 Liquidity Pools", callback_data="dex:liquidity"
+            ),
         ],
         [
-            InlineKeyboardButton("🔄 Refresh", callback_data="dex:refresh"),
-            InlineKeyboardButton("✖️ Close", callback_data="dex:close"),
+            InlineKeyboardButton(text="🔄 Refresh", callback_data="dex:refresh"),
+            InlineKeyboardButton(text="✖️ Close", callback_data="dex:close"),
         ],
     ]
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _build_loading_message(server_name: str = None) -> str:
@@ -417,7 +402,7 @@ def _build_menu_with_data(
         for network, balances in gateway_data["balances_by_network"].items():
             # Calculate network total
             network_total = sum(bal["value"] for bal in balances)
-            network_total_str = _format_value(network_total)
+            network_total_str = format_usd_value(network_total)
 
             header += f"  🌐 *{escape_markdown_v2(network.upper())}* \\- `{escape_markdown_v2(network_total_str)}`\n\n"
 
@@ -430,7 +415,7 @@ def _build_menu_with_data(
             for bal in balances[:5]:
                 token = bal["token"][:9]  # Truncate if needed
                 units_str = _format_amount(bal["units"])[:11]
-                value_str = _format_value(bal["value"]).replace("$", "")[:9]
+                value_str = format_usd_value(bal["value"]).replace("$", "")[:9]
                 pct = bal["percentage"]
 
                 table += f"{token:<10} {units_str:<12} {value_str:<10} {pct:>5.1f}%\n"
@@ -440,7 +425,7 @@ def _build_menu_with_data(
 
         # Show total portfolio value
         if gateway_data["total_value"] > 0:
-            total_str = _format_value(gateway_data["total_value"])
+            total_str = format_usd_value(gateway_data["total_value"])
             header += f"💵 *Total:* `{escape_markdown_v2(total_str)}`\n\n"
 
     # Show active LP positions if available
@@ -470,7 +455,7 @@ def _build_menu_with_data(
 
 async def _load_menu_data_background(
     message,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     reply_markup,
     last_swap,
     server_name: str = None,
@@ -494,7 +479,7 @@ async def _load_menu_data_background(
     }
 
     try:
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Step 2: Fetch balances first (usually fast) and update UI immediately
         # When refresh=True, bypass local cache and tell API to refresh from exchanges
@@ -567,15 +552,17 @@ async def _load_menu_data_background(
         logger.debug("Menu data loading was cancelled during final update")
     except Exception as e:
         # Ignore "message is not modified" errors
-        if "not modified" not in str(e).lower():
+        if not is_not_modified(e):
             logger.warning(f"Failed to update menu with data: {e}")
     finally:
         # Clean up task reference
-        context.user_data.pop(DEX_LOADING_TASK_KEY, None)
+        owner = _loading_owner(context)
+        if _loading_tasks.get(owner) is asyncio.current_task():
+            _loading_tasks.pop(owner, None)
 
 
 async def show_dex_menu(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, refresh: bool = False
+    update: Update, context: Context, refresh: bool = False
 ) -> None:
     """Display main DEX trading menu with balances and positions
 
@@ -608,7 +595,7 @@ async def show_dex_menu(
                 await query_message.delete()
             except Exception:
                 pass
-            message = await query_message.chat.send_message(
+            message = await query_message.answer(
                 loading_message, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
         else:
@@ -619,11 +606,11 @@ async def show_dex_menu(
                 )
                 message = query_message
             except Exception as e:
-                if "not modified" not in str(e).lower():
+                if not is_not_modified(e):
                     logger.warning(f"Failed to edit menu message: {e}")
                 message = query_message
     else:
-        message = await update.message.reply_text(
+        message = await update.message.answer(
             loading_message, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
@@ -642,10 +629,10 @@ async def show_dex_menu(
             chat_id=chat_id,
         )
     )
-    context.user_data[DEX_LOADING_TASK_KEY] = task
+    _loading_tasks[_loading_owner(context)] = task
 
 
-async def handle_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_close(update: Update, context: Context) -> None:
     """Handle close button - delete the menu message"""
     # Cancel any pending loading task
     cancel_dex_loading_task(context)
@@ -658,7 +645,7 @@ async def handle_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.answer("Menu closed")
 
 
-async def handle_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_refresh(update: Update, context: Context) -> None:
     """Handle refresh button - clear local cache and force refresh from exchanges"""
     query = update.callback_query
     await query.answer("Refreshing from exchanges...")

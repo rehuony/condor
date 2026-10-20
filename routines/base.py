@@ -29,6 +29,53 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+@dataclass
+class RoutineContext:
+    """What a routine runs with, whoever started it.
+
+    ``chat_id`` is where messages go; ``owner_id`` is whose ``user_data`` (and
+    so whose preferences, server pin and reports) the run executes against.
+    They differ in a group chat, where the chat id is negative and the owner
+    is the person who pressed Run. ``user_data`` is that owner's live bucket,
+    shared with the rest of the process; ``bot`` is never None (a real bot or
+    the HTTP/bell fallback). ``server_name`` names the server a web, MCP or
+    code run was launched against; Telegram runs leave it empty and carry the
+    server as a preference inside ``user_data``.
+    """
+
+    chat_id: int
+    owner_id: int
+    instance_id: str
+    user_data: dict
+    bot: Any
+    server_name: str = ""
+
+    @classmethod
+    def pinned(
+        cls, server_name: str, *, bot: Any, chat_id: int = 0, instance_id: str = ""
+    ) -> "RoutineContext":
+        """A context pinned to ``server_name``, for runs that did not come from a chat.
+
+        The server travels both by name (for a routine that must *record* it)
+        and as a pinned active-server preference, which is how ``get_client``
+        resolves it. Pinned, not preferred: the chat's own default must not
+        override the server this run was launched against.
+        """
+        from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY
+
+        return cls(
+            chat_id=chat_id,
+            owner_id=chat_id,
+            instance_id=instance_id,
+            user_data={
+                USER_PREFERENCES_KEY: {"general": {"active_server": server_name}},
+                SERVER_PIN_KEY: True,
+            },
+            bot=bot,
+            server_name=server_name,
+        )
+
+
 def library_dir() -> Path:
     """The general routine library on disk: the directory this module lives in.
 

@@ -23,7 +23,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RoutineInfo, RoutineInstance } from "@/lib/api";
+import type { RoutineInfo, RoutineInstance } from "@/lib/api/routines";
 import type { LibraryFocus } from "./DockRoutines";
 import { WorkspacePaneOutlet, WorkspacePaneProvider } from "./WorkspacePane";
 
@@ -31,10 +31,19 @@ const getRoutineInstances = vi.fn();
 const getReports = vi.fn();
 const getRoutines = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    getRoutineInstances: (...a: unknown[]) => getRoutineInstances(...a),
+vi.mock("@/lib/api/delegations", () => ({
+  delegationsApi: {
+    stopDelegation: () => Promise.resolve({}),
+  },
+}));
+vi.mock("@/lib/api/reports", () => ({
+  reportsApi: {
     getReports: (...a: unknown[]) => getReports(...a),
+  },
+}));
+vi.mock("@/lib/api/routines", () => ({
+  routinesApi: {
+    getRoutineInstances: (...a: unknown[]) => getRoutineInstances(...a),
     getRoutines: (...a: unknown[]) => getRoutines(...a),
     getRoutineInstance: (id: string) =>
       Promise.resolve({
@@ -42,7 +51,6 @@ vi.mock("@/lib/api", () => ({
         routine_name: "alpha",
         status: "completed",
       }),
-    stopDelegation: () => Promise.resolve({}),
   },
 }));
 

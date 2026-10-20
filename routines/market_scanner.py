@@ -10,9 +10,9 @@ from typing import Any
 import aiohttp
 import numpy as np
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from config_manager import get_client
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -346,10 +346,10 @@ def format_results(result: dict, lookback_hours: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     """Scan top markets and classify by volume/volatility profile."""
-    chat_id = context._chat_id if hasattr(context, "_chat_id") else None
-    client = await get_client(chat_id, context=context)
+    chat_id = context.chat_id
+    client = await get_client(chat_id, user_data=context.user_data)
     if not client:
         return "No server available. Configure servers in /config."
 

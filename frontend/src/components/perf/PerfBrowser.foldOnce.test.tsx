@@ -29,10 +29,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  ControllerInfo,
-  ControllerPerformanceSnapshot,
-} from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ControllerPerformanceSnapshot } from "@/lib/api/performance";
 import type { FleetOwner } from "@/lib/agent-attribution";
 
 /**
@@ -72,9 +70,18 @@ vi.mock("@/lib/perf-history", async () => {
 });
 
 // Everything the browser asks the API for is beside the point here.
-vi.mock("@/lib/api", () => ({
-  api: new Proxy({}, { get: () => () => Promise.resolve({}) }),
-}));
+/** Every domain module answers with the same stub: any read resolves to
+ * an empty object. */
+function stubApi() {
+  return new Proxy({}, { get: () => () => Promise.resolve({}) });
+}
+
+vi.mock("@/lib/api/bots", () => ({ botsApi: stubApi() }));
+vi.mock("@/lib/api/performance", () => ({ performanceApi: stubApi() }));
+vi.mock("@/lib/api/executors", () => ({ executorsApi: stubApi() }));
+vi.mock("@/lib/api/market", () => ({ marketApi: stubApi() }));
+vi.mock("@/lib/api/agents", () => ({ agentsApi: stubApi() }));
+vi.mock("@/lib/api/archived", () => ({ archivedApi: stubApi() }));
 
 vi.mock("@/components/bots/PnlEvolutionChart", () => ({
   PnlEvolutionChart: () => <div data-aggregate-chart />,

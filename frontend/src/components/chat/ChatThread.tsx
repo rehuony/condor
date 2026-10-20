@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { AlertTriangle, Bot, Brain, Loader2, MessageSquare, X } from "lucide-react";
+import { AlertTriangle, Bot, Brain, MessageSquare, X } from "lucide-react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import type { ChatSlot, PermissionRequest } from "@/hooks/useChatSocket";
-import { CHAT_SLUG, type AgentSummary, type ChatAgentOption } from "@/lib/api";
+import { CHAT_SLUG, type AgentSummary } from "@/lib/api/agents";
+import type { ChatAgentOption } from "@/lib/api/chat";
 import { speakerNames } from "@/lib/agentColor";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { ChatInput } from "./ChatInput";
@@ -255,7 +257,7 @@ export function ChatThread({
               })()}
               {slot.pending && (
                 <p className="mt-3 flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Spinner size="xs" />
                   Warming up — type away, it will be sent
                 </p>
               )}
@@ -289,7 +291,7 @@ export function ChatThread({
             // Indented to the gutter every turn now hangs from, not to the
             // avatar that used to sit there.
             <div className="mb-3 flex items-center gap-1.5 pl-3 text-[11px] text-[var(--color-text-muted)]">
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
               Waiting its turn
             </div>
           )}

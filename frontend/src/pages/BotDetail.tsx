@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   Check,
   Circle,
-  Loader2,
   Pencil,
   RotateCcw,
   Save,
@@ -13,9 +12,11 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { CodeEditor } from "@/components/editor/CodeEditor";
+import { Card } from "@/components/ui/Card";
 import { FallbackSpinner } from "@/components/ui/FallbackSpinner";
+import { Spinner } from "@/components/ui/Spinner";
 import { useServer } from "@/hooks/useServer";
-import { api } from "@/lib/api";
+import { botsApi } from "@/lib/api/bots";
 import { configToYaml, validateYamlMapping } from "@/lib/configYaml";
 
 export function BotDetail() {
@@ -31,7 +32,7 @@ export function BotDetail() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["bot", server, id],
-    queryFn: () => api.getBot(server!, id!),
+    queryFn: () => botsApi.getBot(server!, id!),
     enabled: !!server && !!id,
     refetchInterval: 10000,
   });
@@ -66,7 +67,7 @@ export function BotDetail() {
   const canSave = isDirty && !yamlError && !!configId;
 
   const saveMutation = useMutation({
-    mutationFn: () => api.updateConfigYaml(server!, configId, yamlValue),
+    mutationFn: () => botsApi.updateConfigYaml(server!, configId, yamlValue),
     onSuccess: () => {
       setOriginalYaml(yamlValue);
       prevConfigSig.current = ""; // force re-sync on next fetch
@@ -170,10 +171,10 @@ export function BotDetail() {
                 <button
                   onClick={handleSave}
                   disabled={!canSave || saveMutation.isPending}
-                  className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-opacity disabled:opacity-40"
                 >
                   {saveMutation.isPending ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <Spinner size="xs" />
                   ) : saveMutation.isSuccess && !isDirty ? (
                     <Check className="h-3 w-3" />
                   ) : (
@@ -221,7 +222,7 @@ export function BotDetail() {
         </div>
 
         {/* Performance */}
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <Card>
           <h3 className="mb-3 font-medium text-[var(--color-text-muted)]">
             Performance
           </h3>
@@ -239,7 +240,7 @@ export function BotDetail() {
               ))}
             </dl>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );

@@ -5,11 +5,14 @@ Portfolio command handler using hummingbot_api_client
 import logging
 import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, ContextTypes
-
 from condor.fetchers.portfolio import dedupe_unified_accounts
 from condor.preferences import get_all_enabled_networks
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from handlers import is_gateway_network
 from handlers.bots._shared import NO_ACCESSIBLE_SERVERS, resolve_accessible_server
 from handlers.config import clear_config_state
@@ -131,7 +134,7 @@ def build_portfolio_keyboard(connector_keys: list) -> InlineKeyboardMarkup:
 
             connector_row.append(
                 InlineKeyboardButton(
-                    display_name, callback_data=f"portfolio:connector:{conn_key}"
+                    text=display_name, callback_data=f"portfolio:connector:{conn_key}"
                 )
             )
             # Use max 2 per row to fit longer names like "solana-mainnet-beta"
@@ -143,19 +146,19 @@ def build_portfolio_keyboard(connector_keys: list) -> InlineKeyboardMarkup:
 
     # Bottom row: Refresh only
     keyboard.append(
-        [InlineKeyboardButton("🔄 Refresh", callback_data="portfolio:refresh")]
+        [InlineKeyboardButton(text="🔄 Refresh", callback_data="portfolio:refresh")]
     )
 
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def build_connector_detail_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for connector detail view with Back button."""
     return InlineKeyboardMarkup(
-        [
+        inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    "⬅️ Back to Overview", callback_data="portfolio:back_overview"
+                    text="⬅️ Back to Overview", callback_data="portfolio:back_overview"
                 )
             ]
         ]
@@ -171,7 +174,7 @@ def build_connector_detail_keyboard() -> InlineKeyboardMarkup:
 # that wording.
 
 
-def _resolve_server_for_user(context: ContextTypes.DEFAULT_TYPE) -> str:
+def _resolve_server_for_user(context: Context) -> str:
     """Pick the server this user's portfolio may be read from.
 
     Both /portfolio and its refresh callback used to choose from *every* enabled
@@ -189,7 +192,7 @@ def _resolve_server_for_user(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 @restricted
 @hummingbot_api_required
-async def portfolio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def portfolio_command(update: Update, context: Context) -> None:
     """
     Handle /portfolio command - Display comprehensive portfolio dashboard
 
@@ -218,13 +221,11 @@ async def portfolio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         try:
             server_name = _resolve_server_for_user(context)
         except ValueError as e:
-            await message.reply_text(
-                format_error_message(str(e)), parse_mode="MarkdownV2"
-            )
+            await message.answer(format_error_message(str(e)), parse_mode="MarkdownV2")
             return
 
         # Send initial loading message immediately
-        text_msg = await message.reply_text(
+        text_msg = await message.answer(
             f"💼 *Portfolio Details* \\| _Server: {escape_markdown_v2(server_name)} ⏳_\n\n"
             f"_Loading\\.\\.\\._",
             parse_mode="MarkdownV2",
@@ -292,7 +293,7 @@ async def portfolio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         # Store data for callbacks
         context.user_data[KEY_TEXT_MESSAGE_ID] = text_msg.message_id
-        context.user_data[KEY_CHAT_ID] = message.chat_id
+        context.user_data[KEY_CHAT_ID] = message.chat.id
         context.user_data[KEY_SERVER_NAME] = server_name
         context.user_data[KEY_SERVER_STATUS] = server_status
         # Cache data for connector detail callbacks
@@ -302,7 +303,7 @@ async def portfolio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     except Exception as e:
         logger.error(f"Error fetching portfolio: {e}", exc_info=True)
         error_message = format_error_message(f"Failed to fetch portfolio: {str(e)}")
-        await message.reply_text(error_message, parse_mode="MarkdownV2")
+        await message.answer(error_message, parse_mode="MarkdownV2")
 
 
 # ============================================
@@ -311,9 +312,7 @@ async def portfolio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 @restricted
-async def portfolio_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def portfolio_callback_handler(update: Update, context: Context) -> None:
     """Handle inline button callbacks for portfolio operations"""
     query = update.callback_query
     await query.answer()
@@ -340,14 +339,12 @@ async def portfolio_callback_handler(
         logger.error(f"Error in portfolio callback handler: {e}", exc_info=True)
         error_message = format_error_message(f"Operation failed: {str(e)}")
         try:
-            await query.message.reply_text(error_message, parse_mode="MarkdownV2")
+            await query.message.answer(error_message, parse_mode="MarkdownV2")
         except Exception as e2:
             logger.error(f"Failed to send error message: {e2}")
 
 
-async def handle_portfolio_refresh(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_portfolio_refresh(update: Update, context: Context) -> None:
     """Handle refresh button - force refresh balances from exchanges"""
     query = update.callback_query
     await query.answer("Refreshing from exchanges...")
@@ -355,7 +352,7 @@ async def handle_portfolio_refresh(
 
 
 async def handle_connector_detail(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, connector_key: str
+    update: Update, context: Context, connector_key: str
 ) -> None:
     """
     Handle connector inspection - show tokens for specific connector.
@@ -386,7 +383,7 @@ async def handle_connector_detail(
                         total_value += v
 
     try:
-        bot = query.get_bot()
+        bot = query.bot
 
         # Format connector detail message
         detail_message = format_connector_detail(
@@ -411,9 +408,7 @@ async def handle_connector_detail(
         logger.error(f"Error showing connector detail: {e}", exc_info=True)
 
 
-async def handle_back_to_overview(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_back_to_overview(update: Update, context: Context) -> None:
     """Handle 'Back' button - return to main portfolio overview."""
     query = update.callback_query
     await query.answer()
@@ -431,7 +426,7 @@ async def handle_back_to_overview(
         return
 
     try:
-        bot = query.get_bot()
+        bot = query.bot
 
         overview_data = {"balances": balances}
         overview_message = format_portfolio_overview(
@@ -457,7 +452,7 @@ async def handle_back_to_overview(
 
 
 async def refresh_portfolio_dashboard(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, refresh: bool = True
+    update: Update, context: Context, refresh: bool = True
 ) -> None:
     """Refresh both the text message and photo with new settings
 
@@ -465,7 +460,7 @@ async def refresh_portfolio_dashboard(
         refresh: If True, force refresh balances from exchanges (bypasses API cache). Defaults to True.
     """
     query = update.callback_query
-    bot = query.get_bot()
+    bot = query.bot
 
     chat_id = context.user_data.get(KEY_CHAT_ID)
     text_message_id = context.user_data.get(KEY_TEXT_MESSAGE_ID)
@@ -545,8 +540,3 @@ async def refresh_portfolio_dashboard(
 
     except Exception as e:
         logger.error(f"Failed to refresh portfolio dashboard: {e}", exc_info=True)
-
-
-def get_portfolio_callback_handler():
-    """Returns the callback query handler for portfolio operations"""
-    return CallbackQueryHandler(portfolio_callback_handler, pattern="^portfolio:")

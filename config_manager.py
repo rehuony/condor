@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 from aiohttp import ClientTimeout
 
+from condor.fsutil import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,6 +139,13 @@ class ConfigManager:
     def _backup_path(self) -> Path:
         """Path of the rotating backup written before each save."""
         return self.config_path.with_suffix(self.config_path.suffix + ".bak")
+
+    def _read_config_text(self) -> Optional[str]:
+        """The config file's current text, or None when absent or unreadable."""
+        try:
+            return self.config_path.read_text()
+        except OSError:
+            return None
 
     def _read_config_file(self, path: Path) -> Optional[dict]:
         """Read and parse a config file. Returns None if unreadable."""
@@ -283,22 +292,31 @@ class ConfigManager:
                 "web_jwt_secret": self._data.get("web_jwt_secret"),
                 "version": self._data.get("version", self.VERSION),
             }
-            # Keep a copy of the last known-good file before truncating it,
-            # so a partial write can be recovered from on the next load.
-            if self.config_path.exists():
+            text = yaml.dump(
+                data,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+            # Every setter saves unconditionally, and most of them are asked
+            # to store what is already there. Nothing on disk changes, so
+            # neither the file nor its backup is touched.
+            previous = self._read_config_text()
+            if previous == text:
+                return
+
+            # Keep a copy of the last known-good file before replacing it, so
+            # a file that turns out unreadable can be recovered from on the
+            # next load.
+            if previous is not None:
                 try:
                     shutil.copy2(self.config_path, self._backup_path)
                 except OSError as e:
                     logger.warning(f"Failed to back up config: {e}")
 
-            with open(self.config_path, "w") as f:
-                yaml.dump(
-                    data,
-                    f,
-                    default_flow_style=False,
-                    sort_keys=False,
-                    allow_unicode=True,
-                )
+            # Published by rename: a crash mid-write leaves the previous file
+            # whole rather than a truncated one.
+            atomic_write_text(self.config_path, text)
             logger.debug(f"Saved config to {self.config_path}")
         except Exception as e:
             logger.error(f"Failed to save config: {e}")
@@ -1472,24 +1490,26 @@ def get_effective_server(chat_id: int, user_data: dict = None) -> str | None:
 
 
 async def get_client(
-    chat_id: int, user_id: int = None, context=None, server: str = None
+    chat_id: int,
+    user_id: int = None,
+    *,
+    user_data: dict | None = None,
+    server: str = None,
 ):
     """Get the API client for the user's preferred server.
 
-    ``server`` names it outright, for a caller that has already resolved which
-    server the work belongs to and must not have that answer re-derived. A
-    routine is the case: it files its results under the server it was launched
-    against, so resolving the client from the chat's ambient preferences
-    instead is how a run gets executed on one box and recorded under another.
+    ``user_data`` is the bucket the preference is read from: a handler passes
+    ``context.user_data``, a routine ``context.user_data`` of its
+    :class:`routines.base.RoutineContext`. ``server`` names it outright, for a
+    caller that has already resolved which server the work belongs to and must
+    not have that answer re-derived. A routine is the case: it files its
+    results under the server it was launched against, so resolving the client
+    from the chat's ambient preferences instead is how a run gets executed on
+    one box and recorded under another.
     """
     preferred_server = server
-    if context is not None:
-        # Handle both normal context and job context (where user_data may be None)
-        user_data = context.user_data
-        if user_data is None:
-            user_data = getattr(context, "_user_data", None)
-
-        if user_id is None and user_data is not None:
+    if user_data is not None:
+        if user_id is None:
             user_id = user_data.get("_user_id")
         if preferred_server is None:
             preferred_server = get_effective_server(chat_id, user_data)

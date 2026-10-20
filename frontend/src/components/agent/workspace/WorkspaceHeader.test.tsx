@@ -17,14 +17,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDetail } from "@/lib/api";
+import type { AgentDetail } from "@/lib/api/agents";
 
-vi.mock("@/lib/api", () => ({
-  CHAT_SLUG: "condor",
-  api: {
+vi.mock("@/lib/api/servers", () => ({
+  serversApi: {
     getServers: vi.fn(async () => [{ name: "brigado_2", online: true }]),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     updateAgentConfig: vi.fn(),
   },
+  CHAT_SLUG: "condor",
 }));
 
 vi.mock("@/hooks/useChat", () => ({
@@ -54,7 +58,7 @@ vi.mock("@/components/ui/AnchoredMenu", () => ({
 }));
 
 const { WorkspaceHeader } = await import("./WorkspaceHeader");
-const { api } = await import("@/lib/api");
+const { agentsApi } = await import("@/lib/api/agents");
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -118,7 +122,7 @@ async function pickServer(name: string) {
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  vi.mocked(api.updateAgentConfig).mockReset();
+  vi.mocked(agentsApi.updateAgentConfig).mockReset();
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -131,18 +135,18 @@ afterEach(() => {
 
 describe("the server pin", () => {
   it("says why a pin was refused, keeps the stored pin, and clears on the next pick", async () => {
-    vi.mocked(api.updateAgentConfig).mockRejectedValueOnce(
+    vi.mocked(agentsApi.updateAgentConfig).mockRejectedValueOnce(
       new Error("AGENT.md is read-only"),
     );
     await render();
     await pickServer("brigado_2");
 
-    expect(api.updateAgentConfig).toHaveBeenCalledWith("brigado", { server_name: "brigado_2" });
+    expect(agentsApi.updateAgentConfig).toHaveBeenCalledWith("brigado", { server_name: "brigado_2" });
     expect(alertText()).toContain("AGENT.md is read-only");
     expect(pinChip().textContent).toContain("brigado_1");
 
-    vi.mocked(api.updateAgentConfig).mockResolvedValueOnce(
-      undefined as unknown as Awaited<ReturnType<typeof api.updateAgentConfig>>,
+    vi.mocked(agentsApi.updateAgentConfig).mockResolvedValueOnce(
+      undefined as unknown as Awaited<ReturnType<typeof agentsApi.updateAgentConfig>>,
     );
     await pickServer("brigado_2");
     expect(alertText()).not.toContain("AGENT.md is read-only");
@@ -151,20 +155,20 @@ describe("the server pin", () => {
 
 describe("the model pick", () => {
   it("says why a pick was refused and clears on the next pick", async () => {
-    vi.mocked(api.updateAgentConfig).mockRejectedValueOnce(new Error("Unknown model"));
+    vi.mocked(agentsApi.updateAgentConfig).mockRejectedValueOnce(new Error("Unknown model"));
     await render();
     const picker = () => host.querySelector<HTMLButtonElement>("[data-brain-picker]")!;
 
     await act(async () => picker().click());
     await flush();
-    expect(api.updateAgentConfig).toHaveBeenCalledWith("brigado", {
+    expect(agentsApi.updateAgentConfig).toHaveBeenCalledWith("brigado", {
       agent_key: "claude-fable-5",
     });
     expect(alertText()).toContain("Unknown model");
     expect(picker().textContent).toBe("claude-opus-5");
 
-    vi.mocked(api.updateAgentConfig).mockResolvedValueOnce(
-      undefined as unknown as Awaited<ReturnType<typeof api.updateAgentConfig>>,
+    vi.mocked(agentsApi.updateAgentConfig).mockResolvedValueOnce(
+      undefined as unknown as Awaited<ReturnType<typeof agentsApi.updateAgentConfig>>,
     );
     await act(async () => picker().click());
     await flush();

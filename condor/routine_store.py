@@ -34,7 +34,6 @@ import logging
 import time
 import traceback
 from pathlib import Path
-from typing import Any
 
 import condor.reports as reports
 from condor import primitives, routine_hooks
@@ -44,6 +43,7 @@ from condor.memory.paths import (
     shared_routines_roots,
 )
 from routines.base import (
+    RoutineContext,
     RoutineResult,
     _merged_from,
     discover_routines,
@@ -84,151 +84,6 @@ def routine_source_roots() -> tuple[Path, ...]:
         if candidate not in resolved:
             resolved.append(candidate)
     return tuple(resolved)
-
-
-class _HttpBot:
-    """Fallback bot that sends Telegram messages via HTTP when no real bot is available."""
-
-    def __init__(self):
-        import os
-
-        self._token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get(
-            "TELEGRAM_TOKEN", ""
-        )
-
-    async def _post(self, method: str, data: dict, files: dict | None = None):
-        if not self._token:
-            return None
-        import httpx
-
-        url = f"https://api.telegram.org/bot{self._token}/{method}"
-        async with httpx.AsyncClient(timeout=30) as client:
-            if files:
-                resp = await client.post(url, data=data, files=files)
-            else:
-                resp = await client.post(url, json=data)
-            result = resp.json()
-            if not result.get("ok"):
-                logger.warning(
-                    "Telegram %s rejected request error_code=%s",
-                    method,
-                    result.get("error_code"),
-                )
-            return result
-
-    async def send_message(self, *a, **kw):
-        chat_id = kw.get("chat_id") or (a[0] if a else None)
-        text = kw.get("text") or (a[1] if len(a) > 1 else "")
-        data = {"chat_id": chat_id, "text": text}
-        if kw.get("parse_mode"):
-            data["parse_mode"] = kw["parse_mode"]
-        if kw.get("disable_web_page_preview") is not None:
-            data["disable_web_page_preview"] = kw["disable_web_page_preview"]
-        if "disable_notification" in kw:
-            data["disable_notification"] = kw["disable_notification"]
-        if kw.get("reply_markup") is not None:
-            markup = kw["reply_markup"]
-            data["reply_markup"] = (
-                markup.to_dict() if hasattr(markup, "to_dict") else markup
-            )
-        return await self._post("sendMessage", data)
-
-    async def send_photo(self, *a, **kw):
-        import mimetypes
-        import os
-
-        chat_id = kw.get("chat_id") or (a[0] if a else None)
-        photo = kw.get("photo") or (a[1] if len(a) > 1 else None)
-        data = {"chat_id": chat_id}
-        if kw.get("caption"):
-            data["caption"] = kw["caption"]
-        if kw.get("parse_mode"):
-            data["parse_mode"] = kw["parse_mode"]
-        files = None
-        if photo is not None:
-            filename = kw.get("filename") or getattr(photo, "name", None) or "chart.png"
-            # TemporaryFile.name is a file descriptor; arbitrary file-like
-            # inputs may expose other non-path values. Keep accepting these
-            # uploads without passing their metadata into MIME inference.
-            filename = (
-                os.fsdecode(filename)
-                if isinstance(filename, (str, os.PathLike))
-                else "chart.png"
-            )
-            mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-            files = {"photo": (filename, photo, mime)}
-        return await self._post("sendPhoto", data, files=files)
-
-    async def send_document(self, *a, **kw):
-        import mimetypes
-
-        chat_id = kw.get("chat_id") or (a[0] if a else None)
-        document = kw.get("document") or (a[1] if len(a) > 1 else None)
-        data = {"chat_id": chat_id}
-        if kw.get("caption"):
-            data["caption"] = kw["caption"]
-        files = None
-        if document is not None:
-            # Honor the buffer's name (e.g. "Daily_PnL.html") and the explicit
-            # `filename` kwarg so the file arrives with a real name + extension
-            # instead of a generic, extension-less "file".
-            filename = kw.get("filename") or getattr(document, "name", None) or "file"
-            mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-            files = {"document": (filename, document, mime)}
-        return await self._post("sendDocument", data, files=files)
-
-    async def edit_message_text(self, *a, **kw):
-        data = {k: v for k, v in kw.items() if v is not None}
-        if hasattr(data.get("reply_markup"), "to_dict"):
-            data["reply_markup"] = data["reply_markup"].to_dict()
-        elif "reply_markup" in kw and kw["reply_markup"] is None:
-            data["reply_markup"] = {"inline_keyboard": []}
-        return await self._post("editMessageText", data)
-
-    async def send_chat_action(self, **kw):
-        return await self._post("sendChatAction", kw)
-
-    async def edit_message_reply_markup(self, **kw):
-        data = dict(kw)
-        markup = data.get("reply_markup")
-        data["reply_markup"] = (
-            markup.to_dict()
-            if hasattr(markup, "to_dict")
-            else (markup or {"inline_keyboard": []})
-        )
-        return await self._post("editMessageReplyMarkup", data)
-
-    async def delete_message(self, **kw):
-        return await self._post("deleteMessage", kw)
-
-    def has_token(self) -> bool:
-        """Can this actually deliver? Without a token every send is a no-op.
-
-        Read by ``delegate.resolve_bot`` so the ladder can fall through to the
-        dashboard bell rather than to a sender that silently drops the message.
-        """
-        return bool(self._token)
-
-    async def get_chat_member(self, *a, **kw):
-        """Raw ``getChatMember`` envelope — the web routes' chat-ownership check
-        (SEC-198) reads ``result.status`` out of it when no live bot is around."""
-        chat_id = kw.get("chat_id") or (a[0] if a else None)
-        user_id = kw.get("user_id") or (a[1] if len(a) > 1 else None)
-        return await self._post(
-            "getChatMember", {"chat_id": chat_id, "user_id": user_id}
-        )
-
-    async def get_chat(self, *a, **kw):
-        """Raw ``getChat`` envelope — the identity backfill (FEAT-088) reads
-        ``first_name`` / ``last_name`` / ``username`` out of ``result`` when no
-        live bot is around. For a private chat the bot already knows, which is
-        every registered user by construction, this is the only source of a name
-        for someone who has not spoken since their record was written."""
-        chat_id = kw.get("chat_id") or (a[0] if a else None)
-        return await self._post("getChat", {"chat_id": chat_id})
-
-
-_http_bot = _HttpBot()
 
 
 def _agent_of(routine) -> str:
@@ -285,35 +140,6 @@ def _run_resume_text(instance_id: str, outcome: str) -> str:
     return f"[routine complete] {outcome}\n\n{instruction}"
 
 
-class WebRoutineContext:
-    """Lightweight context so routines can run without Telegram."""
-
-    def __init__(self, server_name: str, bot=None, chat_id: int = 0):
-        from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY
-
-        self._chat_id = chat_id
-        # The server this run was launched against, readable by name — for a routine
-        # that must *record* it (backtest_chart files its results under it).
-        self.server_name = server_name
-        self.bot = bot if bot is not None else _http_bot
-        # And the same server as an active-server preference, which is how
-        # get_client(chat_id, context=...) resolves it. This dict was keyed
-        # "preferences" while the preference API reads USER_PREFERENCES_KEY
-        # ("user_preferences"), so the server a web or agent run was launched with
-        # never reached its client — every such run silently picked the chat default.
-        # Pinned, not preferred: this run was launched against `server_name`, so
-        # the chat's own default must not override it — the chat may well be a
-        # chat whose default is a different server (see `get_effective_server`).
-        self._user_data: dict[str, Any] = {
-            USER_PREFERENCES_KEY: {"general": {"active_server": server_name}},
-            SERVER_PIN_KEY: True,
-        }
-
-    @property
-    def user_data(self) -> dict:
-        return self._user_data
-
-
 # How many finished-run results stay resident (CORR-142). Results must outlive
 # their run — the dashboard renders the detail panel after the run ends and only
 # fetches the chart PNG when the user opens that run, and an MCP agent that
@@ -366,6 +192,24 @@ class RoutineStore:
     def get_bot(self):
         """Return the registered Telegram bot, or None if not set yet."""
         return self._bot
+
+    def outbound_bot(self):
+        """What a run sends through: the registered bot, else the standalone one.
+
+        A process with no live application (the web server during tests, a
+        worker) still delivers through ``TELEGRAM_TOKEN``; with no token at
+        all the dashboard bell takes the message (FEAT-048).
+        """
+        if self._bot is not None:
+            return self._bot
+        from condor.telegram.transport import standalone_bot
+
+        bot = standalone_bot()
+        if bot is not None:
+            return bot
+        from condor.notifications import NotifyBot
+
+        return NotifyBot()
 
     # ── Discovery ──
 
@@ -594,7 +438,7 @@ class RoutineStore:
             result,
             report_id,
             failed=failed,
-            bot=(self._bot or _http_bot),
+            bot=self.outbound_bot(),
             # Only the hooks of whoever started this run fire (SEC-152).
             owner_id=meta.get("user_id"),
         )
@@ -790,7 +634,12 @@ class RoutineStore:
         assistant asked — which differs from the source when an agent runs a
         routine from the general library.
         """
-        ctx = WebRoutineContext(server_name, bot=self._bot, chat_id=user_id)
+        ctx = RoutineContext.pinned(
+            server_name,
+            bot=self.outbound_bot(),
+            chat_id=user_id,
+            instance_id=instance_id,
+        )
         start = time.time()
         error_msg = None
         failed = False

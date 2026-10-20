@@ -9,10 +9,14 @@ exchanges are currently connected and points the user to the web UI.
 import logging
 from urllib.parse import quote, urlparse
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_active_server
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.auth import restricted
 from utils.config import WEB_URL
 from utils.telegram_formatters import escape_markdown_v2
@@ -63,11 +67,13 @@ def keys_web_button(user) -> InlineKeyboardButton | None:
     """
     if _web_url_is_local():
         return None
-    return InlineKeyboardButton("🌐 Open Web Dashboard", url=build_keys_login_url(user))
+    return InlineKeyboardButton(
+        text="🌐 Open Web Dashboard", url=build_keys_login_url(user)
+    )
 
 
 @restricted
-async def keys_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def keys_command(update: Update, context: Context) -> None:
     """Handle /keys command - show connected exchanges (read-only)."""
     from handlers import clear_all_input_states
     from utils.telegram_helpers import create_mock_query_from_message
@@ -91,7 +97,7 @@ async def get_default_account(client) -> str:
     return DEFAULT_ACCOUNT
 
 
-async def show_api_keys(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_api_keys(query, context: Context) -> None:
     """
     Show the exchanges currently connected (read-only).
 
@@ -109,9 +115,11 @@ async def show_api_keys(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not servers:
             message_text = format_server_selection_needed()
-            keyboard = [[InlineKeyboardButton("« Close", callback_data="config_close")]]
+            keyboard = [
+                [InlineKeyboardButton(text="« Close", callback_data="config_close")]
+            ]
         else:
-            chat_id = query.message.chat_id
+            chat_id = query.message.chat.id
             header, server_online, _ = await build_config_message_header(
                 "🔑 API Keys",
                 include_gateway=False,
@@ -124,7 +132,7 @@ async def show_api_keys(query, context: ContextTypes.DEFAULT_TYPE) -> None:
                     header + "⚠️ _Server is offline\\. Cannot show API keys\\._"
                 )
                 keyboard = [
-                    [InlineKeyboardButton("« Close", callback_data="config_close")]
+                    [InlineKeyboardButton(text="« Close", callback_data="config_close")]
                 ]
             else:
                 client = await get_config_manager().get_client_for_chat(
@@ -170,22 +178,26 @@ async def show_api_keys(query, context: ContextTypes.DEFAULT_TYPE) -> None:
                         "_Link valid for 5 minutes\\._"
                     )
                     keyboard.append(
-                        [InlineKeyboardButton("🌐 Open Web Dashboard", url=web_url)]
+                        [
+                            InlineKeyboardButton(
+                                text="🌐 Open Web Dashboard", url=web_url
+                            )
+                        ]
                     )
 
                 message_text = header + creds_display + web_hint
                 keyboard.append(
-                    [InlineKeyboardButton("« Close", callback_data="config_close")]
+                    [InlineKeyboardButton(text="« Close", callback_data="config_close")]
                 )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         try:
             await query.message.edit_text(
                 message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
         except Exception as e:
-            if "Message is not modified" in str(e):
+            if is_not_modified(e):
                 await query.answer("✅ Already up to date")
             else:
                 raise
@@ -193,8 +205,10 @@ async def show_api_keys(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error(f"Error showing API keys: {e}", exc_info=True)
         error_text = f"❌ Error loading API keys: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Close", callback_data="config_close")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Close", callback_data="config_close")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
@@ -203,9 +217,7 @@ async def show_api_keys(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 # Entry point function for routing
 
 
-async def handle_api_keys_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_api_keys_callback(update: Update, context: Context) -> None:
     """
     Route API key callback queries to the read-only view.
 

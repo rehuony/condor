@@ -99,7 +99,7 @@ def test_candle_dates_use_each_rows_timestamp_unit(monkeypatch, timestamps):
     )
     get_client = AsyncMock(return_value=client)
     monkeypatch.setattr(mcap, "get_client", get_client)
-    context = SimpleNamespace(_chat_id=7)
+    context = SimpleNamespace(chat_id=7, user_data={})
 
     candles = asyncio.run(mcap._fetch_candles(context, "ORCA-USDT", "1d", 90))
 
@@ -108,7 +108,7 @@ def test_candle_dates_use_each_rows_timestamp_unit(monkeypatch, timestamps):
         pd.Timestamp("2024-01-02", tz="UTC"),
     ]
     assert candles["close"].tolist() == [2.5, 2.5]
-    get_client.assert_awaited_once_with(7, context=context)
+    get_client.assert_awaited_once_with(7, user_data=context.user_data)
 
 
 @pytest.fixture
@@ -164,7 +164,7 @@ def _run():
     return asyncio.run(
         mcap.run(
             mcap.Config(tokens="ORCA", send_to_telegram=False, normalize=False),
-            SimpleNamespace(_chat_id=0),
+            SimpleNamespace(chat_id=0, user_data={}, bot=None),
         )
     )
 
@@ -228,7 +228,7 @@ def test_one_tokens_missing_valuation_preserves_other_token_and_all_price_series
     result = asyncio.run(
         mcap.run(
             mcap.Config(tokens="ORCA,RAY", send_to_telegram=False, normalize=False),
-            SimpleNamespace(_chat_id=0),
+            SimpleNamespace(chat_id=0, user_data={}, bot=None),
         )
     )
 
@@ -359,7 +359,7 @@ def test_report_is_saved_before_short_photo_caption_with_full_summary_returned(
     result = asyncio.run(
         mcap.run(
             mcap.Config(tokens="ORCA", send_to_telegram=True),
-            SimpleNamespace(_chat_id=7, bot=bot),
+            SimpleNamespace(chat_id=7, user_data={}, bot=bot),
         )
     )
 

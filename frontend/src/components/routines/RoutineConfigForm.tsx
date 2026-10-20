@@ -2,8 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 
 import { SelectField as MenuSelect } from "@/components/ui/select-field";
-import type { RoutineFieldInfo } from "@/lib/api";
-import { api } from "@/lib/api";
+import { routinesApi, type RoutineFieldInfo } from "@/lib/api/routines";
 import { useServer } from "@/hooks/useServer";
 import { formatSlug } from "@/lib/routineUtils";
 
@@ -31,7 +30,7 @@ function SelectField({
   const { server } = useServer();
   const { data, isLoading } = useQuery({
     queryKey: ["routine-field-options", field.options_from, server],
-    queryFn: () => api.getRoutineFieldOptions(field.options_from!, server!),
+    queryFn: () => routinesApi.getRoutineFieldOptions(field.options_from!, server!),
     enabled: !!field.options_from && !!server,
     staleTime: 30_000,
   });

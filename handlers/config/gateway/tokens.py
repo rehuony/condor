@@ -2,11 +2,16 @@
 Gateway token management functions
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.pool_data import gecko_call
 from condor.preferences import get_active_server
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
+from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import (
     OWNER_REQUIRED_MESSAGE,
@@ -36,16 +41,14 @@ NETWORK_TO_GECKO = {
 }
 
 
-async def show_tokens_menu(
-    query, context: ContextTypes.DEFAULT_TYPE, show_all: bool = False
-) -> None:
+async def show_tokens_menu(query, context: Context, show_all: bool = False) -> None:
     """Show tokens menu - select network to view tokens"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading networks...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -62,7 +65,7 @@ async def show_tokens_menu(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back to Gateway", callback_data="config_gateway"
+                        text="« Back to Gateway", callback_data="config_gateway"
                     )
                 ]
             ]
@@ -95,7 +98,8 @@ async def show_tokens_menu(
                 network_buttons.append(
                     [
                         InlineKeyboardButton(
-                            network_id, callback_data=f"gateway_token_network_{idx}"
+                            text=network_id,
+                            callback_data=f"gateway_token_network_{idx}",
                         )
                     ]
                 )
@@ -111,13 +115,13 @@ async def show_tokens_menu(
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            f"🌐 All Networks ({len(all_networks)})",
+                            text=f"🌐 All Networks ({len(all_networks)})",
                             callback_data="gateway_token_all_networks",
                         )
                     ],
                     [
                         InlineKeyboardButton(
-                            "« Back to Gateway", callback_data="config_gateway"
+                            text="« Back to Gateway", callback_data="config_gateway"
                         )
                     ],
                 ]
@@ -130,12 +134,12 @@ async def show_tokens_menu(
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            "« Back to Gateway", callback_data="config_gateway"
+                            text="« Back to Gateway", callback_data="config_gateway"
                         )
                     ]
                 ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -143,21 +147,25 @@ async def show_tokens_menu(
 
     except Exception as e:
         # Ignore "message not modified" errors - they're harmless
-        if "not modified" in str(e).lower():
+        if is_not_modified(e):
             logger.debug(f"Message not modified (ignored): {e}")
             return
         logger.error(f"Error showing tokens menu: {e}", exc_info=True)
         error_text = f"❌ Error loading networks: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back to Gateway", callback_data="config_gateway")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to Gateway", callback_data="config_gateway"
+                )
+            ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_token_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_token_action(query, context: Context) -> None:
     """Handle token-specific actions"""
     action_data = query.data.replace("gateway_token_", "")
 
@@ -248,7 +256,7 @@ async def handle_token_action(query, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def show_network_tokens(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str, page: int = 0
+    query, context: Context, network_id: str, page: int = 0
 ) -> None:
     """Show tokens for a specific network with button grid and pagination"""
     TOKENS_PER_PAGE = 16
@@ -259,7 +267,7 @@ async def show_network_tokens(
 
         await query.answer("Loading tokens...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -290,10 +298,11 @@ async def show_network_tokens(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "➕ Add Token", callback_data=f"gateway_token_add_{network_id}"
+                        text="➕ Add Token",
+                        callback_data=f"gateway_token_add_{network_id}",
                     )
                 ],
-                [InlineKeyboardButton("« Back", callback_data="gateway_tokens")],
+                [InlineKeyboardButton(text="« Back", callback_data="gateway_tokens")],
             ]
         else:
             # Store all tokens for selection
@@ -331,7 +340,7 @@ async def show_network_tokens(
                 symbol = token.get("symbol", "?")[:6]  # Truncate long symbols
                 row.append(
                     InlineKeyboardButton(
-                        symbol, callback_data=f"gateway_token_select_{global_idx}"
+                        text=symbol, callback_data=f"gateway_token_select_{global_idx}"
                     )
                 )
 
@@ -349,13 +358,15 @@ async def show_network_tokens(
                 if page > 0:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            "« Prev", callback_data=f"gateway_token_page_{page - 1}"
+                            text="« Prev",
+                            callback_data=f"gateway_token_page_{page - 1}",
                         )
                     )
                 if page < total_pages - 1:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            "Next »", callback_data=f"gateway_token_page_{page + 1}"
+                            text="Next »",
+                            callback_data=f"gateway_token_page_{page + 1}",
                         )
                     )
                 if nav_buttons:
@@ -365,18 +376,20 @@ async def show_network_tokens(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "➕ Add Token", callback_data=f"gateway_token_add_{network_id}"
+                        text="➕ Add Token",
+                        callback_data=f"gateway_token_add_{network_id}",
                     ),
                     InlineKeyboardButton(
-                        "🔄 Refresh", callback_data=f"gateway_token_view_{network_id}"
+                        text="🔄 Refresh",
+                        callback_data=f"gateway_token_view_{network_id}",
                     ),
                 ]
             )
             keyboard.append(
-                [InlineKeyboardButton("« Back", callback_data="gateway_tokens")]
+                [InlineKeyboardButton(text="« Back", callback_data="gateway_tokens")]
             )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -384,21 +397,21 @@ async def show_network_tokens(
 
     except Exception as e:
         # Ignore "message not modified" errors - they're harmless
-        if "not modified" in str(e).lower():
+        if is_not_modified(e):
             logger.debug(f"Message not modified (ignored): {e}")
             return
         logger.error(f"Error showing network tokens: {e}", exc_info=True)
         error_text = f"❌ Error loading tokens: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="gateway_tokens")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_tokens")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def prompt_add_token(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def prompt_add_token(query, context: Context, network_id: str) -> None:
     """Prompt user to enter token details"""
     try:
         network_escaped = escape_markdown_v2(network_id)
@@ -410,7 +423,7 @@ async def prompt_add_token(
         context.user_data["awaiting_token_input"] = "token_details"
         context.user_data["token_network"] = network_id
         context.user_data["token_message_id"] = query.message.message_id
-        context.user_data["token_chat_id"] = query.message.chat_id
+        context.user_data["token_chat_id"] = query.message.chat.id
 
         message_text = (
             f"➕ *Add Token to {network_escaped}*\n\n"
@@ -425,11 +438,11 @@ async def prompt_add_token(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Cancel", callback_data=f"gateway_token_view_{network_id}"
+                    text="« Cancel", callback_data=f"gateway_token_view_{network_id}"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -441,16 +454,14 @@ async def prompt_add_token(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def prompt_remove_token(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def prompt_remove_token(query, context: Context, network_id: str) -> None:
     """Show list of tokens to select for editing or removal"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading tokens...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -479,7 +490,7 @@ async def prompt_remove_token(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back", callback_data=f"gateway_token_view_{network_id}"
+                        text="« Back", callback_data=f"gateway_token_view_{network_id}"
                     )
                 ]
             ]
@@ -495,7 +506,8 @@ async def prompt_remove_token(
                 token_buttons.append(
                     [
                         InlineKeyboardButton(
-                            f"{symbol}", callback_data=f"gateway_token_select_{idx}"
+                            text=f"{symbol}",
+                            callback_data=f"gateway_token_select_{idx}",
                         )
                     ]
                 )
@@ -509,12 +521,12 @@ async def prompt_remove_token(
             keyboard = token_buttons + [
                 [
                     InlineKeyboardButton(
-                        "« Back", callback_data=f"gateway_token_view_{network_id}"
+                        text="« Back", callback_data=f"gateway_token_view_{network_id}"
                     )
                 ]
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -525,9 +537,7 @@ async def prompt_remove_token(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def show_token_options(
-    query, context: ContextTypes.DEFAULT_TYPE, token_idx: int
-) -> None:
+async def show_token_options(query, context: Context, token_idx: int) -> None:
     """Show edit/remove options for a selected token"""
     try:
         tokens = context.user_data.get("token_manage_list", [])
@@ -565,19 +575,19 @@ async def show_token_options(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✏️ Edit", callback_data=f"gateway_token_edit_{token_idx}"
+                    text="✏️ Edit", callback_data=f"gateway_token_edit_{token_idx}"
                 ),
                 InlineKeyboardButton(
-                    "🗑 Remove", callback_data=f"gateway_token_del_{token_idx}"
+                    text="🗑 Remove", callback_data=f"gateway_token_del_{token_idx}"
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "« Back", callback_data=f"gateway_token_page_{current_page}"
+                    text="« Back", callback_data=f"gateway_token_page_{current_page}"
                 )
             ],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -589,9 +599,7 @@ async def show_token_options(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def prompt_edit_token(
-    query, context: ContextTypes.DEFAULT_TYPE, token_idx: int
-) -> None:
+async def prompt_edit_token(query, context: Context, token_idx: int) -> None:
     """Prompt user to enter new values for the token"""
     try:
         tokens = context.user_data.get("token_manage_list", [])
@@ -615,7 +623,7 @@ async def prompt_edit_token(
         context.user_data["token_network"] = network_id
         context.user_data["token_edit_address"] = address
         context.user_data["token_message_id"] = query.message.message_id
-        context.user_data["token_chat_id"] = query.message.chat_id
+        context.user_data["token_chat_id"] = query.message.chat.id
 
         # Show current values
         current_values = f"{symbol},{decimals}"
@@ -636,11 +644,11 @@ async def prompt_edit_token(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Cancel", callback_data=f"gateway_token_select_{token_idx}"
+                    text="« Cancel", callback_data=f"gateway_token_select_{token_idx}"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -653,13 +661,13 @@ async def prompt_edit_token(
 
 
 async def show_delete_token_confirmation(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str, token_address: str
+    query, context: Context, network_id: str, token_address: str
 ) -> None:
     """Show confirmation dialog before deleting a token"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
 
         # Get token details to show in confirmation
         client = await get_config_manager().get_client_for_chat(
@@ -716,16 +724,16 @@ async def show_delete_token_confirmation(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✅ Yes, Delete", callback_data="gateway_token_confirm_remove"
+                    text="✅ Yes, Delete", callback_data="gateway_token_confirm_remove"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "❌ Cancel", callback_data=f"gateway_token_view_{network_id}"
+                    text="❌ Cancel", callback_data=f"gateway_token_view_{network_id}"
                 )
             ],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -738,13 +746,13 @@ async def show_delete_token_confirmation(
 
 
 async def remove_token(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str, token_address: str
+    query, context: Context, network_id: str, token_address: str
 ) -> None:
     """Remove a token from Gateway"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         user_id = query.from_user.id
 
         # The token list is the owner's configuration, shared by everyone on the
@@ -787,11 +795,12 @@ async def remove_token(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Back to Tokens", callback_data=f"gateway_token_view_{network_id}"
+                    text="« Back to Tokens",
+                    callback_data=f"gateway_token_view_{network_id}",
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             success_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -808,19 +817,17 @@ async def remove_token(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Back", callback_data=f"gateway_token_view_{network_id}"
+                    text="« Back", callback_data=f"gateway_token_view_{network_id}"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_token_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_token_input(update: Update, context: Context) -> None:
     """Handle text input during token addition/removal flow"""
     awaiting_field = context.user_data.get("awaiting_token_input")
     logger.info(
@@ -838,8 +845,6 @@ async def handle_token_input(
         pass
 
     try:
-        from types import SimpleNamespace
-
         from config_manager import get_config_manager
 
         network_id = context.user_data.get("token_network")
@@ -863,7 +868,7 @@ async def handle_token_input(
                     # Show fetching message
                     if message_id and chat_id:
                         network_escaped = escape_markdown_v2(network_id)
-                        await update.get_bot().edit_message_text(
+                        await context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=message_id,
                             text=f"🔍 *Fetching token details\\.\\.\\.*\n\nFrom GeckoTerminal for {network_escaped}",
@@ -891,14 +896,14 @@ async def handle_token_input(
 
                 except Exception as e:
                     logger.warning(f"Failed to fetch token from GeckoTerminal: {e}")
-                    await update.get_bot().send_message(
+                    await context.bot.send_message(
                         chat_id=chat_id,
                         text=f"❌ Could not fetch token details. Please use full format:\naddress,symbol,decimals,name",
                     )
                     return
 
             elif len(parts) < 3:
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=chat_id,
                     text="❌ Invalid format. Use: address,symbol,decimals,name\nOr just paste the token address.",
                 )
@@ -921,7 +926,7 @@ async def handle_token_input(
             symbol_escaped = escape_markdown_v2(symbol)
 
             if message_id and chat_id:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"⏳ *Adding Token {symbol_escaped}*\n\nTo {network_escaped}\n\n_Please wait\\.\\.\\._",
@@ -946,7 +951,7 @@ async def handle_token_input(
                 )
 
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=success_text,
@@ -958,29 +963,16 @@ async def handle_token_input(
 
                 await asyncio.sleep(2)
 
-                async def mock_answer(text=""):
-                    """Mock async answer method"""
-                    pass
-
-                mock_message = SimpleNamespace(
-                    edit_text=lambda text, parse_mode=None, reply_markup=None: update.get_bot().edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=text,
-                        parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    ),
-                    chat_id=chat_id,
-                    message_id=message_id,
+                mock_query = MockQuery(
+                    message_handle(context.bot, chat_id, message_id), None
                 )
-                mock_query = SimpleNamespace(message=mock_message, answer=mock_answer)
                 await show_network_tokens(mock_query, context, network_id)
 
             except Exception as e:
                 logger.error(f"Error adding token: {e}", exc_info=True)
                 error_text = f"❌ Error adding token: {escape_markdown_v2(str(e))}"
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=error_text,
@@ -1002,22 +994,9 @@ async def handle_token_input(
             context.user_data.pop("dex_state", None)
 
             # Create mock query and call confirmation dialog
-            async def mock_answer(text=""):
-                """Mock async answer method"""
-                pass
-
-            mock_message = SimpleNamespace(
-                edit_text=lambda text, parse_mode=None, reply_markup=None: update.get_bot().edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=text,
-                    parse_mode=parse_mode,
-                    reply_markup=reply_markup,
-                ),
-                chat_id=chat_id,
-                message_id=message_id,
+            mock_query = MockQuery(
+                message_handle(context.bot, chat_id, message_id), None
             )
-            mock_query = SimpleNamespace(message=mock_message, answer=mock_answer)
             await show_delete_token_confirmation(
                 mock_query, context, network_id, token_address
             )
@@ -1028,7 +1007,7 @@ async def handle_token_input(
             parts = [p.strip() for p in token_input.split(",")]
 
             if len(parts) < 2:
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=chat_id, text="❌ Invalid format. Use: symbol,decimals,name"
                 )
                 return
@@ -1060,14 +1039,14 @@ async def handle_token_input(
             if not is_owner:
                 refusal_text = f"⛔ {escape_markdown_v2(OWNER_REQUIRED_MESSAGE)}"
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=refusal_text,
                         parse_mode="MarkdownV2",
                     )
                 else:
-                    await update.get_bot().send_message(
+                    await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=refusal_text,
                         parse_mode="MarkdownV2",
@@ -1079,7 +1058,7 @@ async def handle_token_input(
             symbol_escaped = escape_markdown_v2(new_symbol)
 
             if message_id and chat_id:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"⏳ *Updating Token {symbol_escaped}*\n\nOn {network_escaped}\n\n_Please wait\\.\\.\\._",
@@ -1114,7 +1093,7 @@ async def handle_token_input(
                 )
 
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=success_text,
@@ -1126,29 +1105,16 @@ async def handle_token_input(
 
                 await asyncio.sleep(2)
 
-                async def mock_answer(text=""):
-                    """Mock async answer method"""
-                    pass
-
-                mock_message = SimpleNamespace(
-                    edit_text=lambda text, parse_mode=None, reply_markup=None: update.get_bot().edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=text,
-                        parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    ),
-                    chat_id=chat_id,
-                    message_id=message_id,
+                mock_query = MockQuery(
+                    message_handle(context.bot, chat_id, message_id), None
                 )
-                mock_query = SimpleNamespace(message=mock_message, answer=mock_answer)
                 await show_network_tokens(mock_query, context, network_id)
 
             except Exception as e:
                 logger.error(f"Error updating token: {e}", exc_info=True)
                 error_text = f"❌ Error updating token: {escape_markdown_v2(str(e))}"
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=error_text,

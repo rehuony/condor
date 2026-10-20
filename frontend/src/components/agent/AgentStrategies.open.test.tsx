@@ -40,8 +40,8 @@ const STRATEGY = {
   instances: [],
 };
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgent: vi.fn(async () => ({
       slug: "brigado",
       name: "Brigado",

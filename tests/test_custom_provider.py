@@ -16,6 +16,15 @@ from condor.acp.pydantic_ai_client import (
     is_pydantic_ai_model,
     model_prefix,
 )
+from condor.llm.custom_models import (
+    CustomProviderError,
+    _extract_model_ids,
+    fetch_models,
+    find_by_token,
+    format_model_label,
+    model_token,
+    normalize_base_url,
+)
 from condor.preferences import (
     build_custom_agent_key,
     find_custom_provider,
@@ -33,15 +42,6 @@ from handlers.agents import (
     _handle_custom_delete,
     _handle_custom_delete_confirm,
     _handle_custom_rekey,
-)
-from handlers.agents.custom_models import (
-    CustomProviderError,
-    _extract_model_ids,
-    fetch_models,
-    find_by_token,
-    format_model_label,
-    model_token,
-    normalize_base_url,
 )
 from handlers.agents.menu import (
     _custom_delete_keyboard,

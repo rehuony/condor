@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 
 import {
   DELEGATION_STATUS,
   formatDelegationTime,
 } from "@/components/agent/delegationStatus";
 import { WorkspaceSheet } from "@/components/chat/WorkspaceSheet";
-import { api, type DelegationSummary } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { delegationsApi, type DelegationSummary } from "@/lib/api/delegations";
 import { formatDuration } from "@/lib/formatters";
 
 /** One labelled block of a run's output, absent when there is nothing to show. */
@@ -58,7 +58,7 @@ export function CodeRunSheet({
 }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["code-run", row.task_id],
-    queryFn: () => api.getCodeRun(row.task_id),
+    queryFn: () => delegationsApi.getCodeRun(row.task_id),
   });
 
   return (
@@ -69,7 +69,7 @@ export function CodeRunSheet({
     >
       {isLoading ? (
         <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner size="xs" />
           Loading the run…
         </div>
       ) : error || !data ? (

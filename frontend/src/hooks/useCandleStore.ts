@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
-import type { CandleData } from "@/lib/api";
+import type { CandleData } from "@/lib/api/market";
 import { candleChannelKey, candleStore } from "@/lib/candle-store";
 
 /** Staleness thresholds by interval category */

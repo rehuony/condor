@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import type { AdminPerson } from "@/lib/admin-api";
 
 /**
@@ -74,7 +74,7 @@ export function ServerAccessGrid({
             ) : (
               <div className="flex shrink-0 items-center gap-1">
                 {busy && (
-                  <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
+                  <Spinner size="xs" tone="muted" />
                 )}
                 {(
                   [

@@ -12,7 +12,8 @@ import { sessionPnlPoints } from "@/components/agent/session/pnlPoints";
 import { OutsideWindow } from "@/components/agent/workspace/OutsideWindow";
 import type { WorkspaceAlert } from "@/components/agent/workspace/views";
 import { ReportViewer } from "@/components/routines/ReportViewer";
-import { api, type AgentPerformance, type StrategyUnavailable } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
+import { agentsApi, type AgentPerformance, type StrategyUnavailable } from "@/lib/api/agents";
 import type { Decision, ParsedJournal } from "@/lib/parse-agent";
 import { unavailableLabel } from "@/lib/strategy-unavailable";
 
@@ -85,7 +86,7 @@ export function NowView({
 
   const { data: reportData } = useQuery({
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "report"],
-    queryFn: () => api.getSessionReport(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionReport(slug, sslug, sessionNum),
     enabled: sessionNum > 0,
   });
   const report = reportData?.report ?? null;
@@ -173,10 +174,8 @@ export function NowView({
       {/* ③ What it last decided, whole. Through the chat's own markdown
           renderer, because a model writes bold, lists and tables and the reader
           was getting the asterisks and the pipes. */}
-      <div
-        data-now-decision
-        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
-      >
+      <Card
+        data-now-decision>
         <h3 className="mb-3 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
           <MessageSquareQuote className="h-3.5 w-3.5" /> Last decision
           {last && last.tick > 0 && (
@@ -224,7 +223,7 @@ export function NowView({
               : "This loop has not run yet."}
           </p>
         )}
-      </div>
+      </Card>
 
       {/* ④ What it put into the world (FEAT-100), read from the same response
           the vitals fold — so the two can never disagree. */}

@@ -7,7 +7,7 @@ import {
   Field,
 } from "@/components/agent/knowledge/KnowledgeChrome";
 import { SelectField } from "@/components/ui/select-field";
-import { api, type MemoryCard } from "@/lib/api";
+import { agentsApi, type MemoryCard } from "@/lib/api/agents";
 
 /** The taxonomy `MemoryStore` validates against — anything else falls back to `fact`. */
 const MEMORY_TYPES = ["preference", "fact", "feedback", "reference"] as const;
@@ -47,7 +47,7 @@ export function MemoryEditor({
 
   const save = useMutation({
     mutationFn: () =>
-      api.saveAgentMemory(slug, existing?.name || name, {
+      agentsApi.saveAgentMemory(slug, existing?.name || name, {
         content: body,
         description,
         type,

@@ -7,7 +7,10 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
-import { api } from "@/lib/api";
+
+import { executorsApi } from "@/lib/api/executors";
+import { marketApi } from "@/lib/api/market";
+import { portfolioApi } from "@/lib/api/portfolio";
 import type { VenueTraits } from "@/lib/connector-capabilities";
 import { LAST_MARKET_KEY } from "@/lib/sessionState";
 import { CreateExecutor } from "@/pages/CreateExecutor";
@@ -92,16 +95,16 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem(LAST_MARKET_KEY, JSON.stringify({ connector: "binance_perpetual", pair: "SOL-USDT" }));
   const venues = new Promise<VenueTraits[]>((resolve) => { resolveVenues = resolve; });
-  vi.spyOn(api, "getVenues").mockReturnValue(venues);
-  vi.spyOn(api, "getPortfolio").mockResolvedValue({ server: "srv", connectors: [], total_usd: 0 });
-  vi.spyOn(api, "getExecutors").mockResolvedValue([]);
-  vi.spyOn(api, "getConsolidatedPositions").mockResolvedValue({ executor_positions: [], bot_positions: [] });
-  vi.spyOn(api, "getTradingRules").mockResolvedValue({ connector: "binance_perpetual", rules: [] });
-  vi.spyOn(api, "getPrice").mockResolvedValue({
+  vi.spyOn(marketApi, "getVenues").mockReturnValue(venues);
+  vi.spyOn(portfolioApi, "getPortfolio").mockResolvedValue({ server: "srv", connectors: [], total_usd: 0 });
+  vi.spyOn(executorsApi, "getExecutors").mockResolvedValue([]);
+  vi.spyOn(portfolioApi, "getConsolidatedPositions").mockResolvedValue({ executor_positions: [], bot_positions: [] });
+  vi.spyOn(marketApi, "getTradingRules").mockResolvedValue({ connector: "binance_perpetual", rules: [] });
+  vi.spyOn(marketApi, "getPrice").mockResolvedValue({
     connector: "binance_perpetual", trading_pair: "SOL-USDT", mid_price: 105, best_bid: 0, best_ask: 0,
   });
-  vi.spyOn(api, "getTickers").mockResolvedValue({ connector: "binance_perpetual", tickers: [], updated_at: null });
-  vi.spyOn(api, "getRates").mockResolvedValue({ rates: {} });
+  vi.spyOn(marketApi, "getTickers").mockResolvedValue({ connector: "binance_perpetual", tickers: [], updated_at: null });
+  vi.spyOn(marketApi, "getRates").mockResolvedValue({ rates: {} });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   container = document.createElement("div");
   document.body.appendChild(container);

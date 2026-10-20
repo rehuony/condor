@@ -1,4 +1,4 @@
-import type { RunningInstance } from "@/lib/api";
+import type { RunningInstance } from "@/lib/api/agents";
 
 export const STATUS_STYLES: Record<string, { dot: string; bg: string; label: string }> = {
   running: { dot: "bg-emerald-400 shadow-[0_0_6px_theme(colors.emerald.400)]", bg: "border-emerald-500/30 bg-emerald-500/5", label: "LIVE" },

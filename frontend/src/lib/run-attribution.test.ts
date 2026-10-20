@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { BotRunInfo } from "./api";
+import type { BotRunInfo } from "./api/bots";
 import { buildAttributor, runWindows, type RunWindow } from "./run-attribution";
 
 const HOUR = 3_600_000;

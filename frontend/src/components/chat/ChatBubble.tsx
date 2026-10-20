@@ -12,13 +12,14 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Starters, type Starter } from "@/components/chat/Starters";
+import { IconButton } from "@/components/ui/IconButton";
 import { useBubbleResume } from "@/hooks/useBubbleResume";
 import { useChat, useSessionOptions } from "@/hooks/useChat";
 import type { ChatSlot } from "@/hooks/useChatSocket";
 import { useServer } from "@/hooks/useServer";
 import { useStarters } from "@/hooks/useStarters";
 import { bubbleAgentSlug, isAgentPage, slotFor } from "@/lib/agentSlug";
-import { CHAT_SLUG } from "@/lib/api";
+import { CHAT_SLUG } from "@/lib/api/agents";
 import { routeFacts } from "@/lib/pageFacts";
 import { agentsQuery } from "@/lib/queryClient";
 import { BUBBLE_OPEN_KEY } from "@/lib/sessionState";
@@ -205,14 +206,14 @@ export function ChatBubble() {
             <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
             Back to chat
           </button>
-          <button
-            onClick={() => toggle(false)}
-            className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+          <IconButton
+            label="Minimize quick chat"
             title="Minimize"
-            aria-label="Minimize quick chat"
+            size="sm"
+            onClick={() => toggle(false)}
           >
             <Minus className="h-4 w-4" />
-          </button>
+          </IconButton>
         </div>
       </div>
 

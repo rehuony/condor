@@ -13,8 +13,10 @@ import { useNavigate } from "react-router-dom";
 
 import { ExecutorChart } from "@/components/charts/ExecutorChart";
 import { PairLabel } from "@/components/executor/PairLabel";
+import { Card } from "@/components/ui/Card";
+import { IconButton } from "@/components/ui/IconButton";
 import { useResizeDrag } from "@/hooks/useResizeDrag";
-import { type ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import {
   formatUsd,
   formatVolume,
@@ -228,21 +230,26 @@ const ExecutorRow = memo(function ExecutorRow({
       </td>
       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
         {onStop && isExecutorActive(ex.status) && (
-          <button
+          <IconButton
+            label="Stop executor"
+            size="sm"
+            tone="danger"
             onClick={() => onStop(ex.id)}
             disabled={isStopping}
-            className="p-1 rounded hover:bg-[var(--color-red)]/10 text-[var(--color-text-muted)] hover:text-[var(--color-red)] transition-colors disabled:opacity-50"
-            title="Stop executor"
           >
             <Square className="h-3.5 w-3.5" />
-          </button>
+          </IconButton>
         )}
         {onDelete && isExecutorTerminated(ex.status) && (
-          <button onClick={() => onDelete(ex.id)} disabled={isDeleting}
-            className="p-1 rounded hover:bg-[var(--color-red)]/10 text-[var(--color-text-muted)] hover:text-[var(--color-red)] disabled:opacity-50"
-            title="Delete executor history" aria-label="Delete executor history">
+          <IconButton
+            label="Delete executor history"
+            size="sm"
+            tone="danger"
+            onClick={() => onDelete(ex.id)}
+            disabled={isDeleting}
+          >
             <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          </IconButton>
         )}
       </td>
     </tr>
@@ -545,12 +552,12 @@ export function DetailPanel({
 
           {/* Controller ID */}
           {executor.controller_id && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-1">
+            <Card className="space-y-1">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 Controller
               </h3>
               <div className="text-sm font-medium font-mono">{executor.controller_id}</div>
-            </div>
+            </Card>
           )}
 
           {/* Executor Chart */}
@@ -566,7 +573,7 @@ export function DetailPanel({
 
           {/* Price Info */}
           {(executor.entry_price > 0 || executor.current_price > 0) && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+            <Card className="space-y-3">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 Price Info
               </h3>
@@ -584,11 +591,11 @@ export function DetailPanel({
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* PnL Breakdown */}
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+          <Card className="space-y-3">
             <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               PnL & Volume
             </h3>
@@ -619,11 +626,11 @@ export function DetailPanel({
                 </div>
               </div>
             </div>
-          </div>
+          </Card>
 
           {/* Position-specific details */}
           {isPosition && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+            <Card className="space-y-3">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 Position Details
               </h3>
@@ -657,12 +664,12 @@ export function DetailPanel({
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Grid-specific details */}
           {isGrid && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+            <Card className="space-y-3">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 Grid Details
               </h3>
@@ -724,12 +731,12 @@ export function DetailPanel({
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* LP-specific details */}
           {isLp && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+            <Card className="space-y-3">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 LP Details
               </h3>
@@ -799,12 +806,12 @@ export function DetailPanel({
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Timestamps */}
           {executor.timestamp > 0 && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-1">
+            <Card className="space-y-1">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 Timing
               </h3>
@@ -824,12 +831,12 @@ export function DetailPanel({
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Custom Info */}
           {customEntries.length > 0 && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-2">
+            <Card className="space-y-2">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 Custom Info
               </h3>
@@ -845,7 +852,7 @@ export function DetailPanel({
                   </div>
                 ))}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Config */}

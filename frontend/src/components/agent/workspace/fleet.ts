@@ -17,11 +17,7 @@ import {
 } from "@/components/agent/workspace/views";
 import { workspaceHref } from "@/components/agent/workspace/workspaceUrl";
 import { countdown, type AgentActionRow } from "@/lib/agent-attribution";
-import type {
-  AgentSummary,
-  RunningInstance,
-  StrategySummary,
-} from "@/lib/api";
+import type { AgentSummary, RunningInstance, StrategySummary } from "@/lib/api/agents";
 import { positionQuoteValue } from "@/lib/pnl-chart";
 import type { ConvertQuote, PerfLeaf } from "@/lib/perf-tree";
 

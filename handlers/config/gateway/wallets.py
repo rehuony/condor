@@ -2,9 +2,6 @@
 Gateway wallet management functions
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import (
     get_active_server,
     get_all_networks_for_chain,
@@ -13,19 +10,26 @@ from condor.preferences import (
     remove_wallet_networks,
     set_wallet_networks,
 )
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 
 from ..server_context import build_config_message_header
 from ._shared import escape_markdown_v2, logger
 
 
-async def show_wallets_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_wallets_menu(query, context: Context) -> None:
     """Show wallets management menu with list of connected wallets as clickable buttons"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading wallets...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -52,7 +56,7 @@ async def show_wallets_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back to Gateway", callback_data="config_gateway"
+                        text="« Back to Gateway", callback_data="config_gateway"
                     )
                 ]
             ]
@@ -63,7 +67,7 @@ async def show_wallets_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back to Gateway", callback_data="config_gateway"
+                        text="« Back to Gateway", callback_data="config_gateway"
                     )
                 ]
             ]
@@ -75,12 +79,12 @@ async def show_wallets_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "➕ Add Wallet", callback_data="gateway_wallet_add"
+                        text="➕ Add Wallet", callback_data="gateway_wallet_add"
                     ),
                 ],
                 [
                     InlineKeyboardButton(
-                        "« Back to Gateway", callback_data="config_gateway"
+                        text="« Back to Gateway", callback_data="config_gateway"
                     )
                 ],
             ]
@@ -128,7 +132,7 @@ async def show_wallets_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
                 wallet_buttons.append(
                     [
                         InlineKeyboardButton(
-                            button_text, callback_data=f"gateway_wallet_view_{idx}"
+                            text=button_text, callback_data=f"gateway_wallet_view_{idx}"
                         )
                     ]
                 )
@@ -136,25 +140,27 @@ async def show_wallets_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             keyboard = wallet_buttons + [
                 [
                     InlineKeyboardButton(
-                        "➕ Add Wallet", callback_data="gateway_wallet_add"
+                        text="➕ Add Wallet", callback_data="gateway_wallet_add"
                     ),
                 ],
                 [
-                    InlineKeyboardButton("🔄 Refresh", callback_data="gateway_wallets"),
                     InlineKeyboardButton(
-                        "« Back to Gateway", callback_data="config_gateway"
+                        text="🔄 Refresh", callback_data="gateway_wallets"
+                    ),
+                    InlineKeyboardButton(
+                        text="« Back to Gateway", callback_data="config_gateway"
                     ),
                 ],
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         try:
             await query.message.edit_text(
                 message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
         except Exception as e:
-            if "Message is not modified" in str(e):
+            if is_not_modified(e):
                 await query.answer("✅ Already up to date")
             else:
                 raise
@@ -163,15 +169,19 @@ async def show_wallets_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error showing wallets menu: {e}", exc_info=True)
         error_text = f"❌ Error loading wallets: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back to Gateway", callback_data="config_gateway")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to Gateway", callback_data="config_gateway"
+                )
+            ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_wallet_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_wallet_action(query, context: Context) -> None:
     """Handle wallet-specific actions"""
     action_data = query.data.replace("gateway_wallet_", "")
 
@@ -301,10 +311,10 @@ async def handle_wallet_action(query, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer("Unknown action")
 
 
-async def prompt_add_wallet_chain(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def prompt_add_wallet_chain(query, context: Context) -> None:
     """Prompt user to select chain for adding wallet"""
     try:
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         header, server_online, gateway_running = await build_config_message_header(
             "➕ Add Wallet",
             include_gateway=True,
@@ -327,16 +337,17 @@ async def prompt_add_wallet_chain(query, context: ContextTypes.DEFAULT_TYPE) -> 
             chain_buttons.append(
                 [
                     InlineKeyboardButton(
-                        chain_display, callback_data=f"gateway_wallet_add_chain_{chain}"
+                        text=chain_display,
+                        callback_data=f"gateway_wallet_add_chain_{chain}",
                     )
                 ]
             )
 
         keyboard = chain_buttons + [
-            [InlineKeyboardButton("« Back", callback_data="gateway_wallets")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_wallets")]
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -349,13 +360,13 @@ async def prompt_add_wallet_chain(query, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def show_wallet_details(
-    query, context: ContextTypes.DEFAULT_TYPE, chain: str, address: str
+    query, context: Context, chain: str, address: str
 ) -> None:
     """Show details for a specific wallet with edit options"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         header, server_online, gateway_running = await build_config_message_header(
             "🔑 Wallet Details",
             include_gateway=True,
@@ -409,7 +420,7 @@ async def show_wallet_details(
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            "⭐️ Set as Default",
+                            text="⭐️ Set as Default",
                             callback_data=f"gateway_wallet_setdefault_{wallet_idx}",
                         )
                     ]
@@ -417,17 +428,21 @@ async def show_wallet_details(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "🗑️ Delete Wallet",
+                        text="🗑️ Delete Wallet",
                         callback_data=f"gateway_wallet_delete_{wallet_idx}",
                     )
                 ]
             )
 
         keyboard.append(
-            [InlineKeyboardButton("« Back to Wallets", callback_data="gateway_wallets")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to Wallets", callback_data="gateway_wallets"
+                )
+            ]
         )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -437,19 +452,21 @@ async def show_wallet_details(
     except Exception as e:
         logger.error(f"Error showing wallet details: {e}", exc_info=True)
         error_text = f"❌ Error: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="gateway_wallets")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_wallets")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
 async def show_wallet_network_edit(
-    query, context: ContextTypes.DEFAULT_TYPE, chain: str, address: str, wallet_idx: int
+    query, context: Context, chain: str, address: str, wallet_idx: int
 ) -> None:
     """Show network toggle interface for a wallet"""
     try:
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         header, server_online, gateway_running = await build_config_message_header(
             "🌐 Edit Networks",
             include_gateway=True,
@@ -495,7 +512,7 @@ async def show_wallet_network_edit(
             network_buttons.append(
                 [
                     InlineKeyboardButton(
-                        button_text,
+                        text=button_text,
                         callback_data=f"gateway_wallet_toggle_net_{wallet_idx}_{net}",
                     )
                 ]
@@ -504,12 +521,12 @@ async def show_wallet_network_edit(
         keyboard = network_buttons + [
             [
                 InlineKeyboardButton(
-                    "✓ Done", callback_data=f"gateway_wallet_net_done_{wallet_idx}"
+                    text="✓ Done", callback_data=f"gateway_wallet_net_done_{wallet_idx}"
                 )
             ]
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -522,7 +539,7 @@ async def show_wallet_network_edit(
 
 
 async def toggle_wallet_network(
-    query, context: ContextTypes.DEFAULT_TYPE, wallet_idx: int, network_id: str
+    query, context: Context, wallet_idx: int, network_id: str
 ) -> None:
     """Toggle a network on/off for a wallet"""
     try:
@@ -558,12 +575,10 @@ async def toggle_wallet_network(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def prompt_add_wallet_private_key(
-    query, context: ContextTypes.DEFAULT_TYPE, chain: str
-) -> None:
+async def prompt_add_wallet_private_key(query, context: Context, chain: str) -> None:
     """Prompt user to enter private key for adding wallet"""
     try:
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         header, server_online, gateway_running = await build_config_message_header(
             f"➕ Add {chain.replace('-', ' ').title()} Wallet",
             include_gateway=True,
@@ -574,7 +589,7 @@ async def prompt_add_wallet_private_key(
         context.user_data["awaiting_wallet_input"] = "add_wallet"
         context.user_data["wallet_chain"] = chain
         context.user_data["wallet_message_id"] = query.message.message_id
-        context.user_data["wallet_chat_id"] = query.message.chat_id
+        context.user_data["wallet_chat_id"] = query.message.chat.id
 
         chain_escaped = escape_markdown_v2(chain.replace("-", " ").title())
         message_text = (
@@ -589,11 +604,11 @@ async def prompt_add_wallet_private_key(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Cancel", callback_data="gateway_wallet_cancel_add"
+                    text="« Cancel", callback_data="gateway_wallet_cancel_add"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -605,12 +620,12 @@ async def prompt_add_wallet_private_key(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def prompt_remove_wallet_chain(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def prompt_remove_wallet_chain(query, context: Context) -> None:
     """Prompt user to select chain for removing wallet"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -656,17 +671,17 @@ async def prompt_remove_wallet_chain(query, context: ContextTypes.DEFAULT_TYPE) 
             chain_buttons.append(
                 [
                     InlineKeyboardButton(
-                        chain_display,
+                        text=chain_display,
                         callback_data=f"gateway_wallet_remove_chain_{chain}",
                     )
                 ]
             )
 
         keyboard = chain_buttons + [
-            [InlineKeyboardButton("« Back", callback_data="gateway_wallets")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_wallets")]
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -678,14 +693,12 @@ async def prompt_remove_wallet_chain(query, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def prompt_remove_wallet_address(
-    query, context: ContextTypes.DEFAULT_TYPE, chain: str
-) -> None:
+async def prompt_remove_wallet_address(query, context: Context, chain: str) -> None:
     """Prompt user to select wallet address to remove"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -738,17 +751,17 @@ async def prompt_remove_wallet_address(
             address_buttons.append(
                 [
                     InlineKeyboardButton(
-                        display_addr,
+                        text=display_addr,
                         callback_data=f"gateway_wallet_confirm_remove_{chain}_{idx}",
                     )
                 ]
             )
 
         keyboard = address_buttons + [
-            [InlineKeyboardButton("« Back", callback_data="gateway_wallet_remove")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_wallet_remove")]
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -760,16 +773,14 @@ async def prompt_remove_wallet_address(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def remove_wallet(
-    query, context: ContextTypes.DEFAULT_TYPE, chain: str, address: str
-) -> None:
+async def remove_wallet(query, context: Context, chain: str, address: str) -> None:
     """Remove a wallet from Gateway"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Removing wallet...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -792,9 +803,13 @@ async def remove_wallet(
         )
 
         keyboard = [
-            [InlineKeyboardButton("« Back to Wallets", callback_data="gateway_wallets")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to Wallets", callback_data="gateway_wallets"
+                )
+            ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             success_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -803,23 +818,23 @@ async def remove_wallet(
     except Exception as e:
         logger.error(f"Error removing wallet: {e}", exc_info=True)
         error_text = f"❌ Error removing wallet: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="gateway_wallets")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_wallets")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def set_default_wallet(
-    query, context: ContextTypes.DEFAULT_TYPE, chain: str, address: str
-) -> None:
+async def set_default_wallet(query, context: Context, chain: str, address: str) -> None:
     """Set a wallet as the default for a chain"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Setting as default...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -841,9 +856,13 @@ async def set_default_wallet(
         )
 
         keyboard = [
-            [InlineKeyboardButton("« Back to Wallets", callback_data="gateway_wallets")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to Wallets", callback_data="gateway_wallets"
+                )
+            ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             success_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -852,16 +871,16 @@ async def set_default_wallet(
     except Exception as e:
         logger.error(f"Error setting default wallet: {e}", exc_info=True)
         error_text = f"❌ Error setting default: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="gateway_wallets")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_wallets")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_wallet_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_wallet_input(update: Update, context: Context) -> None:
     """Handle text input during wallet addition flow"""
     awaiting_field = context.user_data.get("awaiting_wallet_input")
     if not awaiting_field:
@@ -887,7 +906,7 @@ async def handle_wallet_input(
             context.user_data.pop("wallet_chat_id", None)
 
             if not chain or not private_key:
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=chat_id, text="❌ Missing chain or private key"
                 )
                 return
@@ -897,7 +916,7 @@ async def handle_wallet_input(
 
             chain_escaped = escape_markdown_v2(chain.replace("-", " ").title())
             if message_id and chat_id:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"⏳ *Adding {chain_escaped} Wallet*\n\n_Please wait\\.\\.\\._",
@@ -951,7 +970,7 @@ async def handle_wallet_input(
                     network_buttons.append(
                         [
                             InlineKeyboardButton(
-                                button_text,
+                                text=button_text,
                                 callback_data=f"gateway_wallet_new_toggle_{net}",
                             )
                         ]
@@ -967,14 +986,14 @@ async def handle_wallet_input(
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            "✓ Done", callback_data="gateway_wallet_new_net_done"
+                            text="✓ Done", callback_data="gateway_wallet_new_net_done"
                         )
                     ]
                 ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
+                reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=success_text,
@@ -982,7 +1001,7 @@ async def handle_wallet_input(
                         reply_markup=reply_markup,
                     )
                 else:
-                    await update.get_bot().send_message(
+                    await context.bot.send_message(
                         chat_id=chat_id,
                         text=success_text,
                         parse_mode="MarkdownV2",
@@ -994,14 +1013,14 @@ async def handle_wallet_input(
                 error_text = f"❌ Error adding wallet: {escape_markdown_v2(str(e))}"
 
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=error_text,
                         parse_mode="MarkdownV2",
                     )
                 else:
-                    await update.get_bot().send_message(
+                    await context.bot.send_message(
                         chat_id=chat_id, text=error_text, parse_mode="MarkdownV2"
                     )
 
@@ -1010,9 +1029,7 @@ async def handle_wallet_input(
         context.user_data.pop("awaiting_wallet_input", None)
 
 
-async def show_new_wallet_network_selection(
-    query, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def show_new_wallet_network_selection(query, context: Context) -> None:
     """Show network selection for newly added wallet"""
     try:
         chain = context.user_data.get("new_wallet_chain")
@@ -1040,7 +1057,8 @@ async def show_new_wallet_network_selection(
             network_buttons.append(
                 [
                     InlineKeyboardButton(
-                        button_text, callback_data=f"gateway_wallet_new_toggle_{net}"
+                        text=button_text,
+                        callback_data=f"gateway_wallet_new_toggle_{net}",
                     )
                 ]
             )
@@ -1055,11 +1073,11 @@ async def show_new_wallet_network_selection(
         keyboard = network_buttons + [
             [
                 InlineKeyboardButton(
-                    "✓ Done", callback_data="gateway_wallet_new_net_done"
+                    text="✓ Done", callback_data="gateway_wallet_new_net_done"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -1071,9 +1089,7 @@ async def show_new_wallet_network_selection(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def toggle_new_wallet_network(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def toggle_new_wallet_network(query, context: Context, network_id: str) -> None:
     """Toggle a network for newly added wallet"""
     try:
         chain = context.user_data.get("new_wallet_chain")
@@ -1104,9 +1120,7 @@ async def toggle_new_wallet_network(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def finish_new_wallet_network_selection(
-    query, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def finish_new_wallet_network_selection(query, context: Context) -> None:
     """Finish network selection for newly added wallet and go to wallets menu"""
     try:
         address = context.user_data.get("new_wallet_address")

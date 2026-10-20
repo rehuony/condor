@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { useCondorWebSocket } from "@/hooks/useWebSocket";
-import { api, type OrderBookLevel, type OrderBookResponse } from "@/lib/api";
+import { marketApi, type OrderBookLevel, type OrderBookResponse } from "@/lib/api/market";
 
 interface OrderBookProps {
   server: string;
@@ -32,7 +32,7 @@ export function OrderBook({ server, connector, pair }: OrderBookProps) {
   // REST initial fetch
   const { data } = useQuery<OrderBookResponse>({
     queryKey: ["order-book", server, connector, pair],
-    queryFn: () => api.getOrderBook(server, connector, pair, LEVELS),
+    queryFn: () => marketApi.getOrderBook(server, connector, pair, LEVELS),
     enabled: !!server && !!connector && !!pair,
   });
 

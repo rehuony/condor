@@ -9,7 +9,8 @@ import {
   readLpPosition,
   type LpPosition,
 } from "@/components/dex/lp-position";
-import { api, type PoolSummary } from "@/lib/api";
+import { executorsApi } from "@/lib/api/executors";
+import { dexApi, type PoolSummary } from "@/lib/api/dex";
 import { isExecutorActive } from "@/lib/formatters";
 
 /** GeckoTerminal's multi-pool endpoint, which the labels come from, caps here. */
@@ -73,7 +74,7 @@ export function useLpPositions(server: string | null): {
   const { data: executors = [], isLoading } = useQuery({
     queryKey: ["dex-lp-executors", server],
     queryFn: () =>
-      api.getExecutors(server!, {
+      executorsApi.getExecutors(server!, {
         executor_type: LP_EXECUTOR_TYPE,
         limit: RECENT_LP_EXECUTORS,
       }),
@@ -112,8 +113,7 @@ export function useLpPositions(server: string | null): {
     queryFn: async () => {
       const entries = await Promise.all(
         Object.entries(byNetwork).map(([network, addresses]) =>
-          api
-            .getDexPoolsByAddress(server!, network, addresses)
+          dexApi.getDexPoolsByAddress(server!, network, addresses)
             .then((r) => r.pools)
             .catch(() => [] as PoolSummary[]),
         ),

@@ -12,7 +12,7 @@ import { poolLabel } from "@/components/dex/format";
 import { GATEWAY_TAB_CHAIN, type PoolSource } from "@/components/dex/pool-source";
 import { useDexUpstream } from "@/hooks/useDexUpstream";
 import { useServer } from "@/hooks/useServer";
-import { api, type PoolSummary } from "@/lib/api";
+import { dexApi, type PoolSummary } from "@/lib/api/dex";
 import { useDexFavorites } from "@/lib/dexFavorites";
 import { DEX_NETWORK_KEY } from "@/lib/sessionState";
 
@@ -89,7 +89,7 @@ export function Dex() {
 
   const { data: chains = [] } = useQuery({
     queryKey: ["dex-chains", server],
-    queryFn: () => api.getDexChains(server!),
+    queryFn: () => dexApi.getDexChains(server!),
     enabled: !!server,
     staleTime: 6 * 60 * 60 * 1000,
   });
@@ -121,7 +121,7 @@ export function Dex() {
 
   const { data: venues = [] } = useQuery({
     queryKey: ["dex-venues", server, network],
-    queryFn: () => api.getDexVenues(server!, network),
+    queryFn: () => dexApi.getDexVenues(server!, network),
     enabled: !!server,
     staleTime: 6 * 60 * 60 * 1000,
   });
@@ -163,7 +163,7 @@ export function Dex() {
   } = useQuery({
     queryKey: [...listingKey, page],
     queryFn: () =>
-      api.getDexPools(
+      dexApi.getDexPools(
         server!,
         source.kind === "gateway"
           ? {
@@ -204,7 +204,7 @@ export function Dex() {
   const { data: pastedPool } = useQuery({
     queryKey: ["dex-pool-by-address", server, network, debouncedQuery],
     queryFn: () =>
-      api.getDexPoolByAddress(server!, debouncedQuery, network).catch((e: Error) => {
+      dexApi.getDexPoolByAddress(server!, debouncedQuery, network).catch((e: Error) => {
         // A pasted *token* address 404s here by design — the token search
         // running alongside is the lookup that resolves it — so not-found is a
         // soft null, not an error. Everything else (throttle 503, network)
@@ -252,7 +252,7 @@ export function Dex() {
       }
       const pages = await Promise.all(
         batches.map((batch) =>
-          api.getDexPoolsByAddress(server!, network, batch),
+          dexApi.getDexPoolsByAddress(server!, network, batch),
         ),
       );
       return {

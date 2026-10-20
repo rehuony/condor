@@ -3,8 +3,11 @@ import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { PairLabel } from "@/components/executor/PairLabel";
+import { IconButton } from "@/components/ui/IconButton";
+import { FULLSCREEN_LAYER } from "@/components/ui/dialog";
 import { useRates } from "@/hooks/useRates";
-import { api, type ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
+import { marketApi } from "@/lib/api/market";
 import {
   computeMultiOverlays,
   createOverlayTooltipView,
@@ -183,7 +186,7 @@ export function ExecutorChart({
   const { data: candles, isLoading, isError } = useQuery({
     queryKey,
     queryFn: () =>
-      api.getCandles(server, connector, tradingPair, interval, 5000, startTime, endTime, poolAddress),
+      marketApi.getCandles(server, connector, tradingPair, interval, 5000, startTime, endTime, poolAddress),
     enabled: !!server && !!connector && !!tradingPair,
     retry: 1,
   });
@@ -661,7 +664,7 @@ export function ExecutorChart({
     <div
       className={
         fullscreen
-          ? "fixed inset-0 z-50 flex flex-col bg-[var(--color-bg)]"
+          ? FULLSCREEN_LAYER
           : "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden"
       }
     >
@@ -688,10 +691,10 @@ export function ExecutorChart({
               {overlays.length} executors overlaid
             </span>
           )}
-          <button
+          <IconButton
+            label={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
+            size="xs"
             onClick={toggleFullscreen}
-            className="p-0.5 rounded hover:bg-[var(--color-surface-hover)] transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
           >
             {fullscreen ? (
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -704,7 +707,7 @@ export function ExecutorChart({
                 <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
               </svg>
             )}
-          </button>
+          </IconButton>
         </div>
       </div>
       {/* Snapshot bubble strip */}

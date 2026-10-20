@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 
 import httpx
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from condor.reports import ReportBuilder
+from routines.base import RoutineContext
 
 CATEGORY = "Analysis"
 
@@ -202,7 +202,7 @@ async def _fetch_coingecko(client: httpx.AsyncClient, gecko_id: str) -> dict:
 # ── main ─────────────────────────────────────────────────────────────────────
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     BASE = "https://api.llama.fi"
     now = datetime.now(timezone.utc)
 

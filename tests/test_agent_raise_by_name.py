@@ -16,6 +16,7 @@ import condor.agents.agent as agent_mod
 from condor.preferences import get_chat_binding
 from handlers import agents as agents_mod
 from handlers.agents import menu as menu_mod
+from tests.conftest import patch_agents
 
 # --- doubles -----------------------------------------------------------------
 
@@ -61,7 +62,7 @@ class _Message:
         self.keyboards.append(kw.get("reply_markup"))
         return self
 
-    async def reply_text(self, text, **kw):
+    async def answer(self, text, **kw):
         self._rendered.append(text)
         self.keyboards.append(kw.get("reply_markup"))
         return self
@@ -124,13 +125,11 @@ def _install(monkeypatch, agents, *, session=None):
     async def fake_conversation_for_session(key):
         return session.conversation_id if session else ""
 
-    monkeypatch.setattr(agents_mod, "_create_tg_session", fake_create)
-    monkeypatch.setattr(agents_mod, "get_session", fake_get_session)
-    monkeypatch.setattr(agents_mod, "destroy_session", fake_destroy)
-    monkeypatch.setattr(agents_mod, "_is_agent_available", lambda key: True)
-    monkeypatch.setattr(
-        agents_mod, "_tg_permission_callback", lambda bot, c, u: object()
-    )
+    patch_agents(monkeypatch, "_create_tg_session", fake_create)
+    patch_agents(monkeypatch, "get_session", fake_get_session)
+    patch_agents(monkeypatch, "destroy_session", fake_destroy)
+    patch_agents(monkeypatch, "_is_agent_available", lambda key: True)
+    patch_agents(monkeypatch, "_tg_permission_callback", lambda bot, c, u: object())
     monkeypatch.setattr(
         agents_mod.runtime, "conversation_for_session", fake_conversation_for_session
     )

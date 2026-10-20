@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ExecutorInfo } from "./api";
+import type { ExecutorInfo } from "./api/executors";
 import { computeMultiOverlays } from "./executor-overlays";
 
 function executor(patch: Partial<ExecutorInfo> = {}): ExecutorInfo {

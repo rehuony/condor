@@ -3,7 +3,8 @@ import { AlertTriangle } from "lucide-react";
 import { useMemo } from "react";
 
 import { SnapshotBody } from "@/components/agent/session/Snapshot";
-import { api } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { agentsApi } from "@/lib/api/agents";
 import { type ParsedSnapshot, parseSnapshot } from "@/lib/parse-agent";
 
 /**
@@ -25,7 +26,7 @@ export function ExperimentDetail({
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ["strategy", slug, sslug, "experiment", number],
-    queryFn: () => api.getExperiment(slug, sslug, number),
+    queryFn: () => agentsApi.getExperiment(slug, sslug, number),
     enabled: number > 0,
   });
 
@@ -38,7 +39,7 @@ export function ExperimentDetail({
   if (isLoading || !parsed) {
     return (
       <div className="flex h-48 items-center justify-center">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+        <Spinner size="lg" />
       </div>
     );
   }

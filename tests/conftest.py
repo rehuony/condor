@@ -51,6 +51,41 @@ def _reset_gecko_throttle():
 
 
 @pytest.fixture(autouse=True)
+def _reset_telegram_output():
+    """Output leases and run targets are process-local; tests use many loops."""
+    from condor.telegram.output import lease as output_lease
+    from condor.telegram.output import runs as output_runs
+
+    output_lease._tails = {}
+    output_runs._runs = {}
+    output_runs._by_draft = {}
+    yield
+    output_lease._tails = {}
+    output_runs._runs = {}
+    output_runs._by_draft = {}
+
+
+@pytest.fixture(autouse=True)
+def _reset_standalone_bot():
+    """Drop the process-wide standalone bot after every test.
+
+    ``standalone_bot()`` caches the client it builds from ``TELEGRAM_TOKEN`` for
+    the life of the process. A test that sets the token would otherwise hand
+    its client to every later test -- including the ones asserting that an
+    install *without* a token falls through to the dashboard bell -- and leak
+    an unclosed aiohttp session at exit.
+    """
+    import asyncio
+
+    from condor.telegram import transport
+
+    yield
+    bot, transport._standalone = transport._standalone, None
+    if bot is not None:
+        asyncio.run(bot.session.close())
+
+
+@pytest.fixture(autouse=True)
 def _isolated_runtime_root(tmp_path, monkeypatch):
     """Keep every durable root out of the developer's live install.
 
@@ -90,7 +125,9 @@ def _isolated_runtime_root(tmp_path, monkeypatch):
     ``tmp_path`` stands in for the repo root in the agent tests, so the registry
     and the stores stay one tree.
     """
-    from condor import paths, telegram_ingress, telegram_input
+    from condor import paths
+    from condor.telegram import ingress as telegram_ingress
+    from condor.telegram import input as telegram_input
 
     monkeypatch.setattr(telegram_ingress, "_instance", None)
     monkeypatch.setattr(telegram_input, "_resolver", None)
@@ -100,6 +137,61 @@ def _isolated_runtime_root(tmp_path, monkeypatch):
     monkeypatch.setenv(paths.AGENTS_ROOT_ENV, str(tmp_path / "agents"))
     monkeypatch.setenv(paths.STOCK_AGENTS_ROOT_ENV, str(tmp_path / "stock-agents"))
     monkeypatch.setenv(paths.REPORTS_DIR_ENV, str(tmp_path / "reports"))
+
+
+def _patch_package(monkeypatch, package, submodules, name, value):
+    """Patch ``name`` on the package and on every listed submodule that has it.
+
+    Handler packages are split into feature modules that import helpers by
+    name, so patching the package attribute alone would not reach the callers.
+    """
+    import importlib
+
+    modules = [package] + [
+        importlib.import_module(f"{package.__name__}.{sub}") for sub in submodules
+    ]
+    for module in modules:
+        if hasattr(module, name):
+            monkeypatch.setattr(module, name, value)
+
+
+def patch_routines(monkeypatch, name, value):
+    """Patch a name in every ``handlers.routines`` module that imported it."""
+    import handlers.routines as hr
+
+    _patch_package(
+        monkeypatch,
+        hr,
+        ("storage", "formatting", "jobs", "views", "actions", "input"),
+        name,
+        value,
+    )
+
+
+def patch_agents(monkeypatch, name, value):
+    """Patch a name in every ``handlers.agents`` module that imported it."""
+    import handlers.agents as agents
+
+    _patch_package(
+        monkeypatch,
+        agents,
+        (
+            "session",
+            "availability",
+            "agent_arg",
+            "llm_settings",
+            "openrouter",
+            "custom_endpoints",
+            "stop",
+            "compact",
+            "talk_to",
+            "conversations",
+            "secrets",
+            "input",
+        ),
+        name,
+        value,
+    )
 
 
 @pytest.fixture

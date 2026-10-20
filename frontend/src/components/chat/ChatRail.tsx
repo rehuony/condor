@@ -11,8 +11,10 @@ import { memo, useEffect, useRef, useState } from "react";
 import { deriveAgentStatus } from "@/components/agent/agentStatus";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { WORKSPACE_BAR } from "@/components/chat/workspaceBar";
+import { IconButton } from "@/components/ui/IconButton";
 import { useWorkspacePane } from "@/hooks/useWorkspacePane";
-import { CHAT_SLUG, type AgentSummary, type ConversationMeta } from "@/lib/api";
+import { CHAT_SLUG, type AgentSummary } from "@/lib/api/agents";
+import type { ConversationMeta } from "@/lib/api/conversations";
 import { CHAT_RAIL_OPEN_KEY } from "@/lib/sessionState";
 
 function readOpen(): boolean {
@@ -116,20 +118,20 @@ export const ChatRail = memo(function ChatRail({
   // nobody asked for.
   const collapsedRail = (
     <aside className="hidden w-10 shrink-0 flex-col items-center gap-3 border-r border-[var(--color-border)] bg-[var(--color-bg)] py-2 md:flex">
-      <button
+      <IconButton
+        label="Show agents and conversations"
+        size="sm"
         onClick={() => toggle(true)}
-        className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-        title="Show agents and conversations"
       >
         <PanelLeftOpen className="h-4 w-4" />
-      </button>
-      <button
+      </IconButton>
+      <IconButton
+        label="New chat"
+        size="sm"
         onClick={onNew}
-        className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-        title="New chat"
       >
         <Plus className="h-4 w-4" />
-      </button>
+      </IconButton>
       {liveAgents.length > 0 && (
         <button
           onClick={() => toggle(true)}
@@ -167,13 +169,14 @@ export const ChatRail = memo(function ChatRail({
           >
             <PanelLeftClose className="h-4 w-4" />
           </button>
-          <button
+          <IconButton
+            label="Collapse"
+            size="sm"
+            className="hidden md:block"
             onClick={() => toggle(false)}
-            className="hidden rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] md:block"
-            title="Collapse"
           >
             <PanelLeftClose className="h-3.5 w-3.5" />
-          </button>
+          </IconButton>
         </div>
 
         {/* Who you can talk to */}

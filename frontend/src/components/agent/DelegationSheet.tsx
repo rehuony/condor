@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { DelegationDetail } from "@/components/agent/DelegationDetail";
@@ -10,7 +9,8 @@ import {
   formatDelegationTime,
 } from "@/components/agent/delegationStatus";
 import { WorkspaceSheet } from "@/components/chat/WorkspaceSheet";
-import { api, type Delegation, type DelegationSummary } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { delegationsApi, type Delegation, type DelegationSummary } from "@/lib/api/delegations";
 
 /** A consult has no transcript to fetch, and the sheet says why rather than
  *  showing an empty one — the record is a ledger entry, not a tape (FEAT-058). */
@@ -59,7 +59,7 @@ export function DelegationSheet({
   const hasBody = "result" in task;
   const { data, error, refetch } = useQuery({
     queryKey: ["delegation", task.task_id],
-    queryFn: () => api.getDelegation(task.task_id),
+    queryFn: () => delegationsApi.getDelegation(task.task_id),
     enabled: !hasBody,
     refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
   });
@@ -110,7 +110,7 @@ export function DelegationSheet({
             </div>
           ) : (
             <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
               Loading result…
             </div>
           )}

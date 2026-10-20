@@ -126,32 +126,6 @@ def test_adoption_is_a_no_op_with_nothing_to_adopt(tmp_path):
     assert not (tmp_path / "dist").exists()
 
 
-# ── docker steps get the same treatment (H2, P3) ──
-
-
-def test_a_docker_timeout_says_retrying_is_safe():
-    """1800s exists so a hung pull cannot wedge the update; hitting it said nothing.
-
-    Both compose steps are idempotent, so the honest answer is "run it again" —
-    but the bare "Timed out after 1800s" left the operator guessing whether a
-    half-rebuilt stack was safe to touch.
-    """
-    message = updater._explain_docker_failure(
-        124, "Timed out after 1800s: docker compose pull", "docker compose pull"
-    )
-    assert "idempotent" in message
-    assert "safe" in message
-    # And the platforms where the ceiling is actually reachable.
-    assert "macOS" in message and "WSL2" in message
-
-
-def test_an_ordinary_docker_failure_is_passed_through_unchanged():
-    assert (
-        updater._explain_docker_failure(1, "no such image", "docker compose pull")
-        == "no such image"
-    )
-
-
 # ── what a browser gets mid-swap ──
 
 
@@ -208,8 +182,9 @@ def test_make_build_frontend_swaps_too_rather_than_emptying_in_place():
     runs. An in-place build would empty that directory under it, which is
     exactly C1, reintroduced by the path the updater does not take.
     """
-    makefile = (Path(__file__).resolve().parent.parent / "Makefile").read_text()
-    target = makefile.split("\nbuild-frontend:", 1)[1].split("\n\n", 1)[0]
+    root = Path(__file__).resolve().parent.parent
+    assert "scripts/shell/build-frontend.sh" in (root / "Makefile").read_text()
+    target = (root / "scripts/shell/build-frontend.sh").read_text()
 
     assert "--outDir dist.new" in target, "builds straight into the served dir"
     assert "rm -rf dist.new" in target, "an interrupted run left a stale scratch dir"

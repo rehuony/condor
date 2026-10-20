@@ -7,7 +7,9 @@ import re
 from typing import Optional
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
+
+from condor.telegram.transport import as_input_file
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -310,7 +312,7 @@ def _build_chart(top: list[dict], sort_by: str) -> tuple[bytes | None, any]:
     return buf.getvalue(), fig
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     from routines.base import RoutineResult
 
     if config.dex_filter:
@@ -411,12 +413,12 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
 
     chart_bytes, plotly_fig = _build_chart(top, config.sort_by)
 
-    chat_id = getattr(context, "_chat_id", None)
+    chat_id = context.chat_id
     if chart_bytes and chat_id and context.bot:
         try:
             await context.bot.send_photo(
                 chat_id=chat_id,
-                photo=io.BytesIO(chart_bytes),
+                photo=as_input_file(chart_bytes),
                 caption=f"Solana Pool Scanner — Top {len(top)} pools"
                 + (" (incomplete scan; see report)" if warning else ""),
             )

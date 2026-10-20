@@ -2,13 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useServer } from "@/hooks/useServer";
-import {
-  api,
-  type AppNotification,
-  type ConversationTurn,
-  type NotificationsResponse,
-  type TokenUsage,
-} from "@/lib/api";
+import { chatApi } from "@/lib/api/chat";
+import { conversationsApi, type ConversationTurn, type TokenUsage } from "@/lib/api/conversations";
+import type { AppNotification, NotificationsResponse } from "@/lib/api/notifications";
 import { useAuth } from "@/lib/auth";
 import { addUsage } from "@/lib/usage";
 import { namesATool, toolCallState } from "@/lib/formatters";
@@ -493,7 +489,7 @@ function turnsToMessages(
     // Restore incoming and delivered images from the same private attachment
     // store, including notifications that contain no text.
     const attachments: ChatAttachment[] = (turn.attachments || []).map((a) => ({
-      url: api.attachmentUrl(conversationId, a.id),
+      url: conversationsApi.attachmentUrl(conversationId, a.id),
       mime: a.mime,
     }));
     // A turn holding nothing at all is an artifact of a prompt that died
@@ -1077,7 +1073,7 @@ export function useChatSocket() {
         uploadsInFlight.current[slotId] = (uploadsInFlight.current[slotId] ?? 0) + 1;
         try {
           const stored = await Promise.all(
-            files.map((file) => api.uploadAttachment(conversationId, file)),
+            files.map((file) => conversationsApi.uploadAttachment(conversationId, file)),
           );
           ids = stored.map((a) => a.id);
         } catch (e) {
@@ -1121,7 +1117,7 @@ export function useChatSocket() {
    */
   const replayPendingConfirmations = useCallback(async () => {
     try {
-      const pending = await api.getPendingConfirmations();
+      const pending = await chatApi.getPendingConfirmations();
       if (pending.length === 0) return;
       setPermissionRequests((prev) => {
         const next = { ...prev };
@@ -1279,7 +1275,7 @@ export function useChatSocket() {
           )
         : null;
       try {
-        const detail = await api.getConversation(conversationId);
+        const detail = await conversationsApi.getConversation(conversationId);
         if (hydrationRevisions.current[slotId] !== revision) return;
         if ((busyRevisions.current[conversationId] ?? 0) === busyRevision &&
             typeof detail.is_busy === "boolean") {
@@ -1456,8 +1452,7 @@ export function useChatSocket() {
       return;
     }
     prewarmed.current = true;
-    api
-      .listConversations(1)
+    conversationsApi.listConversations(1)
       .then(async (list) => {
         const latest = list[0];
         // Re-checked after the fetch: a session may have arrived meanwhile,
@@ -1483,7 +1478,7 @@ export function useChatSocket() {
         // adding one.
         const options = await queryClient.fetchQuery({
           queryKey: ["session-options"],
-          queryFn: api.getSessionOptions,
+          queryFn: chatApi.getSessionOptions,
         });
         if (slotsRef.current.length > 0) return;
         startSession(options.default_agent, serverRef.current || undefined);
@@ -2192,7 +2187,7 @@ export function useChatSocket() {
     async (slotId: string, selection: { agentSlug?: string; agentKey?: string }) => {
       if (!user) return;
       const key = webSessionKey(user.id, slotId);
-      const { session } = await api.switchSession(key, {
+      const { session } = await chatApi.switchSession(key, {
         agent_slug: selection.agentSlug,
         agent_key: selection.agentKey,
       });
@@ -2244,7 +2239,7 @@ export function useChatSocket() {
     async (slotId: string, serverName: string) => {
       if (!user) return;
       const key = webSessionKey(user.id, slotId);
-      const { session } = await api.switchSession(key, { server_name: serverName });
+      const { session } = await chatApi.switchSession(key, { server_name: serverName });
       // Same ordering rule as the brain switch: buffered text first, divider
       // after it.
       flushChunks();

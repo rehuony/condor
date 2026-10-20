@@ -23,7 +23,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 
 vi.mock("@/components/charts/ExecutorChart", () => ({
   ExecutorChart: () => null,

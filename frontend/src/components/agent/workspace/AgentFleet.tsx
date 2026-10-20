@@ -3,10 +3,11 @@ import { useCallback, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { PerfBrowser } from "@/components/perf/PerfBrowser";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { useFleetData } from "@/hooks/useFleetData";
 import { useServer } from "@/hooks/useServer";
 import { attributionIndex, ownerRowLabel } from "@/lib/agent-attribution";
-import type { AgentRunRow } from "@/lib/api";
+import type { AgentRunRow } from "@/lib/api/agents";
 import { parsePopulation } from "@/lib/perf-tree";
 
 /**
@@ -109,10 +110,10 @@ export function AgentFleet({
 
   if (!server) {
     return (
-      <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+      <EmptyState>
         This agent has no server pinned, and no server is selected — so there is no
         fleet to read. Pin one from the header above.
-      </p>
+      </EmptyState>
     );
   }
 

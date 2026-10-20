@@ -9,7 +9,7 @@ import {
   type BeatState,
 } from "@/components/agent/lab/runs";
 import type { AgentActionRow } from "@/lib/agent-attribution";
-import { api } from "@/lib/api";
+import { agentsApi } from "@/lib/api/agents";
 import { parseJournal, type TickEntry } from "@/lib/parse-agent";
 
 /**
@@ -63,7 +63,7 @@ export function TickSpine({
 }) {
   const { data: journalData } = useQuery({
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "journal"],
-    queryFn: () => api.getSessionJournal(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionJournal(slug, sslug, sessionNum),
     enabled: sessionNum > 0,
   });
 
@@ -71,7 +71,7 @@ export function TickSpine({
   // share one cache entry rather than each paying for the log.
   const { data: actionsData } = useQuery({
     queryKey: ["session-actions", slug, sslug, sessionNum],
-    queryFn: () => api.getSessionActions(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionActions(slug, sslug, sessionNum),
     enabled: sessionNum > 0,
   });
 

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
+import { marketApi } from "@/lib/api/market";
 
 /**
  * A venue's trading rules — the pair list and the price/amount increments.
@@ -14,7 +14,7 @@ import { api } from "@/lib/api";
 export function useTradingRules(server: string, connector: string, enabled = true) {
   const { data } = useQuery({
     queryKey: ["trading-rules", server, connector],
-    queryFn: () => api.getTradingRules(server, connector),
+    queryFn: () => marketApi.getTradingRules(server, connector),
     enabled: !!server && !!connector && enabled,
     staleTime: 5 * 60 * 1000,
   });

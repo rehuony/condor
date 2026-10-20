@@ -19,7 +19,6 @@ import pytest
 from condor import paths
 from condor.updates import components
 from condor.updates import run as run_module
-from utils import updater
 
 
 @pytest.fixture(autouse=True)
@@ -35,21 +34,6 @@ def _no_live_run():
     run_module._task = None
     run_module._relaunch = None
     run_module._observers.clear()
-    components.invalidate()
-
-
-@pytest.fixture
-def _a_sibling_api(monkeypatch, tmp_path):
-    """An install where hummingbot-api is present.
-
-    ``components.keys()`` reports what is *on this host*: a component whose repo
-    directory is missing is not a component at all. A CI checkout has no sibling
-    hummingbot-api, so without this the plan below is a Condor-only plan and the
-    test is really measuring the developer's directory layout.
-    """
-    repo = tmp_path / "hummingbot-api"
-    repo.mkdir()
-    monkeypatch.setattr(updater, "HUMMINGBOT_API_DIR", str(repo))
     components.invalidate()
 
 
@@ -307,26 +291,12 @@ def test_a_second_start_joins_the_run_already_in_flight():
     asyncio.run(go())
 
 
-def test_the_plan_is_laid_out_before_anything_runs(_a_sibling_api):
+def test_the_plan_is_laid_out_before_anything_runs():
     """The confirm screen and the progress screen are the same list."""
-    status = components.ComponentStatus(
-        key=components.HUMMINGBOT_API,
-        name="Hummingbot API",
-        facets={},
-        mode="image",
-    )
-    steps = run_module._plan(
-        [components.HUMMINGBOT_API, components.CONDOR],
-        {components.HUMMINGBOT_API: status},
-    )
-    keys = [s.key for s in steps]
-    # Condor last, and it stops with the code on disk: there is no restart step
-    # because the engine never restarts the process (it asks instead).
-    assert keys == [
-        "hummingbot-api.fast-forward",
-        "hummingbot-api.image",
-        "hummingbot-api.up",
-        "hummingbot-api.health",
+    steps = run_module._plan([components.CONDOR])
+    # It stops with the code on disk: there is no restart step because the
+    # engine never restarts the process (it asks instead).
+    assert [s.key for s in steps] == [
         "condor.fast-forward",
         "condor.unstash",
         "condor.deps",
@@ -334,35 +304,13 @@ def test_the_plan_is_laid_out_before_anything_runs(_a_sibling_api):
         "condor.doctor",
     ]
     assert all(s.state == "pending" for s in steps)
-    assert "Pulling" in steps[1].label
 
 
-def test_an_image_this_checkout_does_not_track_gets_no_image_steps(_a_sibling_api):
-    """The plan must not promise a pull the run is going to skip.
-
-    Off the default branch the published tag has nothing to do with the code on
-    disk, so the image is the operator's and is left alone. The checkout is
-    still fast-forwarded -- it supplies the shared files the container reads.
-    """
-    status = components.ComponentStatus(
-        key=components.HUMMINGBOT_API,
-        name="x",
-        facets={
-            "image": components.Facet(
-                kind="image",
-                current="sha256:abc",
-                behind=0,
-                detail=["Left alone; you own this image."],
-            )
-        },
-        mode="image",
-    )
-    steps = run_module._plan(
-        [components.HUMMINGBOT_API], {components.HUMMINGBOT_API: status}
-    )
-    labels = [s.label for s in steps]
-    assert labels == ["Fast-forwarding the hummingbot-api repo"]
-    assert not any("Pulling" in label for label in labels)
+def test_hummingbot_api_is_not_an_updatable_component():
+    """The API is built and deployed on its own host; nothing here pulls it."""
+    assert components.get("hummingbot-api") is None
+    assert "hummingbot-api" not in components.keys()
+    assert run_module._plan(["hummingbot-api"]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +374,7 @@ AFTER = "0ed2a0f1234567890abcdef1234567890abcdef1"
 def _run_condor_update(*, before: str, after: str) -> run_module.Run:
     """Drive ``_update_condor`` with every shell-out stubbed out."""
     run = _a_run(
-        steps=run_module._plan([components.CONDOR], {}),
+        steps=run_module._plan([components.CONDOR]),
         components=[components.CONDOR],
     )
     commits = iter([before, after])

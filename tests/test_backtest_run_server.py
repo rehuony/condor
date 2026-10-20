@@ -19,7 +19,7 @@ import pytest
 import condor.backtest_store as store_mod
 import condor.reports as reports_mod
 from condor.backtest_store import BacktestStore
-from condor.routine_store import WebRoutineContext
+from routines.base import RoutineContext
 from tests.conftest import load_shared_routine
 
 # The scripted client and the stubbed renderer are FEAT-039's, and this is about
@@ -52,7 +52,7 @@ def asked(monkeypatch):
     """Record which server the routine asked for a client for."""
     calls: list[dict] = []
 
-    async def fake_get_client(chat_id, user_id=None, context=None, server=None):
+    async def fake_get_client(chat_id, user_id=None, *, user_data=None, server=None):
         calls.append({"chat_id": chat_id, "server": server})
         return FakeClient(FakeBacktesting("task-1", [_completed_envelope()]))
 
@@ -78,7 +78,7 @@ def test_a_web_run_uses_the_server_it_was_launched_against(store, asked):
         end_date="2025-04-23",
         chart=False,
     )
-    asyncio.run(bc.run(config, WebRoutineContext(server_name=LAUNCHED_ON)))
+    asyncio.run(bc.run(config, RoutineContext.pinned(LAUNCHED_ON, bot=None)))
 
     assert [c["server"] for c in asked] == [LAUNCHED_ON]
     assert store.get_result("task-1")["server"] == LAUNCHED_ON
@@ -88,7 +88,10 @@ def test_a_chat_run_still_resolves_its_server_from_the_chat(store, asked):
     """The Telegram seat is unchanged: the active-server preference decides."""
 
     class ChatContext:
-        _chat_id = 42
+        chat_id = 42
+        owner_id = 42
+        instance_id = ""
+        server_name = ""
         bot = None
         user_data = {"user_preferences": {"general": {"active_server": CHAT_DEFAULT}}}
 
@@ -124,7 +127,7 @@ def test_naming_the_server_outranks_the_chat_default():
     cm_mod.get_config_manager = lambda: _CM()
     try:
         client = asyncio.run(
-            cm_mod.get_client(42, context=ChatContext(), server=LAUNCHED_ON)
+            cm_mod.get_client(42, user_data=ChatContext.user_data, server=LAUNCHED_ON)
         )
     finally:
         cm_mod.get_config_manager = original

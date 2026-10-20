@@ -11,14 +11,15 @@ dependency but is not installed in this venv.
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
-import telegram
 from aiohttp import ClientConnectorError
 from bs4 import BeautifulSoup
 from fastapi import HTTPException
-from telegram.error import BadRequest
 
+import condor.telegram.app as telegram_app
+from condor.telegram.errors import bad_request
 from condor.web.models import WebUser
 from condor.web.routes.agents import NotifyRequest, notify_user
 from mcp_servers.condor.exceptions import APIError
@@ -32,27 +33,25 @@ CALLER = WebUser(id=1, role="user")
 class _FakeBot:
     """Stands in for the resolved outbound bot.
 
-    ``ok`` mirrors what ``_HttpBot`` returns; ``raises`` mirrors a live
-    python-telegram-bot rejecting bad Markdown.
+    ``raises`` mirrors a live bot rejecting bad Markdown.
     """
 
-    def __init__(self, ok=True, raises_with_parse_mode=False):
-        self.ok = ok
+    def __init__(self, raises_with_parse_mode=False):
         self.raises_with_parse_mode = raises_with_parse_mode
         self.calls: list[dict] = []
 
     async def send_message(self, **kw):
         self.calls.append(kw)
         if kw.get("parse_mode") and self.raises_with_parse_mode:
-            raise BadRequest("can't parse entities")
+            raise bad_request("can't parse entities")
         visible = (
             BeautifulSoup(kw["text"], "html.parser").get_text()
             if kw.get("parse_mode") == "HTML"
             else kw["text"]
         )
         if len(visible.encode("utf-16-le")) // 2 > 4096:
-            raise BadRequest("Message is too long")
-        return {"ok": self.ok}
+            raise bad_request("Message is too long")
+        return SimpleNamespace(message_id=len(self.calls))
 
 
 @pytest.fixture
@@ -231,7 +230,7 @@ def test_the_tool_goes_through_the_main_process_and_never_touches_telegram(monke
     monkeypatch.setattr(
         notification_tool.settings, "session_key", "web:1:slot-1", raising=False
     )
-    monkeypatch.setattr(telegram, "Bot", _no_direct_bot)
+    monkeypatch.setattr(telegram_app, "make_bot", _no_direct_bot)
 
     assert asyncio.run(notification_tool.send_notification("hello")) == {
         "sent": True,
@@ -250,7 +249,7 @@ def test_a_recorded_only_notification_is_not_reported_as_sent(monkeypatch):
         return {"sent": False, "recorded": True}
 
     monkeypatch.setattr(notification_tool, "call_main_api", fake_call)
-    monkeypatch.setattr(telegram, "Bot", _no_direct_bot)
+    monkeypatch.setattr(telegram_app, "make_bot", _no_direct_bot)
 
     assert asyncio.run(notification_tool.send_notification("hello")) == {
         "sent": False,
@@ -263,7 +262,7 @@ def test_the_tool_falls_back_to_direct_telegram_when_the_main_api_is_down(monkey
     monkeypatch.setattr(notification_tool, "call_main_api", _offline)
     monkeypatch.setattr(notification_tool.settings, "bot_token", "T", raising=False)
     monkeypatch.setattr(notification_tool.settings, "chat_id", 42, raising=False)
-    monkeypatch.setattr(telegram, "Bot", _direct_bot(posted))
+    monkeypatch.setattr(telegram_app, "make_bot", _direct_bot(posted))
 
     assert asyncio.run(notification_tool.send_notification("hello")) == {
         "sent": True,
@@ -277,7 +276,7 @@ def test_a_route_that_could_not_deliver_is_not_replayed(monkeypatch):
         return {"sent": False, "recorded": False}
 
     monkeypatch.setattr(notification_tool, "call_main_api", fake_call)
-    monkeypatch.setattr(telegram, "Bot", _no_direct_bot)
+    monkeypatch.setattr(telegram_app, "make_bot", _no_direct_bot)
 
     assert asyncio.run(notification_tool.send_notification("hello")) == {
         "sent": False,
@@ -293,7 +292,7 @@ def test_an_unconfirmed_or_rejected_request_is_never_replayed(monkeypatch, reaso
         raise APIError(reason)
 
     monkeypatch.setattr(notification_tool, "call_main_api", failed)
-    monkeypatch.setattr(telegram, "Bot", _no_direct_bot)
+    monkeypatch.setattr(telegram_app, "make_bot", _no_direct_bot)
 
     result = asyncio.run(notification_tool.send_notification("hello"))
 
@@ -333,7 +332,7 @@ def _direct_bot(posted: list, fail_on: int | None = None):
         async def send_message(self, **kw):
             result = await super().send_message(**kw)
             if len(self.calls) == fail_on:
-                raise BadRequest("second page rejected")
+                raise bad_request("second page rejected")
             return result
 
     return _Bot
@@ -358,7 +357,7 @@ def test_long_notification_reaches_telegram_and_is_recorded_once(
     monkeypatch.setattr(notification_tool, "call_main_api", call_route)
     monkeypatch.setattr(notification_tool.settings, "chat_id", CALLER.id)
     monkeypatch.setattr(notification_tool.settings, "session_key", "web:1:s")
-    monkeypatch.setattr(telegram, "Bot", _no_direct_bot)
+    monkeypatch.setattr(telegram_app, "make_bot", _no_direct_bot)
 
     result = asyncio.run(notification_tool.send_notification(text, parse_mode))
 
@@ -380,9 +379,8 @@ def test_long_notification_reaches_telegram_and_is_recorded_once(
     assert [n.text for n in list_for(CALLER.id)] == [text]
 
 
-@pytest.mark.parametrize("http_response", [False, True])
 def test_partial_delivery_reports_failure_without_replaying_sent_pages(
-    monkeypatch, bot, notes, http_response
+    monkeypatch, bot, notes
 ):
     from condor.notifications import list_for
 
@@ -392,9 +390,7 @@ def test_partial_delivery_reports_failure_without_replaying_sent_pages(
     async def reject_second_page(**kw):
         result = await original_send(**kw)
         if len(bot.calls) == 2:
-            if http_response:
-                return {"ok": False, "description": "second page rejected"}
-            raise BadRequest("second page rejected")
+            raise bad_request("second page rejected")
         return result
 
     async def call_route(method, path, body, timeout=None):
@@ -404,7 +400,7 @@ def test_partial_delivery_reports_failure_without_replaying_sent_pages(
     monkeypatch.setattr(notification_tool, "call_main_api", call_route)
     monkeypatch.setattr(notification_tool.settings, "chat_id", CALLER.id)
     monkeypatch.setattr(notification_tool.settings, "session_key", "web:1:s")
-    monkeypatch.setattr(telegram, "Bot", _no_direct_bot)
+    monkeypatch.setattr(telegram_app, "make_bot", _no_direct_bot)
     text = "消息🔎 " * 2400 + "最后一段"
 
     result = asyncio.run(notification_tool.send_notification(text))
@@ -424,7 +420,7 @@ def test_direct_fallback_splits_long_messages_and_reports_partial_failure(
     monkeypatch.setattr(notification_tool, "call_main_api", _offline)
     monkeypatch.setattr(notification_tool.settings, "bot_token", "T")
     monkeypatch.setattr(notification_tool.settings, "chat_id", 42)
-    monkeypatch.setattr(telegram, "Bot", _direct_bot(posted, fail_on))
+    monkeypatch.setattr(telegram_app, "make_bot", _direct_bot(posted, fail_on))
     body = "测试🔎 " * 2000 + "TG-RESTART-END"
     text = f"<b>{body}</b>" if parse_mode == "HTML" else f"**{body}**"
 

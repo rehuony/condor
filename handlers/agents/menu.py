@@ -3,14 +3,17 @@
 import logging
 from datetime import datetime, timezone
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
+from condor.llm.custom_models import format_model_label
 from condor.runtime import SessionKey
 from condor.runtime import client as runtime
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 
 from ._shared import AGENT_OPTIONS, resolve_chat_binding
-from .custom_models import format_model_label
 
 log = logging.getLogger(__name__)
 
@@ -19,42 +22,23 @@ def _active_session_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for active session."""
     rows = [
         [
-            InlineKeyboardButton("New", callback_data="agent:new"),
-            InlineKeyboardButton("Compact", callback_data="agent:compact"),
+            InlineKeyboardButton(text="New", callback_data="agent:new"),
+            InlineKeyboardButton(text="Compact", callback_data="agent:compact"),
         ],
         [
-            InlineKeyboardButton("Change LLM", callback_data="agent:settings"),
-            InlineKeyboardButton("Talk to", callback_data="agent:talk_to"),
+            InlineKeyboardButton(text="Change LLM", callback_data="agent:settings"),
+            InlineKeyboardButton(text="Talk to", callback_data="agent:talk_to"),
         ],
-        [InlineKeyboardButton("Conversations", callback_data="agent:conv_list")],
+        [InlineKeyboardButton(text="Conversations", callback_data="agent:conv_list")],
         [
             # Kills the subprocess and the conversation with it. Labelled
             # "End session" so it is not read as "stop generating" — that is
             # /stop, which aborts the turn and keeps the context.
-            InlineKeyboardButton("End session", callback_data="agent:stop"),
-            InlineKeyboardButton("Close", callback_data="agent:close"),
+            InlineKeyboardButton(text="End session", callback_data="agent:stop"),
+            InlineKeyboardButton(text="Close", callback_data="agent:close"),
         ],
     ]
-    return InlineKeyboardMarkup(rows)
-
-
-def stop_generating_keyboard(token: str) -> InlineKeyboardMarkup:
-    """The button that rides on a streamed answer while it is being written.
-
-    Same semantics as /stop — abort the turn at the agent, keep the session and
-    its context — but reachable without leaving the message you are watching,
-    which is where someone actually decides an answer has gone wrong. Dropped by
-    `TelegramStreamer.finalize()`, so it never outlives the turn it can stop.
-    """
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "⏹ Stop generating", callback_data=f"agent:cancel:{token}"
-                )
-            ]
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # "Talk to" picker pagination
@@ -72,15 +56,15 @@ def _talk_to_keyboard(
     keyboard: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
-                ("• " if not current_slug else "") + "Condor (coordinator)",
+                text=("• " if not current_slug else "") + "Condor (coordinator)",
                 callback_data="agent:talk_pick:-1",
             )
         ]
     ]
 
     if not agents:
-        keyboard.append([InlineKeyboardButton("Back", callback_data="agent:menu")])
-        return InlineKeyboardMarkup(keyboard)
+        keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     total_pages = (len(agents) + TALK_PAGE_SIZE - 1) // TALK_PAGE_SIZE
     page = max(0, min(page, total_pages - 1))
@@ -93,7 +77,7 @@ def _talk_to_keyboard(
         if agent.slug == current_slug:
             label = f"• {label}"
         keyboard.append(
-            [InlineKeyboardButton(label, callback_data=f"agent:talk_pick:{idx}")]
+            [InlineKeyboardButton(text=label, callback_data=f"agent:talk_pick:{idx}")]
         )
 
     if total_pages > 1:
@@ -101,24 +85,24 @@ def _talk_to_keyboard(
         if page > 0:
             nav.append(
                 InlineKeyboardButton(
-                    "‹ Prev", callback_data=f"agent:talk_page:{page - 1}"
+                    text="‹ Prev", callback_data=f"agent:talk_page:{page - 1}"
                 )
             )
         nav.append(
             InlineKeyboardButton(
-                f"{page + 1}/{total_pages}", callback_data="agent:talk_noop"
+                text=f"{page + 1}/{total_pages}", callback_data="agent:talk_noop"
             )
         )
         if page < total_pages - 1:
             nav.append(
                 InlineKeyboardButton(
-                    "Next ›", callback_data=f"agent:talk_page:{page + 1}"
+                    text="Next ›", callback_data=f"agent:talk_page:{page + 1}"
                 )
             )
         keyboard.append(nav)
 
-    keyboard.append([InlineKeyboardButton("Back", callback_data="agent:menu")])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # Conversations picker pagination. Smaller than the other pickers on purpose:
@@ -179,8 +163,8 @@ def _conversations_keyboard(
     keyboard: list[list[InlineKeyboardButton]] = []
 
     if not metas:
-        keyboard.append([InlineKeyboardButton("Back", callback_data="agent:menu")])
-        return InlineKeyboardMarkup(keyboard)
+        keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     total_pages = (len(metas) + CONVERSATIONS_PAGE_SIZE - 1) // CONVERSATIONS_PAGE_SIZE
     page = max(0, min(page, total_pages - 1))
@@ -191,10 +175,10 @@ def _conversations_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    _conversation_label(meta, current_id),
+                    text=_conversation_label(meta, current_id),
                     callback_data=f"agent:conv_pick:{token}",
                 ),
-                InlineKeyboardButton("🗑", callback_data=f"agent:conv_del:{token}"),
+                InlineKeyboardButton(text="🗑", callback_data=f"agent:conv_del:{token}"),
             ]
         )
 
@@ -203,24 +187,24 @@ def _conversations_keyboard(
         if page > 0:
             nav.append(
                 InlineKeyboardButton(
-                    "‹ Prev", callback_data=f"agent:conv_page:{page - 1}"
+                    text="‹ Prev", callback_data=f"agent:conv_page:{page - 1}"
                 )
             )
         nav.append(
             InlineKeyboardButton(
-                f"{page + 1}/{total_pages}", callback_data="agent:conv_noop"
+                text=f"{page + 1}/{total_pages}", callback_data="agent:conv_noop"
             )
         )
         if page < total_pages - 1:
             nav.append(
                 InlineKeyboardButton(
-                    "Next ›", callback_data=f"agent:conv_page:{page + 1}"
+                    text="Next ›", callback_data=f"agent:conv_page:{page + 1}"
                 )
             )
         keyboard.append(nav)
 
-    keyboard.append([InlineKeyboardButton("Back", callback_data="agent:menu")])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _conversation_delete_keyboard(meta) -> InlineKeyboardMarkup:
@@ -234,14 +218,14 @@ def _conversation_delete_keyboard(meta) -> InlineKeyboardMarkup:
     from ._shared import conversation_token
 
     return InlineKeyboardMarkup(
-        [
+        inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    "Delete for good",
+                    text="Delete for good",
                     callback_data=f"agent:conv_delok:{conversation_token(meta.id)}",
                 )
             ],
-            [InlineKeyboardButton("Keep it", callback_data="agent:conv_list")],
+            [InlineKeyboardButton(text="Keep it", callback_data="agent:conv_list")],
         ]
     )
 
@@ -311,18 +295,18 @@ def _settings_keyboard(
         if state is not None and not state.usable:
             label = f"⚠️ {label}"
         keyboard.append(
-            [InlineKeyboardButton(label, callback_data=f"agent:set_llm:{key}")]
+            [InlineKeyboardButton(text=label, callback_data=f"agent:set_llm:{key}")]
         )
     keyboard.append(
         [
             InlineKeyboardButton(
-                f"Key-shape warnings: {'on' if secret_notices else 'off'}",
+                text=f"Key-shape warnings: {'on' if secret_notices else 'off'}",
                 callback_data="agent:secret_notices_toggle",
             )
         ]
     )
-    keyboard.append([InlineKeyboardButton("Back", callback_data="agent:menu")])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # OpenRouter picker pagination
@@ -338,11 +322,13 @@ def _openrouter_picker_keyboard(
     list so callback_data stays well under Telegram's 64-byte cap regardless of
     slug length.
     """
-    from .openrouter_models import format_button_label
+    from condor.llm.openrouter_models import format_button_label
 
     if not models:
         return InlineKeyboardMarkup(
-            [[InlineKeyboardButton("Back", callback_data="agent:settings")]]
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Back", callback_data="agent:settings")]
+            ]
         )
 
     total_pages = (len(models) + OPENROUTER_PAGE_SIZE - 1) // OPENROUTER_PAGE_SIZE
@@ -351,7 +337,11 @@ def _openrouter_picker_keyboard(
     end = min(start + OPENROUTER_PAGE_SIZE, len(models))
 
     keyboard: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton("Enter model manually", callback_data="agent:or_type")],
+        [
+            InlineKeyboardButton(
+                text="Enter model manually", callback_data="agent:or_type"
+            )
+        ],
     ]
     for idx in range(start, end):
         m = models[idx]
@@ -359,24 +349,30 @@ def _openrouter_picker_keyboard(
         if current_slug and m.slug == current_slug:
             label = f"• {label}"
         keyboard.append(
-            [InlineKeyboardButton(label, callback_data=f"agent:or_pick:{idx}")]
+            [InlineKeyboardButton(text=label, callback_data=f"agent:or_pick:{idx}")]
         )
 
     nav_row: list[InlineKeyboardButton] = []
     if page > 0:
         nav_row.append(
-            InlineKeyboardButton("‹ Prev", callback_data=f"agent:or_page:{page - 1}")
+            InlineKeyboardButton(
+                text="‹ Prev", callback_data=f"agent:or_page:{page - 1}"
+            )
         )
     nav_row.append(
-        InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="agent:or_noop")
+        InlineKeyboardButton(
+            text=f"{page + 1}/{total_pages}", callback_data="agent:or_noop"
+        )
     )
     if page < total_pages - 1:
         nav_row.append(
-            InlineKeyboardButton("Next ›", callback_data=f"agent:or_page:{page + 1}")
+            InlineKeyboardButton(
+                text="Next ›", callback_data=f"agent:or_page:{page + 1}"
+            )
         )
     keyboard.append(nav_row)
-    keyboard.append([InlineKeyboardButton("Back", callback_data="agent:settings")])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:settings")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _openrouter_input_keyboard() -> InlineKeyboardMarkup:
@@ -386,13 +382,13 @@ def _openrouter_input_keyboard() -> InlineKeyboardMarkup:
     out — otherwise a user who changed their mind has to know to type /cancel.
     """
     return InlineKeyboardMarkup(
-        [
+        inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    "Back to model list", callback_data="agent:or_page:0"
+                    text="Back to model list", callback_data="agent:or_page:0"
                 )
             ],
-            [InlineKeyboardButton("Cancel", callback_data="agent:or_type_cancel")],
+            [InlineKeyboardButton(text="Cancel", callback_data="agent:or_type_cancel")],
         ]
     )
 
@@ -418,18 +414,22 @@ def _custom_endpoints_keyboard(
             label = name
         key = sanitize_provider_name(name)
         keyboard.append(
-            [InlineKeyboardButton(label, callback_data=f"agent:cu_use:{key}")]
+            [InlineKeyboardButton(text=label, callback_data=f"agent:cu_use:{key}")]
         )
 
     keyboard.append(
-        [InlineKeyboardButton("+ Add endpoint", callback_data="agent:cu_add")]
+        [InlineKeyboardButton(text="+ Add endpoint", callback_data="agent:cu_add")]
     )
     if providers:
         keyboard.append(
-            [InlineKeyboardButton("Manage endpoints", callback_data="agent:cu_manage")]
+            [
+                InlineKeyboardButton(
+                    text="Manage endpoints", callback_data="agent:cu_manage"
+                )
+            ]
         )
-    keyboard.append([InlineKeyboardButton("Back", callback_data="agent:settings")])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:settings")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _custom_manage_keyboard(providers: list[dict]) -> InlineKeyboardMarkup:
@@ -440,17 +440,21 @@ def _custom_manage_keyboard(providers: list[dict]) -> InlineKeyboardMarkup:
     for provider in providers:
         name = provider.get("name", "?")
         key = sanitize_provider_name(name)
-        keyboard.append([InlineKeyboardButton(name, callback_data="agent:cu_noop")])
+        keyboard.append(
+            [InlineKeyboardButton(text=name, callback_data="agent:cu_noop")]
+        )
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "Change API key", callback_data=f"agent:cu_key:{key}"
+                    text="Change API key", callback_data=f"agent:cu_key:{key}"
                 ),
-                InlineKeyboardButton("Forget", callback_data=f"agent:cu_del:{key}"),
+                InlineKeyboardButton(
+                    text="Forget", callback_data=f"agent:cu_del:{key}"
+                ),
             ]
         )
-    keyboard.append([InlineKeyboardButton("Back", callback_data="agent:cu_list")])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:cu_list")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _custom_delete_keyboard(name: str) -> InlineKeyboardMarkup:
@@ -463,14 +467,14 @@ def _custom_delete_keyboard(name: str) -> InlineKeyboardMarkup:
     from condor.preferences import sanitize_provider_name
 
     return InlineKeyboardMarkup(
-        [
+        inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    f"Forget {name}",
+                    text=f"Forget {name}",
                     callback_data=f"agent:cu_delok:{sanitize_provider_name(name)}",
                 )
             ],
-            [InlineKeyboardButton("Keep it", callback_data="agent:cu_manage")],
+            [InlineKeyboardButton(text="Keep it", callback_data="agent:cu_manage")],
         ]
     )
 
@@ -478,16 +482,22 @@ def _custom_delete_keyboard(name: str) -> InlineKeyboardMarkup:
 def _custom_input_keyboard() -> InlineKeyboardMarkup:
     """Keyboard shown while waiting for typed input (URL, key, search)."""
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Cancel", callback_data="agent:cu_cancel")]]
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Cancel", callback_data="agent:cu_cancel")]
+        ]
     )
 
 
 def _custom_key_prompt_keyboard() -> InlineKeyboardMarkup:
     """API-key prompt: type one, or declare the endpoint doesn't need one."""
     return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("No API key needed", callback_data="agent:cu_nokey")],
-            [InlineKeyboardButton("Cancel", callback_data="agent:cu_cancel")],
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="No API key needed", callback_data="agent:cu_nokey"
+                )
+            ],
+            [InlineKeyboardButton(text="Cancel", callback_data="agent:cu_cancel")],
         ]
     )
 
@@ -504,12 +514,12 @@ def _custom_error_keyboard(
     """
     label, action = secondary or ("Edit URL", "agent:cu_add")
     return InlineKeyboardMarkup(
-        [
+        inline_keyboard=[
             [
-                InlineKeyboardButton("Try again", callback_data=retry_action),
-                InlineKeyboardButton(label, callback_data=action),
+                InlineKeyboardButton(text="Try again", callback_data=retry_action),
+                InlineKeyboardButton(text=label, callback_data=action),
             ],
-            [InlineKeyboardButton("Back", callback_data="agent:cu_list")],
+            [InlineKeyboardButton(text="Back", callback_data="agent:cu_list")],
         ]
     )
 
@@ -540,14 +550,18 @@ def _custom_picker_keyboard(
     ids are unbounded and callback_data is capped at 64 bytes, and a hash still
     resolves to the right model if the list was refetched between render and tap.
     """
-    from .custom_models import model_token
+    from condor.llm.custom_models import model_token
 
     models = _order_models(model_ids, current_id, query)
     keyboard: list[list[InlineKeyboardButton]] = []
 
     if not models:
         keyboard.append(
-            [InlineKeyboardButton("No models match", callback_data="agent:cu_noop")]
+            [
+                InlineKeyboardButton(
+                    text="No models match", callback_data="agent:cu_noop"
+                )
+            ]
         )
         total_pages = 1
         page = 0
@@ -562,7 +576,8 @@ def _custom_picker_keyboard(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        label, callback_data=f"agent:cu_pick:{model_token(model_id)}"
+                        text=label,
+                        callback_data=f"agent:cu_pick:{model_token(model_id)}",
                     )
                 ]
             )
@@ -572,18 +587,18 @@ def _custom_picker_keyboard(
         if page > 0:
             nav_row.append(
                 InlineKeyboardButton(
-                    "‹ Prev", callback_data=f"agent:cu_page:{page - 1}"
+                    text="‹ Prev", callback_data=f"agent:cu_page:{page - 1}"
                 )
             )
         nav_row.append(
             InlineKeyboardButton(
-                f"{page + 1}/{total_pages}", callback_data="agent:cu_noop"
+                text=f"{page + 1}/{total_pages}", callback_data="agent:cu_noop"
             )
         )
         if page < total_pages - 1:
             nav_row.append(
                 InlineKeyboardButton(
-                    "Next ›", callback_data=f"agent:cu_page:{page + 1}"
+                    text="Next ›", callback_data=f"agent:cu_page:{page + 1}"
                 )
             )
         keyboard.append(nav_row)
@@ -593,55 +608,61 @@ def _custom_picker_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    f"Clear filter '{query}'", callback_data="agent:cu_clear"
+                    text=f"Clear filter '{query}'", callback_data="agent:cu_clear"
                 )
             ]
         )
     elif len(model_ids) > CUSTOM_PAGE_SIZE:
         keyboard.append(
-            [InlineKeyboardButton("Search models", callback_data="agent:cu_search")]
+            [
+                InlineKeyboardButton(
+                    text="Search models", callback_data="agent:cu_search"
+                )
+            ]
         )
 
-    keyboard.append([InlineKeyboardButton("Back", callback_data="agent:cu_list")])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:cu_list")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _no_session_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard when no session is active."""
     rows = [
         [
-            InlineKeyboardButton("Start", callback_data="agent:start"),
-            InlineKeyboardButton("Change LLM", callback_data="agent:settings"),
+            InlineKeyboardButton(text="Start", callback_data="agent:start"),
+            InlineKeyboardButton(text="Change LLM", callback_data="agent:settings"),
         ],
         # Here too, not only beside a live session: picking the specialist is
         # how you say which one to *raise*, and hanging it off a running
         # subprocess made the coordinator the only thing a chat could start as.
-        [InlineKeyboardButton("Talk to", callback_data="agent:talk_to")],
+        [InlineKeyboardButton(text="Talk to", callback_data="agent:talk_to")],
         # Reachable with no session precisely because this is when it is wanted:
         # the chat whose subprocess is gone is the one whose owner is looking for
         # what they were saying yesterday.
-        [InlineKeyboardButton("Conversations", callback_data="agent:conv_list")],
-        [InlineKeyboardButton("Close", callback_data="agent:close")],
+        [InlineKeyboardButton(text="Conversations", callback_data="agent:conv_list")],
+        [InlineKeyboardButton(text="Close", callback_data="agent:close")],
     ]
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _compact_menu_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for compact options."""
     return InlineKeyboardMarkup(
-        [
+        inline_keyboard=[
             [
-                InlineKeyboardButton("Auto", callback_data="agent:compact_auto"),
-                InlineKeyboardButton("Custom", callback_data="agent:compact_custom"),
+                InlineKeyboardButton(text="Auto", callback_data="agent:compact_auto"),
+                InlineKeyboardButton(
+                    text="Custom", callback_data="agent:compact_custom"
+                ),
             ],
-            [InlineKeyboardButton("Back", callback_data="agent:menu")],
+            [InlineKeyboardButton(text="Back", callback_data="agent:menu")],
         ]
     )
 
 
 async def show_agent_menu(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
 ) -> None:
     """Show agent menu: active session info or auto-start."""
     chat_id = update.effective_chat.id
@@ -696,6 +717,6 @@ async def show_agent_menu(
                 await message.edit_text(text)
         else:
             if keyboard:
-                await message.reply_text(text, reply_markup=keyboard)
+                await message.answer(text, reply_markup=keyboard)
             else:
-                await message.reply_text(text)
+                await message.answer(text)

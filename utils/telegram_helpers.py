@@ -1,28 +1,12 @@
 """Telegram helper utilities for reusing callback-based handlers from commands."""
 
+from datetime import datetime, timezone
 
-class MockMessage:
-    """Wrapper around a real message to provide edit_text interface."""
-
-    def __init__(self, msg):
-        self._msg = msg
-        self.message_id = msg.message_id
-        self.chat_id = msg.chat_id
-
-    async def edit_text(self, text, parse_mode=None, reply_markup=None):
-        return await self._msg.edit_text(
-            text, parse_mode=parse_mode, reply_markup=reply_markup
-        )
-
-    async def delete(self):
-        return await self._msg.delete()
-
-    def get_bot(self):
-        return self._msg.get_bot()
+from condor.telegram.types import Chat, Message
 
 
 class MockQuery:
-    """Mock query object to reuse callback-based functions from commands."""
+    """Stand-in callback query so command handlers can reuse callback flows."""
 
     def __init__(self, message, from_user):
         self.message = message
@@ -34,6 +18,19 @@ class MockQuery:
 
 
 async def create_mock_query_from_message(update, initial_text="Loading..."):
-    """Create a mock query from a message update for reusing callback handlers."""
-    msg = await update.message.reply_text(initial_text)
-    return MockQuery(MockMessage(msg), update.effective_user)
+    """Send a placeholder reply and wrap it as a query for callback handlers."""
+    msg = await update.message.answer(initial_text)
+    return MockQuery(msg, update.effective_user)
+
+
+def message_handle(bot, chat_id: int, message_id: int) -> Message:
+    """A bound ``Message`` for ``(chat_id, message_id)`` so it can be edited.
+
+    Used where only the identifiers survive (deferred flows); the handle has
+    no text or sender, only what ``edit_text``/``delete`` need.
+    """
+    return Message(
+        message_id=message_id,
+        date=datetime.now(timezone.utc),
+        chat=Chat(id=chat_id, type="private" if chat_id > 0 else "supergroup"),
+    ).as_(bot)

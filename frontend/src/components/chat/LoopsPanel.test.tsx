@@ -19,7 +19,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LiveFleetOwner } from "@/hooks/useLiveLoops";
-import type { AgentSummary } from "@/lib/api";
+import type { AgentSummary } from "@/lib/api/agents";
 import type { LiveLoop } from "@/lib/agent-attribution";
 
 import { LoopsPanel } from "./LoopsPanel";

@@ -14,9 +14,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
+from condor.telegram.transport import as_input_file
 from config_manager import get_client
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -285,9 +286,9 @@ def _style_ax(ax):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    chat_id = getattr(context, "_chat_id", None)
-    client = await get_client(chat_id, context=context)
+async def run(config: Config, context: RoutineContext) -> str:
+    chat_id = context.chat_id
+    client = await get_client(chat_id, user_data=context.user_data)
     if not client:
         return "No server available — configure a Hummingbot server first."
 
@@ -449,7 +450,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     plt.tight_layout()
     await context.bot.send_photo(
         chat_id=chat_id,
-        photo=io.BytesIO(_to_bytes(fig)),
+        photo=as_input_file(_to_bytes(fig)),
         caption=f"📈 (A) Returns distribution + realized volatility — {config.timeframe}",
     )
     plt.close(fig)
@@ -491,7 +492,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     plt.tight_layout()
     await context.bot.send_photo(
         chat_id=chat_id,
-        photo=io.BytesIO(_to_bytes(fig)),
+        photo=as_input_file(_to_bytes(fig)),
         caption="📊 (B) ADX distribution — % time in trending regime per pair",
     )
     plt.close(fig)
@@ -580,7 +581,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     plt.tight_layout()
     await context.bot.send_photo(
         chat_id=chat_id,
-        photo=io.BytesIO(_to_bytes(fig)),
+        photo=as_input_file(_to_bytes(fig)),
         caption="📉 (C) Best EMA combo per pair | ▲=Long ▼=Short | Last 500 bars",
     )
     plt.close(fig)
@@ -636,7 +637,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         plt.tight_layout()
         await context.bot.send_photo(
             chat_id=chat_id,
-            photo=io.BytesIO(_to_bytes(fig)),
+            photo=as_input_file(_to_bytes(fig)),
             caption=f"🗺️ (D) {pair_hm} — EMA score heatmap | ★ = best combo",
         )
         plt.close(fig)
@@ -678,7 +679,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
     plt.tight_layout()
     await context.bot.send_photo(
         chat_id=chat_id,
-        photo=io.BytesIO(_to_bytes(fig)),
+        photo=as_input_file(_to_bytes(fig)),
         caption="📐 (E) Normalized distance — EMA entry threshold visualized",
     )
     plt.close(fig)

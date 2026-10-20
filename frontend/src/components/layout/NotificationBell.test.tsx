@@ -10,8 +10,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const getNotifications = vi.fn();
 const clearNotifications = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/notifications", () => ({
+  notificationsApi: {
     getNotifications: (...a: unknown[]) => getNotifications(...a),
     clearNotifications: (...a: unknown[]) => clearNotifications(...a),
     markNotificationsRead: () => Promise.resolve({ unread: 0 }),

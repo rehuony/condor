@@ -25,10 +25,14 @@ const getConversation = vi.fn();
 const listConversations = vi.fn();
 const uploadAttachment = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    listConversations: (...args: unknown[]) => listConversations(...args),
+vi.mock("@/lib/api/chat", () => ({
+  chatApi: {
     getSessionOptions: () => Promise.resolve({ default_agent: "claude-code" }),
+  },
+}));
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    listConversations: (...args: unknown[]) => listConversations(...args),
     getConversation: (...args: unknown[]) => getConversation(...args),
     uploadAttachment: (...args: unknown[]) => uploadAttachment(...args),
     attachmentUrl: (conversationId: string, id: string) => `/api/v1/conversations/${conversationId}/attachments/${id}`,

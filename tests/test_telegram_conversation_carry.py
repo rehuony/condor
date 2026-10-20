@@ -17,12 +17,14 @@ onto the chat is exercised for real, and the assertions are on the
 import asyncio
 from copy import deepcopy
 from itertools import count
+from types import SimpleNamespace
 
 import condor.agents.agent as agent_mod
 import config_manager as cm_mod
 from condor.runtime import SessionKey, SessionSpec, conversations
 from condor.runtime import sessions as sessions_mod
 from handlers import agents as agents_mod
+from tests.conftest import patch_agents
 
 # --- doubles -----------------------------------------------------------------
 
@@ -70,7 +72,7 @@ class _LiveSession:
 
 class _Message:
     _ids = count(1)
-    chat_id = 4242
+    chat = SimpleNamespace(id=4242)
     photo = sticker = voice = audio = document = None
     reply_to_message = external_reply = None
 
@@ -83,7 +85,7 @@ class _Message:
         self._rendered.append(text)
         return self
 
-    async def reply_text(self, text, **kw):
+    async def answer(self, text, **kw):
         self._rendered.append(text)
         return self
 
@@ -179,11 +181,9 @@ def _install(monkeypatch, agents=(), *, live=None):
     monkeypatch.setattr(agents_mod.runtime, "destroy", fake_destroy)
     monkeypatch.setattr(agents_mod.runtime, "prompt", fake_prompt)
     monkeypatch.setattr(agents_mod.runtime, "prompt_once", fake_prompt_once)
-    monkeypatch.setattr(agents_mod, "_is_agent_available", lambda key: True)
-    monkeypatch.setattr(
-        agents_mod, "_tg_permission_callback", lambda bot, c, u: object()
-    )
-    monkeypatch.setattr(agents_mod, "TelegramStreamer", _Streamer)
+    patch_agents(monkeypatch, "_is_agent_available", lambda key: True)
+    patch_agents(monkeypatch, "_tg_permission_callback", lambda bot, c, u: object())
+    patch_agents(monkeypatch, "TelegramStreamer", _Streamer)
 
     monkeypatch.setattr(
         conversations,

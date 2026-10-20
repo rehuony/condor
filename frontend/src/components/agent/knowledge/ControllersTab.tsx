@@ -1,15 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
 import { Chip, Empty } from "@/components/agent/knowledge/KnowledgeChrome";
+import { Spinner } from "@/components/ui/Spinner";
 import { useServer } from "@/hooks/useServer";
-import {
-  api,
-  type ControllerActionResult,
-  type ControllerCard,
-  type ControllerVerdict,
-} from "@/lib/api";
+import { agentsApi, type ControllerActionResult, type ControllerCard, type ControllerVerdict } from "@/lib/api/agents";
 
 /**
  * The controllers an agent owns or inherits, and where each stands on the
@@ -34,7 +30,7 @@ export function ControllersTab({
   const statusKey = ["agent-controllers", slug, server] as const;
   const status = useQuery({
     queryKey: statusKey,
-    queryFn: () => api.getAgentControllers(slug, server as string),
+    queryFn: () => agentsApi.getAgentControllers(slug, server as string),
     enabled: !!server && controllers.length > 0,
     staleTime: 0,
     retry: false,
@@ -300,7 +296,7 @@ function ControllerItem({
 
   const sync = useMutation({
     mutationFn: (overwrite: boolean) =>
-      api.syncAgentController(slug, card.name, server as string, overwrite),
+      agentsApi.syncAgentController(slug, card.name, server as string, overwrite),
     onSuccess: setResult,
     onError: (e) => setResult(errorResult(card.name, e)),
     onSettled: onChanged,
@@ -398,7 +394,7 @@ function ControllerItem({
               </span>
             )}
             {sync.isPending && (
-              <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
+              <Spinner size="xs" tone="muted" />
             )}
           </div>
           {result && <Outcome result={result} />}
@@ -432,7 +428,7 @@ function ControllerReader({
   const [style, setStyle] = useState<string | null>(null);
   const source = useQuery({
     queryKey: ["agent-controller-source", slug, card.name],
-    queryFn: () => api.getAgentControllerSource(slug, card.name),
+    queryFn: () => agentsApi.getAgentControllerSource(slug, card.name),
     enabled: style === null,
   });
 
@@ -464,7 +460,7 @@ function ControllerReader({
       )}
       {style === null ? (
         source.isLoading ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-text-muted)]" />
+          <Spinner size="sm" tone="muted" />
         ) : source.isError ? (
           <p className="text-[11px] text-[var(--color-red)]">
             {source.error instanceof Error
@@ -515,11 +511,11 @@ function StyleReader({
   const [result, setResult] = useState<ControllerActionResult | null>(null);
   const sample = useQuery({
     queryKey: ["agent-controller-sample", slug, card.name, style],
-    queryFn: () => api.getAgentControllerSample(slug, card.name, style),
+    queryFn: () => agentsApi.getAgentControllerSample(slug, card.name, style),
   });
   const upload = useMutation({
     mutationFn: (overwrite: boolean) =>
-      api.uploadAgentControllerConfig(
+      agentsApi.uploadAgentControllerConfig(
         slug,
         card.name,
         style,
@@ -538,7 +534,7 @@ function StyleReader({
   return (
     <div className="space-y-1.5">
       {sample.isLoading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-text-muted)]" />
+        <Spinner size="sm" tone="muted" />
       ) : sample.isError ? (
         <p className="text-[11px] text-[var(--color-red)]">
           {sample.error instanceof Error
@@ -573,7 +569,7 @@ function StyleReader({
           />
         )}
         {upload.isPending && (
-          <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
+          <Spinner size="xs" tone="muted" />
         )}
       </div>
       {result && <Outcome result={result} />}

@@ -13,7 +13,8 @@
 
 import { agentBucket, BEFORE_LEDGER, OUTSIDE } from "@/components/perf/agentFilter";
 import type { DeedIndex, Provenance } from "@/lib/agent-attribution";
-import type { BotRunInfo, ControllerInfo, ExecutorInfo } from "@/lib/api";
+import type { BotRunInfo, ControllerInfo } from "@/lib/api/bots";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import { controllerKey } from "@/lib/controller-identity";
 import { isExecutorActive, toMs } from "@/lib/formatters";
 

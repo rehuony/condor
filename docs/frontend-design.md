@@ -24,7 +24,7 @@ selected by `data-theme` on `<html>` (`hooks/useTheme.ts`): `dark` (default),
 | `--color-border` / `--color-border-hover` | All dividers and outlines (1px) |
 | `--color-text` / `--color-text-muted` | Primary text / labels, secondary values, hints |
 | `--color-primary` / `--color-primary-hover` | Gold primary action, selection, focus ring |
-| `--on-primary` | Text on a primary fill. Do not use `text-white`: it fails contrast in every theme |
+| `--on-primary` | Text on a primary (gold) fill. Do not use `text-white` there: it fails contrast in every theme |
 | `--color-green` / `--color-red` / `--color-yellow` | Profit/buy, loss/sell/danger, warning |
 | `--chart-*` | Chart background, grid, axis text, up/down candles |
 | `--chart-series-1..8` | Categorical series in fixed order; never generate extra hues |
@@ -59,25 +59,59 @@ Tailwind usage spells tokens as arbitrary values, with opacity modifiers for tin
   status dots.
 - Depth comes from borders and surface steps. Use `shadow-xl` only for floating
   layers (menus, dialogs).
-- Overlays: `fixed inset-0 z-40 bg-black/40` behind sheets. Modals take their backdrop
-  and panel from `components/ui/dialog` (`DIALOG_BACKDROP`, `DIALOG_PANEL`, footer and
-  button classes): a dimmed, lightly blurred backdrop, a `rounded-2xl` panel that slides
-  in (no animation under reduced motion), centred at every width; on phones the footer
-  buttons split one row evenly, Cancel left and the action right. Confirmations use `components/ui/ConfirmDialog`:
-  the title is the question, the body is at most one line (what it touches, or the one
-  consequence a reader could get wrong), then Cancel + action; no icons, no restated
-  warnings and one-line edits such as a
-  rename use `components/ui/TextInputDialog`; both portal to `<body>`. Rows never turn
-  into inline forms or inline confirms. Floating menus use
+- Overlays come from `components/ui/dialog`; do not write `fixed inset-0` by hand.
+  Modals take `DIALOG_BACKDROP` and `DIALOG_PANEL` (plus the footer and button
+  classes): a dimmed, lightly blurred backdrop, a `rounded-2xl` panel that slides in
+  (no animation under reduced motion), centred at every width; on phones the footer
+  buttons split one row evenly, Cancel left and the action right. A view that takes
+  over the whole viewport rather than floating over it (a chart, a report, the editor)
+  uses `FULLSCREEN_LAYER`, or `FULLSCREEN_LAYER_TOP` when it must sit above an open
+  dialog. Confirmations use `components/ui/ConfirmDialog`: the title is the question,
+  the body is at most one line (what it touches, or the one consequence a reader could
+  get wrong), then Cancel + action; no icons, no restated warnings. One-line edits such
+  as a rename use `components/ui/TextInputDialog`; both portal to `<body>`. Rows never
+  turn into inline forms or inline confirms. Floating menus use
   `components/ui/AnchoredMenu`.
+
+## Shared UI primitives
+
+`src/components/ui/` holds the building blocks every feature composes. Reach for
+one of these before writing the markup again; when a feature needs a variant, add
+a prop here rather than a copy there. `primitives.test.tsx` covers their contracts.
+
+| Primitive | Use it for | Not for |
+| --- | --- | --- |
+| `Card` / `CARD_CLASS` | A bordered surface panel (`rounded-lg border bg-surface p-4`). `as` picks the element | Table rows, list items, chat bubbles: those are surfaces with their own density |
+| `EmptyState` | "Nothing here" in a list, table or detail pane: one muted, centred line | Loading (use `SpinnerBlock`) or an error (use a notice) |
+| `Spinner`, `SpinnerBlock`, `FallbackSpinner` | `Spinner` is inline and inherits color (`size`, `tone="muted|primary"`, `label` for a status role); `SpinnerBlock` is a centred, muted block for an empty pane; `FallbackSpinner` is the route `Suspense` fallback | Status dots or progress rings that mean a state rather than "loading" |
+| `IconButton` | A button that is only an icon (close, back, copy, refresh, collapse). `label` is required and becomes the accessible name; `size`, `tone="default|primary|danger"` | Buttons with text; toggles whose pressed state matters (write `aria-pressed` yourself) |
+| `Disclosure` | A section that opens under a heading: `summary`, chevron, `aria-expanded`/`aria-controls`, body unmounted while closed; controlled or uncontrolled | Tabs, accordions that must keep a hidden body mounted, or rows whose expansion is the row's own layout |
+| `Field`, `Label`, `INPUT_CLASS`, `LABEL_CLASS` | Form rows: `Field` wraps `Label`, the control and an optional `hint`; `INPUT_CLASS` is the text input look | Selects (see `SelectField`) |
+| `SelectField` (`select-field.tsx`) | Every select; the app has no native `<select>` | — |
+| `table.ts` (`TABLE_HEAD_ROW`, `TH`, `TD`, `*_NUM`, `DENSE_*`) | Table head rows, text and numeric cells at the standard and dense pitches | Grids of KPI tiles |
+| `dialog.ts`, `ConfirmDialog`, `TextInputDialog`, `InlineConfirm` | Modal chrome and the confirmation patterns described above; `InlineConfirm` only for small in-row toggles | Full-page takeovers that are not dialogs (use `FULLSCREEN_LAYER`) |
+| `AnchoredMenu` | A floating menu positioned against a trigger | Select menus (`SelectField` has its own) |
+| `HintBubble` | A one-time hint (`hooks/useOneTimeHint.ts` decides when) | Tooltips: use `title` |
+
+Choosing between them:
+
+- A pane that is waiting shows `SpinnerBlock`; a control that is working shows an
+  inline `Spinner` beside its label; a pane with nothing to show shows `EmptyState`.
+  Never leave the slot blank and never show a zero in place of an absent value.
+- An action that only has an icon is an `IconButton`. The moment it gains a word
+  it is a button with the classes under *Components and states*.
+- Collapsible content under a heading is a `Disclosure`. A chevron drawn next to a
+  row that expands into its own detail is the row's business, not a `Disclosure`.
+- A panel with a title and padding is a `Card`. A dense list of rows is a bordered
+  container with `divide-y`, not a stack of cards.
 
 ## Components and states
 
 - Primary button: `rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs
   font-medium text-[var(--on-primary)] transition-colors
   hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed
-  disabled:opacity-50`. Many existing buttons still use `text-white`; use
-  `--on-primary` in new or edited code.
+  disabled:opacity-50`. Text on a primary fill is always `--on-primary`; red and
+  green fills keep `text-white` (as `DIALOG_DANGER` does).
 - Primary-tinted (ghost) button: `text-[var(--color-primary)]
   hover:bg-[var(--color-primary)]/10`.
 - Secondary button: border + surface, `hover:bg-[var(--color-surface-hover)]`.
@@ -98,8 +132,8 @@ Tailwind usage spells tokens as arbitrary values, with opacity modifiers for tin
   `focus-visible` outline in `--color-primary`, and a disabled state.
 - Icons: `lucide-react`, `h-3.5 w-3.5` in compact controls and `h-4 w-4` otherwise,
   `shrink-0` inside flex rows.
-- Loading, empty and error states are explicit text in muted color; unavailable
-  data is shown as unavailable, never as zero.
+- Loading, empty and error states are explicit (`SpinnerBlock`, `EmptyState`, a
+  notice); unavailable data is shown as unavailable, never as zero.
 
 ## Responsive behavior
 
@@ -149,7 +183,14 @@ the behavior being developed:
 - Keep the existing import style of each file. New imports may use `@/`, but do
   not rewrite existing relative imports without a reason related to the change.
 - Keep related behavior with its owning component or module. Extract files when
-  they establish a clear responsibility or support reuse.
+  they establish a clear responsibility or support reuse. A screen that outgrows
+  one file is split by region into a sibling folder, each region a component with
+  an explicit props interface and the state left in the parent (see
+  `components/perf/browser/` under `PerfBrowser.tsx`).
+- The API client is one module per domain in `lib/api/<domain>.ts`, each exporting
+  its `<domain>Api` object and types; `lib/api.ts` holds only `apiFetch`,
+  `errorStatus` and `query`. Import the domain module you call, and mock that
+  module in tests, rather than a catch-all `api`.
 - Name files the way their directory does: PascalCase for components and pages,
   camelCase or kebab-case for `lib/` and `hooks/` modules as the neighbors do.
 - Avoid unrelated formatting, ordering, and wording changes.

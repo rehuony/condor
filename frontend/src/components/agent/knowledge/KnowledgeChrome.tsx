@@ -1,4 +1,5 @@
 import { Pencil, Plus, Save, Trash2, Wand2, X } from "lucide-react";
+import { IconButton } from "../../ui/IconButton";
 
 // ── Shared bits ──
 //
@@ -179,31 +180,33 @@ export function Row({
       {(onAsk || onEdit || onDelete) && (
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           {onAsk && (
-            <button
+            <IconButton
+              label={askTitle || "Ask the agent about this"}
+              size="sm"
+              tone="primary"
               onClick={onAsk}
-              title={askTitle || "Ask the agent about this"}
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-primary)]"
             >
               <Wand2 className="h-3 w-3" />
-            </button>
+            </IconButton>
           )}
           {onEdit && (
-            <button
+            <IconButton
+              label={editTitle || "Edit"}
+              size="sm"
               onClick={onEdit}
-              title={editTitle || "Edit"}
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
             >
               <Pencil className="h-3 w-3" />
-            </button>
+            </IconButton>
           )}
           {onDelete && (
-            <button
+            <IconButton
+              label={deleteTitle || "Delete"}
+              size="sm"
+              tone="danger"
               onClick={onDelete}
-              title={deleteTitle || "Delete"}
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-red)]/10 hover:text-[var(--color-red)]"
             >
               <Trash2 className="h-3 w-3" />
-            </button>
+            </IconButton>
           )}
         </div>
       )}
@@ -322,7 +325,7 @@ export function EditorShell({
           <button
             onClick={onSave}
             disabled={!canSave || isPending}
-            className="flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-all disabled:opacity-30"
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-[var(--on-primary)] transition-all disabled:opacity-30"
           >
             <Save className="h-3.5 w-3.5" />
             {isPending ? "Saving…" : "Save"}

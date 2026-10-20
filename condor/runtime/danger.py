@@ -1,11 +1,9 @@
 """Security-critical tool-call classification (ARCH-190).
 
 Which tool calls need a human, which are refused outright, and how a pending
-call is summarized for the confirmation prompt. This used to live in the
-Telegram package (``handlers/agents/_shared.py`` / ``confirmation.py``), which
-``main.py`` hot-reloads via watchfiles — so the runtime's trade gate depended
-on reload timing. It is platform-neutral and belongs to the runtime; the
-handlers modules re-export from here for their Telegram callers.
+call is summarized for the confirmation prompt. It is platform-neutral and
+belongs to the runtime: the Telegram side (:mod:`condor.telegram.approvals`)
+only renders the summary and posts the answer back.
 
 Stdlib-only on purpose: everything that dispatches on a tool name (the danger
 list, the risk gate, the confirmation summary) imports this module, so it must

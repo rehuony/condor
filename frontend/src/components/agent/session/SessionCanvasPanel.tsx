@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { api } from "@/lib/api";
+import { agentsApi } from "@/lib/api/agents";
 
 // ── Session Canvas ──
 //
@@ -16,7 +16,7 @@ export function SessionCanvasPanel({ slug, sslug, sessionNum }: { slug: string; 
   const [expanded, setExpanded] = useState(true);
   const { data } = useQuery({
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "canvas"],
-    queryFn: () => api.getSessionCanvas(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionCanvas(slug, sslug, sessionNum),
     refetchInterval: 30000,
   });
 

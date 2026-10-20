@@ -1,56 +1,44 @@
 # Telegram agent reply delivery
 
-`TelegramStreamer` presents private-chat agent replies and background wake turns
-using silent progress followed by a separate final answer. Input handling is
-specified in [Telegram conversations](telegram-conversations.md).
-
-## Configuration
-
-Optional process settings:
-
-```dotenv
-TELEGRAM_AGENT_REPLY_MODE=final
-TELEGRAM_AGENT_EDIT_INTERVAL=1.0
-```
-
-`final` buffers assistant text until completion. `edit` updates a temporary
-ordinary-message preview at the configured minimum interval in seconds. Both
-send the final answer as new messages. The default interval is one second;
-Telegram's `RetryAfter` delay takes precedence. Invalid modes and nonpositive or
-nonfinite intervals fail startup checks.
-
-These settings apply to private-chat agent replies and wake turns. Dashboard
-rendering, routine notifications and trading controls have separate behavior.
-Apply process configuration on restart.
+`RichReplyStreamer` presents private-chat agent replies and background wake turns
+as Bot API 10.3 rich-message drafts while the model runs, then a separate final
+rich message. Input handling is specified in [Telegram conversations](telegram-conversations.md).
 
 ## Runtime and ownership
 
 - User input passes through admission and media resolution to `runtime.prompt`,
-  the conversation queue, the session/provider, and then `TelegramStreamer`.
+  the conversation queue, the session/provider, and then `RichReplyStreamer`.
   Wake turns use `TelegramWakeSink` with the same runtime and presenter; opening
-  the sink performs no network request.
+  the sink performs no network request. The sink is registered once at process
+  start (`register_wake`), not at import, so a handler reload cannot attach a
+  second one.
 - Private chats use `tg:<chat_id>` session keys. The runtime owns durable
   acceptance, deduplication, conversation FIFO, authorization and history.
 - Approval messages come from `TelegramChannel`. The presenter observes pending
   confirmations for its active request; the confirmation registry owns approval,
-  authorization and expiry.
-- `/stop` calls `runtime.abort`; inline Stop resolves its opaque run token and
-  calls `runtime.abort_turn(owner, conversation, request)`. Stale or duplicate
-  buttons cannot stop a later request. Stop ends generation without cancelling
+  authorization and expiry. A non-draft message in the same chat hides the
+  draft; the streamer immediately resends it with the same `draft_id`.
+- `/stop` calls `runtime.abort`. The client's bottom-right native stop (from
+  `can_stop=True` on the draft) delivers `Update.stopped_message_generation`
+  with `chat` and `draft_id`. The router looks up `(chat, draft_id)` and calls
+  `runtime.abort_turn(owner, conversation, request)`. Stale or duplicate stop
+  events cannot stop a later request. Stop ends generation without cancelling
   orders, closing positions, stopping trading bots or undoing completed actions.
 
-The presenter owns its request identity, temporary message IDs, one progress
-worker, one typing worker and one finalization task. Queued requests show one
-silent waiting notice, without typing or animation. Execution starts typing and
-silent status updates derived from actual tool and confirmation events. Typing
-pauses during approval. Raw reasoning and tool logs are hidden.
+The presenter owns its request identity, a process-unique non-zero `draft_id`,
+one progress worker and one finalization task. Queued requests show one
+"waiting" draft. Execution refreshes the draft about once a second (untouched
+drafts vanish in about three seconds) with `keep_on_stop=True`. After a native
+stop the streamer must not send another draft for that id. Raw reasoning and
+tool logs are hidden. Groups and other non-private chats skip drafts and only
+send the final message.
 
 All assistant `TEXT` remains in order because providers do not expose a reliable
 commentary/final boundary. Finalization freezes that body, retains any redacted
-voice transcript, retires Stop, and drains or cancels the progress and typing
-workers. Concurrent finalizers share one task; late events cannot change the
-result. Per-chat `OutputLease` instances serialize final delivery in FIFO order.
-Different chats remain independent, and owner cancellation closes the final sender.
+voice transcript, and drains or cancels the progress worker. Concurrent
+finalizers share one task; late events cannot change the result. Per-chat
+`OutputLease` instances serialize final delivery in FIFO order. Different chats
+remain independent, and owner cancellation closes the final sender.
 
 Relevant event fields:
 
@@ -70,58 +58,28 @@ segment; successful model termination alone proves neither delivery nor executio
 of a requested trade.
 
 - Confirmed segments advance the cursor once. Only the first final segment may
-  notify; progress and later segments are silent. Link previews are suppressed.
-  Telegram client mute settings still apply.
+  notify; later segments are silent. Draft updates do not notify.
+- Markdown longer than 32000 characters is split. `RICH_MESSAGE_TEXT_TOO_LONG`
+  splits further. A parse failure falls back to plain `send_message`.
 - Read/write failures, ambiguous timeouts and missing acknowledgements are
   unknown outcomes and are never blindly resent. A definite connection failure
-  or connection timeout before sending permits one retry of the unconfirmed
-  page. `BadRequest`, `Forbidden` and exhausted rate limits are failures.
-- `RetryAfter` uses the server delay, including `timedelta` values, with at most
-  three attempts. Progress uses `telegram_call(..., retry_rate_limits=False)`
-  and schedules a fresh snapshot after waiting, without blocking the runtime
-  consumer. Repeated preview failures disable progress, not execution or final
-  delivery.
-- A known missing or uneditable preview permits one replacement. Exact
-  `Message is not modified` responses acknowledge the requested text and markup.
-- HTML parsing failures downgrade only unconfirmed content to readable plain
-  text, preserving link destinations. Segments respect UTF-16 limits, escaped
-  content and formatting wrappers. Oversized link markup falls back to split
-  plain text.
-- Complete delivery removes only the run's own progress and preview messages.
-  Failed deletion attempts an ended label and Stop removal. Incomplete delivery
-  preserves visible content and removes Stop where possible. A status can direct
-  users to the saved dashboard conversation, but a failed edit cannot guarantee
-  that notice arrives. Delivery failures never rerun the model or tools.
+  before sending permits one retry of the unconfirmed page. `BadRequest`,
+  `Forbidden` and exhausted rate limits are failures.
+- Progress uses `telegram_call(..., retry_rate_limits=False)` and backs off on
+  `RetryAfter` (about 11 s after a tight burst). Three consecutive rate limits
+  disable further drafts for that turn.
 
-The delivery cursor is process-local, so delivery has no cross-network or
-cross-restart exactly-once guarantee. Durable request deduplication separately
-prevents repeated execution of accepted transport messages. Logs retain error
-types, hashed chat references and segment counts, excluding payloads, credentials
-and raw exception URLs.
+## Notifications and reports
 
-Execution failures retain partial answers. A later `DONE` does not clear an
-already recorded failure.
+`send_text(..., parse_mode="Markdown")` — notifications, wake notes, routine
+results, and delegation details — sends `send_rich_message` first so tables stay
+tables. A parse rejection or a sender without that method falls back to the HTML
+renderer. Menus stay MarkdownV2. A confirmed non-draft send restores any live
+draft in that chat.
 
-## Verification and deployment
+## Verification
 
-Run the delivery regression suite with:
-
-```bash
-python -m pytest -q \
-  tests/test_telegram_layered_replies.py tests/test_telegram_output.py \
-  tests/test_telegram_reply_integration.py tests/test_agent_stop_generating_button.py \
-  tests/test_agent_stop_telegram.py tests/test_agent_stream_dedupe.py \
-  tests/test_telegram_delivery_failures.py tests/test_agents_wake_telegram.py
-```
-
-These tests use fake bots, mocked HTTP transport and isolated stores. Live
-acceptance uses an authorized bot/chat and checks acknowledged message IDs,
-send/edit counts, notification flags and task cleanup. Client notifications
-require separate observation from API acknowledgements. Keep run-specific results
-in `.condor/research/`.
-
-Follow the [maintenance workflow](maintenance.md) for branch
-publication. Handler hot reload can activate edits immediately; deploy runtime
-and handler changes coherently and verify the running process separately from
-Git state. Preserve configuration, conversation records and attachments during
-rollback. This delivery protocol requires no data migration.
+Confirm a private-chat turn shows a native-stop draft, a regular approval
+message hides and restores that draft, `/stop` and the composer stop both end
+generation, a finished turn is a new rich message, and an unknown send is not
+duplicated. Do not place real trades.

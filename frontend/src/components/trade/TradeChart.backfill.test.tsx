@@ -36,7 +36,7 @@ import { chartDouble, createChart } from "@/test/lightweight-charts-double";
 import { TradeChart } from "./TradeChart";
 import { candleChannelKey, candleStore } from "@/lib/candle-store";
 import { intervalSeconds } from "@/lib/candle-history";
-import type { CandleData } from "@/lib/api";
+import type { CandleData } from "@/lib/api/market";
 
 const CANDLES = [
   { timestamp: 1_700_000_000, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
@@ -55,8 +55,12 @@ vi.mock("@/hooks/useRates", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  api: { getCandles: (...args: unknown[]) => apiState.getCandles(...args) },
   errorStatus: (error: { status?: number }) => error?.status,
+}));
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getCandles: (...args: unknown[]) => apiState.getCandles(...args),
+  },
 }));
 
 declare global {

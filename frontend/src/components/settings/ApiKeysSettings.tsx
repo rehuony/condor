@@ -4,17 +4,20 @@ import {
   Check,
   ExternalLink,
   Key,
-  Loader2,
   Plus,
   Star,
   Wallet,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
+import { EmptyState } from "@/components/ui/EmptyState";
+import { INPUT_CLASS } from "@/components/ui/Field";
+import { IconButton } from "@/components/ui/IconButton";
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
+import { Spinner } from "@/components/ui/Spinner";
 import { useServer } from "@/hooks/useServer";
 import { OWNER_ONLY_HINT, useServerPermission } from "@/hooks/useServerPermission";
-import { type ConnectorInfo, type CredentialInfo, type GatewayWalletGroup, api } from "@/lib/api";
+import { settingsApi, type ConnectorInfo, type CredentialInfo, type GatewayWalletGroup } from "@/lib/api/settings";
 import { CREDENTIAL_FIELD_PATTERNS } from "@/lib/credential-fields";
 import { credentialsQuery, gatewayWalletsQuery, invalidateCredentialQueries } from "@/lib/queryClient";
 import { ConnectHyperliquid } from "./ConnectHyperliquid";
@@ -79,14 +82,14 @@ export function ApiKeysSettings() {
     refetch: refetchCreds,
   } = useQuery({
     ...credentialsQuery(server),
-    queryFn: () => api.getCredentials(server!),
+    queryFn: () => settingsApi.getCredentials(server!),
     enabled: !!server,
   });
 
   // Gateway wallets — an error (e.g. Gateway not running) renders as a muted note, not a failure.
   const { data: walletsData, error: walletsError } = useQuery({
     ...gatewayWalletsQuery(server),
-    queryFn: () => api.getGatewayWallets(server!),
+    queryFn: () => settingsApi.getGatewayWallets(server!),
     enabled: !!server,
     retry: false,
   });
@@ -94,7 +97,7 @@ export function ApiKeysSettings() {
   // Same query key as GatewaySettings so the status is shared across the two tabs.
   const { data: gatewayStatus } = useQuery({
     queryKey: ["gateway-status", server],
-    queryFn: () => api.getGatewayStatus(server!),
+    queryFn: () => settingsApi.getGatewayStatus(server!),
     enabled: !!server,
     retry: false,
   });
@@ -102,14 +105,14 @@ export function ApiKeysSettings() {
 
   const { data: connectorsData, isLoading: loadingConnectors } = useQuery({
     queryKey: ["settings-connectors", server, flow.connectorType],
-    queryFn: () => api.getAvailableConnectors(server!, flow.connectorType || undefined),
+    queryFn: () => settingsApi.getAvailableConnectors(server!, flow.connectorType || undefined),
     enabled: !!server && !!flow.connectorType && flow.step === "select-exchange",
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: configMapData, isLoading: loadingConfigMap } = useQuery({
     queryKey: ["settings-config-map", server, flow.connectorName],
-    queryFn: () => api.getConnectorConfigMap(server!, flow.connectorName),
+    queryFn: () => settingsApi.getConnectorConfigMap(server!, flow.connectorName),
     enabled: !!server && !!flow.connectorName && flow.step === "fill-fields",
     staleTime: 30 * 60 * 1000,
   });
@@ -124,7 +127,7 @@ export function ApiKeysSettings() {
       if (!server) return;
       qc.prefetchQuery({
         queryKey: ["settings-config-map", server, name],
-        queryFn: () => api.getConnectorConfigMap(server, name),
+        queryFn: () => settingsApi.getConnectorConfigMap(server, name),
         staleTime: 30 * 60 * 1000,
       });
     },
@@ -138,7 +141,7 @@ export function ApiKeysSettings() {
 
   const addMut = useMutation({
     mutationFn: () =>
-      api.addCredential(server!, {
+      settingsApi.addCredential(server!, {
         connector_name: flow.connectorName,
         credentials: flow.values,
       }),
@@ -146,7 +149,7 @@ export function ApiKeysSettings() {
   });
 
   const deleteMut = useMutation({
-    mutationFn: (connector: string) => api.deleteCredential(server!, connector),
+    mutationFn: (connector: string) => settingsApi.deleteCredential(server!, connector),
     onSuccess: () => { invalidate(); setConfirmDelete(null); },
   });
 
@@ -154,13 +157,13 @@ export function ApiKeysSettings() {
     qc.invalidateQueries({ queryKey: gatewayWalletsQuery(server).queryKey });
 
   const defaultWalletMut = useMutation({
-    mutationFn: (w: { chain: string; address: string }) => api.setDefaultGatewayWallet(server!, w),
+    mutationFn: (w: { chain: string; address: string }) => settingsApi.setDefaultGatewayWallet(server!, w),
     onSuccess: invalidateWallets,
   });
 
   const deleteWalletMut = useMutation({
     mutationFn: ({ chain, address }: { chain: string; address: string }) =>
-      api.removeGatewayWallet(server!, chain, address),
+      settingsApi.removeGatewayWallet(server!, chain, address),
     onSuccess: () => { invalidateWallets(); setConfirmDeleteWallet(null); },
   });
 
@@ -234,9 +237,9 @@ export function ApiKeysSettings() {
 
   if (!server) {
     return (
-      <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+      <EmptyState>
         Select a server first.
-      </p>
+      </EmptyState>
     );
   }
 
@@ -374,7 +377,7 @@ export function ApiKeysSettings() {
         </h3>
         {loadingConnectors ? (
           <div className="flex items-center gap-2 py-4 text-xs text-[var(--color-text-muted)]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading connectors...
+            <Spinner /> Loading connectors...
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -440,7 +443,7 @@ export function ApiKeysSettings() {
         </h3>
         {loadingConfigMap ? (
           <div className="flex items-center gap-2 py-4 text-xs text-[var(--color-text-muted)]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading fields...
+            <Spinner /> Loading fields...
           </div>
         ) : (
           <div className="space-y-3">
@@ -474,7 +477,7 @@ export function ApiKeysSettings() {
                   onChange={(e) =>
                     setFlow({ ...flow, values: { ...flow.values, [f.key]: e.target.value } })
                   }
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                  className={INPUT_CLASS}
                   placeholder={f.isSecret ? "********" : f.key}
                 />
               </div>
@@ -490,9 +493,9 @@ export function ApiKeysSettings() {
               <button
                 onClick={() => addMut.mutate()}
                 disabled={addMut.isPending}
-                className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
               >
-                {addMut.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                {addMut.isPending && <Spinner size="xs" />}
                 Add Credential
               </button>
               <button
@@ -547,7 +550,7 @@ export function ApiKeysSettings() {
             onClick={() => setFlow({ ...INITIAL_FLOW, step: "select-type" })}
             disabled={!isOwner || !credsData}
             title={!isOwner ? OWNER_ONLY_HINT : !credsData ? "Load existing API keys before adding another." : undefined}
-            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--color-primary)]"
+            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--color-primary)]"
           >
             <Plus className="h-3.5 w-3.5" /> Add API Key
           </button>
@@ -569,7 +572,7 @@ export function ApiKeysSettings() {
             disabled={fetchingCreds}
             className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
           >
-            {fetchingCreds && <Loader2 className="h-3 w-3 animate-spin" />}
+            {fetchingCreds && <Spinner size="xs" />}
             {fetchingCreds ? "Retrying..." : "Retry"}
           </button>
         </div>
@@ -577,12 +580,12 @@ export function ApiKeysSettings() {
 
       {loadingCreds ? (
         <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
-          <Loader2 className="h-5 w-5 animate-spin" />
+          <Spinner size="lg" />
         </div>
       ) : !credsData || (credsError && credentials.length === 0) ? null : credentials.length === 0 ? (
-        <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+        <EmptyState>
           No API keys configured. Add one to start trading.
-        </p>
+        </EmptyState>
       ) : (
         <div className="space-y-4">
           {Object.entries(grouped)
@@ -679,16 +682,16 @@ export function ApiKeysSettings() {
 
                   <div className="flex shrink-0 items-center gap-1">
                     {!w.isDefault && confirmDeleteWallet !== walletKey && (
-                      <button
+                      <IconButton
+                        label={isOwner ? "Set as default wallet for this chain" : OWNER_ONLY_HINT}
+                        tone="primary"
                         onClick={() =>
                           defaultWalletMut.mutate({ chain: w.chain, address: w.address })
                         }
                         disabled={defaultWalletMut.isPending || !isOwner}
-                        className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50"
-                        title={isOwner ? "Set as default wallet for this chain" : OWNER_ONLY_HINT}
                       >
                         <Star className="h-3.5 w-3.5" />
-                      </button>
+                      </IconButton>
                     )}
                     <InlineConfirm
                       confirming={confirmDeleteWallet === walletKey}

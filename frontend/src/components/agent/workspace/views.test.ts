@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AgentRunRow, StrategySummary } from "@/lib/api";
+import type { AgentRunRow, StrategySummary } from "@/lib/api/agents";
 import {
   alertsFor,
   journalNamesDeploy,

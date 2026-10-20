@@ -1,6 +1,5 @@
-// ── Shared helpers for PNL evolution charts ──
-
-import type { ControllerInfo, ControllerPerformanceSnapshot } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ControllerPerformanceSnapshot } from "@/lib/api/performance";
 import { controllerKey } from "@/lib/controller-identity";
 import { toMs } from "@/lib/formatters";
 import type { ConvertFn } from "@/lib/rates";

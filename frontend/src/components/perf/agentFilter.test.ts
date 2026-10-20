@@ -17,7 +17,7 @@ import {
   runRecords,
 } from "./agentFilter";
 import type { DeedIndex, FleetOwner } from "@/lib/agent-attribution";
-import type { DeploymentRow } from "@/lib/api";
+import type { DeploymentRow } from "@/lib/api/agents";
 import type { PerfLeaf } from "@/lib/perf-tree";
 
 function leaf(over: Partial<PerfLeaf> = {}): PerfLeaf {

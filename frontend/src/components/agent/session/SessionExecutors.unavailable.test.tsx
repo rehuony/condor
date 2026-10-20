@@ -20,11 +20,15 @@ declare global {
 
 const getStrategySessionExecutors = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
+    getPositionsHeld: vi.fn(async () => ({ positions: [], summary: {} })),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getStrategySessionExecutors: (...a: unknown[]) => getStrategySessionExecutors(...a),
     getSessionSnapshots: vi.fn(async () => ({ snapshots: [] })),
-    getPositionsHeld: vi.fn(async () => ({ positions: [], summary: {} })),
   },
 }));
 vi.mock("@/hooks/useAgentExecutors", () => ({

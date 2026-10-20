@@ -66,7 +66,9 @@ async def test_full_transfers_and_final_withdrawal_do_not_resurrect_balances(
         ],
         keyed,
     )
-    assert [p.total_usd for p in result.points] == [1000, 1000, 1000, 0]
+    # The emptied snapshot is a gap, never a carried-forward balance and never
+    # a plotted zero: an exchange that failed to report looks exactly the same.
+    assert [p.total_usd for p in result.points] == [1000, 1000, 1000]
     assert result.valuation == "wallet"
 
 

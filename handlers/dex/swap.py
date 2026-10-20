@@ -12,8 +12,6 @@ import logging
 from decimal import Decimal
 
 import aiohttp
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
 
 from condor.preferences import (
     DEFAULT_DEX_NETWORK,
@@ -23,6 +21,14 @@ from condor.preferences import (
     get_dex_swap_defaults,
     set_dex_last_swap,
     set_last_trade_connector,
+)
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    NO_LINK_PREVIEW,
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
 )
 from config_manager import get_client
 from utils.telegram_formatters import (
@@ -282,7 +288,7 @@ def _get_routers_for_network(connectors: list, network_id: str) -> list:
 # ============================================
 
 
-async def handle_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_swap(update: Update, context: Context) -> None:
     """Handle swap - unified menu for quote and execute"""
     if "swap_params" not in context.user_data:
         defaults = get_dex_swap_defaults(context.user_data)
@@ -293,9 +299,7 @@ async def handle_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await show_swap_menu(update, context)
 
 
-async def handle_swap_refresh(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_refresh(update: Update, context: Context) -> None:
     """Handle swap refresh - clear cache and reload"""
     query = update.callback_query
     if query:
@@ -308,7 +312,7 @@ async def handle_swap_refresh(
 
 
 async def _fetch_quotes_background(
-    context: ContextTypes.DEFAULT_TYPE, message, params: dict, chat_id: int = None
+    context: Context, message, params: dict, chat_id: int = None
 ) -> None:
     """Fetch BUY/SELL quotes and balances in background and update the message"""
     try:
@@ -321,7 +325,7 @@ async def _fetch_quotes_background(
         if not all([connector, network, trading_pair, amount]):
             return
 
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Fetch balances in parallel with quotes
         async def fetch_balances_safe():
@@ -391,14 +395,14 @@ async def _fetch_quotes_background(
         if context.user_data.get("dex_state") == "swap":
             help_text = _build_swap_menu_text(context.user_data, params, quote_data)
             keyboard = _build_swap_keyboard(params)
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
             try:
                 await message.edit_text(
                     help_text,
                     parse_mode="MarkdownV2",
                     reply_markup=reply_markup,
-                    disable_web_page_preview=True,
+                    link_preview_options=NO_LINK_PREVIEW,
                 )
             except Exception as e:
                 # Message may have been deleted or changed
@@ -413,39 +417,41 @@ def _build_swap_keyboard(params: dict) -> list:
     return [
         [
             InlineKeyboardButton(
-                f"🌐 {params.get('network', 'solana-mainnet-beta')}",
+                text=f"🌐 {params.get('network', 'solana-mainnet-beta')}",
                 callback_data="dex:swap_set_network",
             )
         ],
         [
             InlineKeyboardButton(
-                f"🔌 {params.get('connector', 'jupiter')}",
+                text=f"🔌 {params.get('connector', 'jupiter')}",
                 callback_data="dex:swap_set_connector",
             ),
             InlineKeyboardButton(
-                f"💱 {params.get('trading_pair', 'SOL-USDC')}",
+                text=f"💱 {params.get('trading_pair', 'SOL-USDC')}",
                 callback_data="dex:swap_set_pair",
             ),
             InlineKeyboardButton(
-                f"📈 {params.get('side', 'BUY')}", callback_data="dex:swap_toggle_side"
+                text=f"📈 {params.get('side', 'BUY')}",
+                callback_data="dex:swap_toggle_side",
             ),
         ],
         [
             InlineKeyboardButton(
-                f"💰 {params.get('amount', '1.0')}", callback_data="dex:swap_set_amount"
+                text=f"💰 {params.get('amount', '1.0')}",
+                callback_data="dex:swap_set_amount",
             ),
             InlineKeyboardButton(
-                _slippage_button_label(params),
+                text=_slippage_button_label(params),
                 callback_data="dex:swap_set_slippage",
             ),
             InlineKeyboardButton(
-                "✅ Execute", callback_data="dex:swap_execute_confirm"
+                text="✅ Execute", callback_data="dex:swap_execute_confirm"
             ),
         ],
         [
-            InlineKeyboardButton("📋 Quote", callback_data="dex:swap_get_quote"),
-            InlineKeyboardButton("🔍 History", callback_data="dex:swap_history"),
-            InlineKeyboardButton("✕ Close", callback_data="dex:close"),
+            InlineKeyboardButton(text="📋 Quote", callback_data="dex:swap_get_quote"),
+            InlineKeyboardButton(text="🔍 History", callback_data="dex:swap_history"),
+            InlineKeyboardButton(text="✕ Close", callback_data="dex:close"),
         ],
     ]
 
@@ -574,7 +580,7 @@ def _build_swap_menu_text(
 
 async def show_swap_menu(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     send_new: bool = False,
     quote_result: dict = None,
     auto_quote: bool = True,
@@ -595,7 +601,7 @@ async def show_swap_menu(
     swaps = get_cached(context.user_data, "recent_swaps", ttl=60)
     if swaps is None:
         try:
-            client = await get_client(chat_id, context=context)
+            client = await get_client(chat_id, user_data=context.user_data)
             swaps = await _fetch_recent_swaps(client, limit=5)
             set_cached(context.user_data, "recent_swaps", swaps)
             context.user_data.pop("recent_swaps_error", None)
@@ -611,7 +617,7 @@ async def show_swap_menu(
     # Build text and keyboard
     help_text = _build_swap_menu_text(context.user_data, params, quote_result)
     keyboard = _build_swap_keyboard(params)
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     # Send or edit message
     message = None
@@ -625,7 +631,7 @@ async def show_swap_menu(
             help_text,
             parse_mode="MarkdownV2",
             reply_markup=reply_markup,
-            disable_web_page_preview=True,
+            link_preview_options=NO_LINK_PREVIEW,
         )
     elif update.callback_query:
         try:
@@ -633,25 +639,25 @@ async def show_swap_menu(
                 help_text,
                 parse_mode="MarkdownV2",
                 reply_markup=reply_markup,
-                disable_web_page_preview=True,
+                link_preview_options=NO_LINK_PREVIEW,
             )
         except Exception as e:
             # Ignore "Message is not modified" error
-            if "not modified" not in str(e).lower():
+            if not is_not_modified(e):
                 raise
         message = update.callback_query.message
     else:
-        message = await update.message.reply_text(
+        message = await update.message.answer(
             help_text,
             parse_mode="MarkdownV2",
             reply_markup=reply_markup,
-            disable_web_page_preview=True,
+            link_preview_options=NO_LINK_PREVIEW,
         )
 
     # Store message for later editing (for text input processing)
     if message:
         context.user_data["swap_menu_message_id"] = message.message_id
-        context.user_data["swap_menu_chat_id"] = message.chat_id
+        context.user_data["swap_menu_chat_id"] = message.chat.id
 
     # Launch background fetch if needed (balances missing or quotes needed)
     if message:
@@ -677,9 +683,7 @@ def _invalidate_swap_quote(user_data: dict) -> None:
         del cache["swap_quote"]
 
 
-async def _update_swap_menu_after_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def _update_swap_menu_after_input(update: Update, context: Context) -> None:
     """Update the swap menu message after text input (like trade.py pattern)"""
     # Delete user's input message
     try:
@@ -697,7 +701,7 @@ async def _update_swap_menu_after_input(
 
         help_text = _build_swap_menu_text(context.user_data, params, quote_result)
         keyboard = _build_swap_keyboard(params)
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         try:
             await context.bot.edit_message_text(
@@ -706,7 +710,7 @@ async def _update_swap_menu_after_input(
                 text=help_text,
                 parse_mode="MarkdownV2",
                 reply_markup=reply_markup,
-                disable_web_page_preview=True,
+                link_preview_options=NO_LINK_PREVIEW,
             )
         except Exception as e:
             logger.debug(f"Could not update swap menu: {e}")
@@ -716,9 +720,7 @@ async def _update_swap_menu_after_input(
         await show_swap_menu(update, context, send_new=True)
 
 
-async def handle_swap_toggle_side(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_toggle_side(update: Update, context: Context) -> None:
     """Toggle between BUY and SELL"""
     params = context.user_data.get("swap_params", {})
     current_side = params.get("side", "BUY")
@@ -727,16 +729,14 @@ async def handle_swap_toggle_side(
     await show_swap_menu(update, context, auto_quote=False)
 
 
-async def handle_swap_set_connector(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_set_connector(update: Update, context: Context) -> None:
     """Show available router connectors for selection"""
     chat_id = update.effective_chat.id
     params = context.user_data.get("swap_params", {})
     network = params.get("network", "solana-mainnet-beta")
 
     try:
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         cache_key = "router_connectors"
         connectors = get_cached(context.user_data, cache_key, ttl=300)
@@ -748,7 +748,7 @@ async def handle_swap_set_connector(
 
         if not available:
             help_text = r"🔌 *Select Connector*" + "\n\n" + r"_No routers available\._"
-            keyboard = [[InlineKeyboardButton("« Back", callback_data="dex:swap")]]
+            keyboard = [[InlineKeyboardButton(text="« Back", callback_data="dex:swap")]]
         else:
             help_text = r"🔌 *Select Connector*"
 
@@ -758,7 +758,7 @@ async def handle_swap_set_connector(
                 name = c.get("name", "unknown")
                 row.append(
                     InlineKeyboardButton(
-                        name, callback_data=f"dex:swap_connector_{name}"
+                        text=name, callback_data=f"dex:swap_connector_{name}"
                     )
                 )
                 if len(row) == 3:
@@ -768,10 +768,10 @@ async def handle_swap_set_connector(
                 connector_buttons.append(row)
 
             keyboard = connector_buttons + [
-                [InlineKeyboardButton("« Back", callback_data="dex:swap")]
+                [InlineKeyboardButton(text="« Back", callback_data="dex:swap")]
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             help_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -786,7 +786,7 @@ async def handle_swap_set_connector(
 
 
 async def handle_swap_connector_select(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, connector_name: str
+    update: Update, context: Context, connector_name: str
 ) -> None:
     """Handle connector selection from button"""
     params = context.user_data.get("swap_params", {})
@@ -817,13 +817,11 @@ async def handle_swap_connector_select(
     await show_swap_menu(update, context)
 
 
-async def handle_swap_set_network(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_set_network(update: Update, context: Context) -> None:
     """Show available networks (DEX) and connectors (CEX) for selection"""
     chat_id = update.effective_chat.id
     try:
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Fetch DEX networks and CEX connectors in parallel
         from handlers import is_gateway_network
@@ -860,13 +858,13 @@ async def handle_swap_set_network(
         # CEX section
         if cex_connectors:
             keyboard.append(
-                [InlineKeyboardButton("━━ CEX ━━", callback_data="dex:noop")]
+                [InlineKeyboardButton(text="━━ CEX ━━", callback_data="dex:noop")]
             )
             row = []
             for connector in cex_connectors:
                 row.append(
                     InlineKeyboardButton(
-                        connector, callback_data=f"dex:switch_cex_{connector}"
+                        text=connector, callback_data=f"dex:switch_cex_{connector}"
                     )
                 )
                 if len(row) == 2:
@@ -878,7 +876,7 @@ async def handle_swap_set_network(
         # DEX section
         if networks:
             keyboard.append(
-                [InlineKeyboardButton("━━ DEX ━━", callback_data="dex:noop")]
+                [InlineKeyboardButton(text="━━ DEX ━━", callback_data="dex:noop")]
             )
             row = []
             for network_item in networks:
@@ -892,7 +890,7 @@ async def handle_swap_set_network(
                     network_id = str(network_item)
                 row.append(
                     InlineKeyboardButton(
-                        network_id, callback_data=f"dex:swap_network_{network_id}"
+                        text=network_id, callback_data=f"dex:swap_network_{network_id}"
                     )
                 )
                 if len(row) == 2:
@@ -908,8 +906,8 @@ async def handle_swap_set_network(
         else:
             help_text = r"🔄 *Select Connector*"
 
-        keyboard.append([InlineKeyboardButton("« Back", callback_data="dex:swap")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard.append([InlineKeyboardButton(text="« Back", callback_data="dex:swap")])
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             help_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -924,7 +922,7 @@ async def handle_swap_set_network(
 
 
 async def handle_swap_network_select(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, network_id: str
+    update: Update, context: Context, network_id: str
 ) -> None:
     """Handle network selection from button"""
     chat_id = update.effective_chat.id
@@ -940,7 +938,7 @@ async def handle_swap_network_select(
     connectors = get_cached(context.user_data, cache_key, ttl=300)
     if connectors is None:
         try:
-            client = await get_client(chat_id, context=context)
+            client = await get_client(chat_id, user_data=context.user_data)
             connectors = await _fetch_router_connectors(client)
             set_cached(context.user_data, cache_key, connectors)
         except Exception as e:
@@ -962,9 +960,7 @@ async def handle_swap_network_select(
     await show_swap_menu(update, context)
 
 
-async def handle_swap_set_pair(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_set_pair(update: Update, context: Context) -> None:
     """Prompt user to input trading pair"""
     help_text = (
         r"📝 *Set Trading Pair*" + "\n\n"
@@ -974,8 +970,8 @@ async def handle_swap_set_pair(
         r"`ETH\-USDT`"
     )
 
-    keyboard = [[InlineKeyboardButton("« Back", callback_data="dex:swap")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [[InlineKeyboardButton(text="« Back", callback_data="dex:swap")]]
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "swap_set_pair"
     context.user_data["dex_previous_state"] = "swap"
@@ -985,9 +981,7 @@ async def handle_swap_set_pair(
     )
 
 
-async def handle_swap_set_amount(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_set_amount(update: Update, context: Context) -> None:
     """Prompt user to input amount"""
     help_text = (
         r"📝 *Set Amount*" + "\n\n"
@@ -997,8 +991,8 @@ async def handle_swap_set_amount(
         r"`0\.01`"
     )
 
-    keyboard = [[InlineKeyboardButton("« Back", callback_data="dex:swap")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [[InlineKeyboardButton(text="« Back", callback_data="dex:swap")]]
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "swap_set_amount"
     context.user_data["dex_previous_state"] = "swap"
@@ -1008,9 +1002,7 @@ async def handle_swap_set_amount(
     )
 
 
-async def handle_swap_set_slippage(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_set_slippage(update: Update, context: Context) -> None:
     """Prompt user to input slippage"""
     help_text = (
         r"📝 *Set Slippage*" + "\n\n"
@@ -1021,8 +1013,8 @@ async def handle_swap_set_slippage(
         r"`default` \- use the connector's own setting"
     )
 
-    keyboard = [[InlineKeyboardButton("« Back", callback_data="dex:swap")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [[InlineKeyboardButton(text="« Back", callback_data="dex:swap")]]
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "swap_set_slippage"
     context.user_data["dex_previous_state"] = "swap"
@@ -1037,9 +1029,7 @@ async def handle_swap_set_slippage(
 # ============================================
 
 
-async def handle_swap_get_quote(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_get_quote(update: Update, context: Context) -> None:
     """Get quote for both BUY and SELL in parallel, display with spread"""
     chat_id = update.effective_chat.id
     try:
@@ -1054,7 +1044,7 @@ async def handle_swap_get_quote(
         if not all([connector, network, trading_pair, amount]):
             raise ValueError("Missing required parameters")
 
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Fetch balances in parallel with quotes
         async def fetch_balances_safe():
@@ -1142,9 +1132,7 @@ async def handle_swap_get_quote(
         )
 
 
-async def handle_swap_execute_confirm(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_execute_confirm(update: Update, context: Context) -> None:
     """Execute the swap with current parameters"""
     try:
         params = context.user_data.get("swap_params", {})
@@ -1191,7 +1179,7 @@ async def handle_swap_execute_confirm(
         )
 
         chat_id = update.effective_chat.id
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         if not hasattr(client, "gateway_swap"):
             raise ValueError("Gateway swap not available")
@@ -1262,8 +1250,10 @@ async def handle_swap_execute_confirm(
             if "status" in result:
                 swap_info += escape_markdown_v2(f"\nStatus: {result['status']}")
 
-        keyboard = [[InlineKeyboardButton("« Back to Swap", callback_data="dex:swap")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back to Swap", callback_data="dex:swap")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             swap_info, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -1272,8 +1262,10 @@ async def handle_swap_execute_confirm(
     except Exception as e:
         logger.error(f"Error executing swap: {e}", exc_info=True)
         error_message = format_error_message(f"Swap failed: {describe_api_error(e)}")
-        keyboard = [[InlineKeyboardButton("« Back to Swap", callback_data="dex:swap")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back to Swap", callback_data="dex:swap")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await update.callback_query.message.edit_text(
             error_message, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
@@ -1284,9 +1276,7 @@ async def handle_swap_execute_confirm(
 # ============================================
 
 
-async def handle_swap_status(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_status(update: Update, context: Context) -> None:
     """Handle swap status check - prompt for tx hash"""
     help_text = (
         r"📊 *Get Swap Status*" + "\n\n"
@@ -1294,8 +1284,8 @@ async def handle_swap_status(
         r"`<tx_hash>`"
     )
 
-    keyboard = [[InlineKeyboardButton("« Cancel", callback_data="dex:swap")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [[InlineKeyboardButton(text="« Cancel", callback_data="dex:swap")]]
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "swap_status"
 
@@ -1304,13 +1294,11 @@ async def handle_swap_status(
     )
 
 
-async def process_swap_status(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, tx_hash: str
-) -> None:
+async def process_swap_status(update: Update, context: Context, tx_hash: str) -> None:
     """Process swap status check"""
     try:
         chat_id = update.effective_chat.id
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         if not hasattr(client, "gateway_swap"):
             raise ValueError("Gateway swap not available")
@@ -1324,10 +1312,10 @@ async def process_swap_status(
                 if key in result:
                     status_info += escape_markdown_v2(f"{key.title()}: {result[key]}\n")
 
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="dex:swap")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [[InlineKeyboardButton(text="« Back", callback_data="dex:swap")]]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-        await update.message.reply_text(
+        await update.message.answer(
             status_info, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
@@ -1336,7 +1324,7 @@ async def process_swap_status(
         error_message = format_error_message(
             f"Failed to get status: {describe_api_error(e)}"
         )
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(error_message, parse_mode="MarkdownV2")
 
 
 def _format_detailed_swap_line(swap: dict) -> str:
@@ -1412,7 +1400,7 @@ def _format_detailed_swap_line(swap: dict) -> str:
 
 
 async def handle_swap_history(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, reset_filters: bool = False
+    update: Update, context: Context, reset_filters: bool = False
 ) -> None:
     """Show swap history with filters and pagination"""
     try:
@@ -1423,11 +1411,11 @@ async def handle_swap_history(
             filters = get_history_filters(context.user_data, "swap")
 
         chat_id = update.effective_chat.id
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         if not hasattr(client, "gateway_swap"):
             error_message = format_error_message("Gateway swap not available")
-            await update.callback_query.message.reply_text(
+            await update.callback_query.message.answer(
                 error_message, parse_mode="MarkdownV2"
             )
             return
@@ -1468,14 +1456,14 @@ async def handle_swap_history(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "🔄 Clear Filters", callback_data="dex:swap_hist_clear"
+                        text="🔄 Clear Filters", callback_data="dex:swap_hist_clear"
                     )
                 ]
             )
             keyboard.append(
-                [InlineKeyboardButton("« Back", callback_data="dex:swap_refresh")]
+                [InlineKeyboardButton(text="« Back", callback_data="dex:swap_refresh")]
             )
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
             await update.callback_query.message.edit_text(
                 message, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -1530,19 +1518,19 @@ async def handle_swap_history(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "🔄 Clear Filters", callback_data="dex:swap_hist_clear"
+                    text="🔄 Clear Filters", callback_data="dex:swap_hist_clear"
                 ),
-                InlineKeyboardButton("« Back", callback_data="dex:swap_refresh"),
+                InlineKeyboardButton(text="« Back", callback_data="dex:swap_refresh"),
             ]
         )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
             reply_markup=reply_markup,
-            disable_web_page_preview=True,
+            link_preview_options=NO_LINK_PREVIEW,
         )
 
     except Exception as e:
@@ -1560,9 +1548,7 @@ async def handle_swap_history(
 # ============================================
 
 
-async def handle_swap_hist_filter_pair(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_hist_filter_pair(update: Update, context: Context) -> None:
     """Show trading pair filter options"""
     filters = get_history_filters(context.user_data, "swap")
     options = HISTORY_FILTERS["swap"]["trading_pair"]
@@ -1577,9 +1563,7 @@ async def handle_swap_hist_filter_pair(
     )
 
 
-async def handle_swap_hist_filter_connector(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_hist_filter_connector(update: Update, context: Context) -> None:
     """Show connector filter options"""
     filters = get_history_filters(context.user_data, "swap")
     options = HISTORY_FILTERS["swap"]["connector"]
@@ -1594,9 +1578,7 @@ async def handle_swap_hist_filter_connector(
     )
 
 
-async def handle_swap_hist_filter_status(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_hist_filter_status(update: Update, context: Context) -> None:
     """Show status filter options"""
     filters = get_history_filters(context.user_data, "swap")
     options = HISTORY_FILTERS["swap"]["status"]
@@ -1612,7 +1594,7 @@ async def handle_swap_hist_filter_status(
 
 
 async def handle_swap_hist_set_filter(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, filter_type: str, value: str
+    update: Update, context: Context, filter_type: str, value: str
 ) -> None:
     """Set a filter value and refresh history"""
     filters = get_history_filters(context.user_data, "swap")
@@ -1636,7 +1618,7 @@ async def handle_swap_hist_set_filter(
 
 
 async def handle_swap_hist_page(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, direction: str
+    update: Update, context: Context, direction: str
 ) -> None:
     """Handle pagination for swap history"""
     filters = get_history_filters(context.user_data, "swap")
@@ -1650,9 +1632,7 @@ async def handle_swap_hist_page(
     await handle_swap_history(update, context)
 
 
-async def handle_swap_hist_clear(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_swap_hist_clear(update: Update, context: Context) -> None:
     """Clear all filters and refresh"""
     await handle_swap_history(update, context, reset_filters=True)
 
@@ -1662,9 +1642,7 @@ async def handle_swap_hist_clear(
 # ============================================
 
 
-async def process_swap(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, user_input: str
-) -> None:
+async def process_swap(update: Update, context: Context, user_input: str) -> None:
     """Process swap from text input: pair side amount [slippage]"""
     try:
         parts = user_input.split()
@@ -1696,17 +1674,17 @@ async def process_swap(
         context.user_data["dex_state"] = "swap"
 
         success_msg = escape_markdown_v2(f"✅ Updated: {trading_pair} {side} {amount}")
-        await update.message.reply_text(success_msg, parse_mode="MarkdownV2")
+        await update.message.answer(success_msg, parse_mode="MarkdownV2")
         await show_swap_menu(update, context, send_new=True)
 
     except Exception as e:
         logger.error(f"Error processing swap input: {e}", exc_info=True)
         error_message = format_error_message(f"Invalid input: {str(e)}")
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(error_message, parse_mode="MarkdownV2")
 
 
 async def process_swap_set_pair(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, user_input: str
+    update: Update, context: Context, user_input: str
 ) -> None:
     """Process trading pair input"""
     try:
@@ -1721,11 +1699,11 @@ async def process_swap_set_pair(
     except Exception as e:
         logger.error(f"Error setting pair: {e}", exc_info=True)
         error_message = format_error_message(f"Failed: {str(e)}")
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(error_message, parse_mode="MarkdownV2")
 
 
 async def process_swap_set_amount(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, user_input: str
+    update: Update, context: Context, user_input: str
 ) -> None:
     """Process amount input. Supports $ prefix for quote-denominated amounts."""
     try:
@@ -1752,11 +1730,11 @@ async def process_swap_set_amount(
     except Exception as e:
         logger.error(f"Error setting amount: {e}", exc_info=True)
         error_message = format_error_message(f"Failed: {str(e)}")
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(error_message, parse_mode="MarkdownV2")
 
 
 async def process_swap_set_slippage(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, user_input: str
+    update: Update, context: Context, user_input: str
 ) -> None:
     """Process slippage input. `default` clears the override so the connector's setting applies."""
     try:
@@ -1778,4 +1756,4 @@ async def process_swap_set_slippage(
     except Exception as e:
         logger.error(f"Error setting slippage: {e}", exc_info=True)
         error_message = format_error_message(f"Failed: {str(e)}")
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(error_message, parse_mode="MarkdownV2")

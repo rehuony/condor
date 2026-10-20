@@ -13,7 +13,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { ControllerPerformanceSnapshot } from "./api";
+import type { ControllerPerformanceSnapshot } from "./api/performance";
 import { executorsQuery, queryClient } from "./queryClient";
 import { handleMessage } from "./shared-socket";
 

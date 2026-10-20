@@ -45,6 +45,7 @@ from pathlib import Path
 from condor.memory.paths import CHAT_SLUG
 from condor.runtime import conversations
 from condor.runtime.conversations import ConversationMeta
+from condor.scheduler import ScheduledJob, get_scheduler
 
 log = logging.getLogger(__name__)
 
@@ -476,14 +477,14 @@ async def sweep(now: float | None = None) -> int:
     return ran
 
 
-async def _reflection_job(context) -> None:  # pragma: no cover - PTB plumbing
+async def _reflection_job(job: ScheduledJob) -> None:  # pragma: no cover - plumbing
     try:
         await sweep()
     except Exception:  # noqa: BLE001 - a sweep must never take the bot down
         log.debug("Reflection sweep job failed", exc_info=True)
 
 
-def register_jobs(application) -> None:
+def register_jobs() -> None:
     """Register the periodic reflection pass.
 
     Registered unconditionally and free on an install with nothing to read: the
@@ -496,13 +497,10 @@ def register_jobs(application) -> None:
     after a restart are when the rest of the runtime is reconciling.
     """
     try:
-        queue = getattr(application, "job_queue", None)
-        if queue is None:
-            return
-        for job in queue.get_jobs_by_name(REFLECTION_JOB):
-            job.schedule_removal()
-        queue.run_repeating(
-            _reflection_job, interval=SWEEP_INTERVAL_S, first=300, name=REFLECTION_JOB
+        scheduler = get_scheduler()
+        scheduler.remove(REFLECTION_JOB)
+        scheduler.repeating(
+            _reflection_job, SWEEP_INTERVAL_S, first=300, name=REFLECTION_JOB
         )
     except Exception:  # noqa: BLE001
         log.debug("Could not register the reflection sweep job", exc_info=True)

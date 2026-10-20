@@ -15,7 +15,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ChatAgentOption } from "@/lib/api";
+import type { ChatAgentOption } from "@/lib/api/chat";
 import { BrainPicker } from "./BrainPicker";
 
 declare global {

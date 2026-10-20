@@ -9,7 +9,6 @@ import {
   Droplets,
   Grid3X3,
   Layers,
-  Loader2,
   Rocket,
   Settings2,
   TrendingUp,
@@ -40,6 +39,7 @@ import { LPConfigPanel } from "@/components/executor/LPConfigPanel";
 import { LP_SIDE_RANGE, useLpConfig } from "@/components/executor/lp-config";
 import { useGridConfig } from "@/components/executor/grid-config";
 import { HintBubble } from "@/components/ui/HintBubble";
+import { Spinner } from "@/components/ui/Spinner";
 import { useOneTimeHint } from "@/hooks/useOneTimeHint";
 import { TradeBottomPane } from "@/components/trade/TradeBottomPane";
 import { ViewOnlyOverlay } from "@/components/trade/ViewOnlyOverlay";
@@ -49,7 +49,8 @@ import { useServer } from "@/hooks/useServer";
 import { useCondorWebSocket } from "@/hooks/useWebSocket";
 import { useMainControllerData } from "@/hooks/useMainControllerData";
 import { useResizeDrag } from "@/hooks/useResizeDrag";
-import { api } from "@/lib/api";
+import { executorsApi } from "@/lib/api/executors";
+import { marketApi } from "@/lib/api/market";
 import { candleStore } from "@/lib/candle-store";
 import { connectorCapabilities, orderBookVenues } from "@/lib/connector-capabilities";
 import { executorsQuery } from "@/lib/queryClient";
@@ -334,7 +335,7 @@ export function CreateExecutor() {
   // exact arguments, so this costs no extra connection.
   const { data: priceData } = useQuery({
     queryKey: ["price", server, connector, pair],
-    queryFn: () => api.getPrice(server!, connector, pair),
+    queryFn: () => marketApi.getPrice(server!, connector, pair),
     enabled: !!server && !!connector && !!pair && caps.hasRestPrice,
     refetchInterval: 5000,
   });
@@ -584,7 +585,7 @@ export function CreateExecutor() {
           break;
       }
 
-      return api.createExecutor(server, payload);
+      return executorsApi.createExecutor(server, payload);
     },
     onSuccess: (data) => {
       // Save defaults for the active type
@@ -910,10 +911,10 @@ export function CreateExecutor() {
                   <button
                     onClick={() => createMutation.mutate()}
                     disabled={!caps.canTrade || !activeValidation.valid || createMutation.isPending}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2.5 text-sm font-bold text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2.5 text-sm font-bold text-[var(--on-primary)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {createMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Spinner />
                     ) : (
                       <Rocket className="h-4 w-4" />
                     )}

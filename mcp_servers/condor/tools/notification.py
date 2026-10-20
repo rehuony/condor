@@ -80,13 +80,12 @@ async def _send_direct(text: str, parse_mode: str) -> dict:
 
     # Normal tool calls use the main API; keep Telegram out of every MCP
     # subprocess's startup import graph until this fallback is actually needed.
-    from telegram import Bot
-
-    from condor.telegram_text import send_text
+    from condor.telegram.errors import describe
+    from condor.telegram.transport import send_text, standalone_bot
 
     try:
-        async with Bot(token=settings.bot_token) as bot:
+        async with standalone_bot(settings.bot_token) as bot:
             await send_text(bot, settings.chat_id, text, parse_mode=parse_mode)
         return {"sent": True, "recorded": False}
     except Exception as exc:
-        return {"sent": False, "recorded": False, "error": str(exc)}
+        return {"sent": False, "recorded": False, "error": describe(exc)}

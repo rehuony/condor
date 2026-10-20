@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -204,37 +204,44 @@ async def get_portfolio_history(
     if isinstance(history, dict):
         logger.debug("Portfolio history keys: %s", list(history.keys()))
 
-    entries, keyed = _extract_snapshot_entries(history)
+    raw_entries, keyed = _extract_snapshot_entries(history)
+    # Dedupe each snapshot once and drop the empty ones here, so neither the
+    # valuation choice, the totals nor the breakdown sees a snapshot the API
+    # recorded with no holdings at all. Plotting such a snapshot as 0 bent
+    # the y-axis and the period change around a value that was never held.
+    entries: list[_Snapshot] = []
+    for ts, snapshot in raw_entries:
+        state, unified = dedupe_unified_accounts(_snapshot_state(snapshot, keyed))
+        if _is_empty_state(state) and not _snapshot_total(snapshot, keyed):
+            continue
+        entries.append(_Snapshot(ts, snapshot, state, unified))
+
     # A window must use ONE valuation basis. Old perpetual snapshots have no
     # floating PnL; mixing wallet and equity would fabricate a gain/loss at the
     # upgrade boundary. In that case keep a clearly labelled wallet series.
     use_equity = bool(entries) and all(
-        _has_equity(_snapshot_state(snapshot, keyed)) for _, snapshot in entries
+        _has_equity(entry.state, entry.unified) for entry in entries
     )
 
     # Each entry is a snapshot, not a delta. Older API versions omitted empty
     # connectors; carrying them forward counts transferred money twice.
     points: list[PortfolioHistoryPoint] = []
-    for ts, snapshot in entries:
-        total = (
-            0 if keyed else snapshot.get("total_value", snapshot.get("total_usd", 0))
-        )
+    for entry in entries:
+        total = _snapshot_total(entry.raw, keyed)
         if use_equity or total == 0:
             # Sum token values from nested structure
             # API returns {timestamp, state: {account: {connector: [balances]}}}
-            cur_totals = _extract_connector_totals(
-                _snapshot_state(snapshot, keyed), use_equity=use_equity
-            )
+            cur_totals = _extract_connector_totals(entry.state, use_equity=use_equity)
             total = sum(cur_totals.values())
-        points.append(PortfolioHistoryPoint(timestamp=ts, total_usd=float(total)))
+        points.append(
+            PortfolioHistoryPoint(timestamp=entry.timestamp, total_usd=float(total))
+        )
 
     points.sort(key=lambda p: p.timestamp)
 
     top_tokens: list[str] = []
     if breakdown and points:
-        top_tokens = _build_token_breakdown(
-            entries, keyed, points, use_equity=use_equity
-        )
+        top_tokens = _build_token_breakdown(entries, points, use_equity=use_equity)
 
     return PortfolioHistoryResponse(
         server=name,
@@ -245,9 +252,55 @@ async def get_portfolio_history(
     )
 
 
+class _Snapshot(NamedTuple):
+    """One history entry, with its state deduped exactly once."""
+
+    timestamp: float
+    raw: Any
+    state: Any
+    unified: set[tuple[str, str]]
+
+
+# Keys a list-shaped snapshot carries beside its state. Stripped when the
+# snapshot *is* the state, so a timestamp is never summed as a holding.
+_SNAPSHOT_META_KEYS = frozenset({"timestamp", "time", "t", "total_value", "total_usd"})
+
+
 def _snapshot_state(snapshot: Any, keyed: bool) -> Any:
     """Return the portfolio state within a snapshot entry."""
-    return snapshot if keyed else snapshot.get("state", snapshot)
+    if keyed or not isinstance(snapshot, dict):
+        return snapshot
+    if "state" in snapshot:
+        return snapshot["state"]
+    return {k: v for k, v in snapshot.items() if k not in _SNAPSHOT_META_KEYS}
+
+
+def _snapshot_total(snapshot: Any, keyed: bool) -> float:
+    """The precomputed total a list-shaped snapshot may carry, else 0."""
+    if keyed or not isinstance(snapshot, dict):
+        return 0
+    return snapshot.get("total_value", snapshot.get("total_usd", 0)) or 0
+
+
+def _is_empty_state(state: Any) -> bool:
+    """True when a snapshot recorded no holdings at all.
+
+    An absent or empty state, an account map with no connectors, or connectors
+    whose balance lists are all empty. Any scalar total or non-empty balance
+    list is a holding, and the state is kept.
+    """
+    if not isinstance(state, dict):
+        return True
+    for account in state.values():
+        if isinstance(account, (int, float)):
+            return False
+        if isinstance(account, dict):
+            for balances in account.values():
+                if isinstance(balances, (int, float)):
+                    return False
+                if isinstance(balances, list) and balances:
+                    return False
+    return True
 
 
 def _extract_snapshot_entries(history: Any) -> tuple[list[tuple[float, Any]], bool]:
@@ -289,8 +342,7 @@ def _extract_snapshot_entries(history: Any) -> tuple[list[tuple[float, Any]], bo
 
 
 def _build_token_breakdown(
-    entries: list[tuple[float, Any]],
-    keyed: bool,
+    entries: list[_Snapshot],
     points: list[PortfolioHistoryPoint],
     use_equity: bool = False,
 ) -> list[str]:
@@ -301,13 +353,11 @@ def _build_token_breakdown(
     # Use only this snapshot's holdings. A missing token may have been sold
     # or withdrawn; a past holding is not evidence that it still exists.
     ts_token_map: dict[float, dict[str, float]] = {}
-    for ts, snapshot in entries:
-        token_vals = _extract_token_values(
-            _snapshot_state(snapshot, keyed), use_equity=use_equity
-        )
+    for entry in entries:
+        token_vals = _extract_token_values(entry.state, use_equity=use_equity)
         if not token_vals:
             continue
-        ts_token_map[ts] = token_vals
+        ts_token_map[entry.timestamp] = token_vals
 
     if not ts_token_map:
         return []
@@ -360,10 +410,10 @@ def _parse_timestamp(val: object) -> float:
     return 0.0
 
 
-def _has_equity(data: Any) -> bool:
+def _has_equity(data: Any, unified: set[tuple[str, str]]) -> bool:
+    """Whether every connector in an already-deduped state reports equity."""
     if not isinstance(data, dict):
         return False
-    data, unified = dedupe_unified_accounts(data)
     if unified:
         return False
     for account in data.values():
@@ -379,11 +429,10 @@ def _has_equity(data: Any) -> bool:
 
 
 def _extract_token_values(data: object, use_equity: bool = False) -> dict[str, float]:
-    """Extract per-token USD values from a portfolio snapshot."""
+    """Extract per-token USD values from an already-deduped portfolio state."""
     tokens: dict[str, float] = {}
     if not isinstance(data, dict):
         return tokens
-    data, _ = dedupe_unified_accounts(data)
     for val in data.values():
         if isinstance(val, dict):
             for connector, inner in val.items():
@@ -406,11 +455,10 @@ def _extract_token_values(data: object, use_equity: bool = False) -> dict[str, f
 def _extract_connector_totals(
     data: object, use_equity: bool = False
 ) -> dict[str, float]:
-    """Extract per-connector USD totals from a portfolio snapshot."""
+    """Extract per-connector USD totals from an already-deduped portfolio state."""
     totals: dict[str, float] = {}
     if not isinstance(data, dict):
         return totals
-    data, _ = dedupe_unified_accounts(data)
     for account, val in data.items():
         if isinstance(val, dict):
             for connector, inner in val.items():

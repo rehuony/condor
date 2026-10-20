@@ -10,7 +10,8 @@ import {
   orderDeployments,
   runFleetHref,
 } from "@/components/agent/lab/deployments";
-import type { DeploymentRow } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
+import type { DeploymentRow } from "@/lib/api/agents";
 import {
   formatCompactUsd,
   formatCurrencyPnl,
@@ -57,7 +58,7 @@ export function DeploymentLedger({
   const runHref = runKey && sessionNum ? runFleetHref(runKey, sessionNum) : null;
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <Card>
       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
         <Package className="h-3.5 w-3.5" /> Deployed
         {ordered.length > 0 && ` (${ordered.length})`}
@@ -114,7 +115,7 @@ export function DeploymentLedger({
           </table>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 

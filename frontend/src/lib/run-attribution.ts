@@ -1,36 +1,4 @@
-// ── Which run created a closed executor (FEAT-089) ──
-//
-// An `ExecutorInfo` carries a `controller_id` and no bot (see `condor/web/models.py`),
-// so attributing one means answering "which bot was running that controller at
-// that moment". The browser used to answer it by matching the id against the
-// *live* fleet, which cannot be right for a population defined as what has
-// finished: a controller of a stopped bot matches nothing, and a config id two
-// live bots share matches ambiguously and was nulled.
-//
-// The answer is in the run history itself. A run's `deployment_config` names
-// every controller it was deployed with (`BotRunInfo.controller_ids`), which is
-// the deployment's own declaration — correct for a run with no performance
-// snapshots left at all, and it makes a shared id resolvable by *when* rather
-// than unresolvable. So the question becomes an interval lookup: which run
-// window contains this instant, among the runs that declared this controller.
-//
-// **What this does not claim.** Measured against three real servers, every row
-// in the API's executors table carries `controller_id: "main"` and no run
-// declares a controller by that name — because `main` is the *trading API's*
-// own default for an executor created without a controller, and the browser
-// never creates one any other way: Condor's create route drops the id on the
-// floor, so every position opened by hand lands under that default. (The knob
-// that does work is the MCP executor tools' `controller_id`, which an
-// autonomous agent stamps with its own session id — those rows are the ones
-// attribution can actually resolve.) A bot's controller executors, meanwhile,
-// live inside its container and never reach that table at all. On those fleets
-// this attributes nothing, which is the right answer: those positions genuinely
-// belong to no run, and `(unattached)` is where they belong. What it buys is
-// that the bucket is now *provably* that rather than accidentally that — and a
-// deployment whose executors do carry their controller's id gets them filed
-// under the run that opened them.
-
-import type { BotRunInfo } from "@/lib/api";
+import type { BotRunInfo } from "@/lib/api/bots";
 
 /** One run's life, and the controllers it declared for that life. */
 export interface RunWindow {

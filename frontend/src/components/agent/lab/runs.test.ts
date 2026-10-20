@@ -15,7 +15,7 @@ import {
   runLabel,
 } from "./runs";
 import type { AgentActionRow } from "@/lib/agent-attribution";
-import type { AgentRunRow } from "@/lib/api";
+import type { AgentRunRow } from "@/lib/api/agents";
 
 function run(over: Partial<AgentRunRow> = {}): AgentRunRow {
   return {

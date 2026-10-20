@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AgentSummary, RunningInstance, StrategySummary } from "@/lib/api";
+import type { AgentSummary, RunningInstance, StrategySummary } from "@/lib/api/agents";
 import {
   attributedMoney,
   declaredServerOf,

@@ -67,8 +67,8 @@ async def _custom_endpoints() -> list[dict]:
     re-fetched here so a stale endpoint shows up as ``reachable: false`` rather
     than being recommended and failing on the first agent run.
     """
+    from condor.llm.custom_models import CustomProviderError, fetch_models
     from condor.preferences import get_custom_providers, load_user_data_for
-    from handlers.agents.custom_models import CustomProviderError, fetch_models
     from mcp_servers.condor.settings import settings
 
     try:

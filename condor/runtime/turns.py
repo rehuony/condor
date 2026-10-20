@@ -23,6 +23,9 @@ _sequence = count(1)
 @dataclass
 class ConversationTurns:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Serializes the durable acceptance writes, which run in worker threads,
+    # so the transcript records inputs in the order they arrived.
+    accept_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pending: dict[str, str] = field(default_factory=dict)
     active_key: str = ""
     active_request: str = ""

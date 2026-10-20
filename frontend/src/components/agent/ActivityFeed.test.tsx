@@ -27,11 +27,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DelegationKind, DelegationSummary } from "@/lib/api";
+import type { DelegationKind, DelegationSummary } from "@/lib/api/delegations";
 import { ActivityFeed } from "./ActivityFeed";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/delegations", () => ({
+  delegationsApi: {
     getDelegationHistory: vi.fn(
       async (agent?: string, limit?: number, kind?: string) => {
         ASKED.push({ agent, limit, kind });

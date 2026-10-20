@@ -44,7 +44,7 @@ def _callback_update(data):
     async def answer(*a, **kw):
         return None
 
-    message = SimpleNamespace(edit_text=edit_text, reply_text=edit_text)
+    message = SimpleNamespace(edit_text=edit_text, answer=edit_text)
     return (
         SimpleNamespace(
             callback_query=SimpleNamespace(data=data, message=message, answer=answer),

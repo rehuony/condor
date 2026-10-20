@@ -1,5 +1,6 @@
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import type { AdminPerson, RoleTarget } from "@/lib/admin-api";
 import { formatRelativeTime } from "@/lib/formatters";
 
@@ -118,7 +119,7 @@ export function PersonDetail({
                 </button>
               )}
               {rolePending && (
-                <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
+                <Spinner size="xs" tone="muted" />
               )}
             </div>
           )}

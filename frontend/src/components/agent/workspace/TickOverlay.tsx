@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { adjacentTicks } from "@/components/agent/lab/runs";
 import { SnapshotDetail } from "@/components/agent/session/Snapshot";
+import { IconButton } from "@/components/ui/IconButton";
 import { snapshotQueryOptions } from "@/hooks/useSnapshotBubbles";
-import { api } from "@/lib/api";
+import { agentsApi } from "@/lib/api/agents";
 import { parseJournal } from "@/lib/parse-agent";
 
 /** True when a key press belongs to whatever has focus, not to the overlay. */
@@ -45,7 +46,7 @@ export function TickOverlay({
 }) {
   const { data: journalData } = useQuery({
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "journal"],
-    queryFn: () => api.getSessionJournal(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionJournal(slug, sslug, sessionNum),
     enabled: sessionNum > 0,
   });
   const journalContent = journalData?.content;
@@ -125,14 +126,13 @@ export function TickOverlay({
             </span>
           )}
         </div>
-        <button
-          type="button"
+        <IconButton
+          label="Close tick"
+          size="sm"
           onClick={onClose}
-          aria-label="Close tick"
-          className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
         >
           <X className="h-4 w-4" />
-        </button>
+        </IconButton>
       </div>
       {/* Keyed by tick so each step opens at the top of its snapshot. */}
       <div key={tick} className="min-h-0 flex-1 overflow-y-auto p-4">

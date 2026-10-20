@@ -8,7 +8,7 @@ import {
   orderDeployments,
   runFleetHref,
 } from "./deployments";
-import type { DeploymentRow } from "@/lib/api";
+import type { DeploymentRow } from "@/lib/api/agents";
 
 function row(over: Partial<DeploymentRow> = {}): DeploymentRow {
   return {

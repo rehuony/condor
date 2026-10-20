@@ -12,7 +12,9 @@
  *   whatever it happened to be holding — including a field another operator had just
  *   changed.
  * * **A 501 is not a red error.** The server is healthy and older than this panel, so
- *   the operator's action is "upgrade it", not "find the outage".
+ *   the operator's action is "deploy a newer build", not "find the outage".
+ * * **The update check contacts GitHub only when asked.** Mounting, focus and switching
+ *   servers never fire it, and an answer belongs to the server it was asked about.
  *
  * @vitest-environment jsdom
  */
@@ -25,22 +27,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const getApiServerInfo = vi.fn();
 const getApiClientConfig = vi.fn();
 const updateApiClientConfig = vi.fn();
-const getApiUpgradePreflight = vi.fn();
-const startApiUpgrade = vi.fn();
-const getApiUpgradeStatus = vi.fn();
+const checkApiUpdate = vi.fn();
 const serverHolder = { current: "alpha" as string | null };
 const ownerHolder = { current: true };
 
 vi.mock("@/lib/api", () => ({
-  api: {
+  errorStatus: (e: unknown) => (e as { status?: number } | null)?.status,
+}));
+vi.mock("@/lib/api/settings", () => ({
+  settingsApi: {
     getApiServerInfo: (s: string) => getApiServerInfo(s),
     getApiClientConfig: (s: string) => getApiClientConfig(s),
     updateApiClientConfig: (s: string, c: unknown) => updateApiClientConfig(s, c),
-    getApiUpgradePreflight: (s: string) => getApiUpgradePreflight(s),
-    startApiUpgrade: (s: string, ack: boolean) => startApiUpgrade(s, ack),
-    getApiUpgradeStatus: (s: string) => getApiUpgradeStatus(s),
+    checkApiUpdate: (s: string) => checkApiUpdate(s),
   },
-  errorStatus: (e: unknown) => (e as { status?: number } | null)?.status,
 }));
 vi.mock("@/hooks/useServer", () => ({
   useServer: () => ({ server: serverHolder.current }),
@@ -56,25 +56,44 @@ declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
 }
 
+const REVISION = "768e7c1f96fb1f21d91ff2313c0de0f8afa1cd3e";
+const LATEST = "e899139394d27c6bfed099073e5933b721a80664";
+
 const INFO = {
   api_version: "1.0.1",
   hummingbot_version: "20260616",
   market_data: { ticker_update_interval: 30, ticker_max_age: 60 },
   docker_available: true,
   container: {
-    id: "abc",
+    id: "c".repeat(64),
     name: "hummingbot-api",
-    image: "hummingbot/hummingbot-api:latest",
-    image_id: "sha256:deadbeef",
-    digest: "hummingbot/hummingbot-api@sha256:abc123def456",
+    image: "rehuony/hummingbot-api:main",
+    image_id: `sha256:${"ab12".repeat(16)}`,
+    digest: null as string | null,
+    image_created: "2026-10-19T23:59:58.123456789Z",
+    build: {
+      source: "https://github.com/rehuony/hummingbot-api",
+      revision: REVISION,
+      branch: "main",
+      created: "2026-10-20T07:00:00Z",
+      dirty: false as boolean | null,
+    },
     compose_project: "hummingbot-api",
-    compose_working_dir: "/root/hummingbot-api",
-    compose_config_files: "/root/hummingbot-api/docker-compose.yml",
+    compose_working_dir: "/srv/hummingbot-api",
+    compose_config_files: "/srv/hummingbot-api/docker-compose.yml",
   },
-  pinned: false,
-  pinned_reason: null,
-  override_file: null,
 };
+
+function verdict(status: string, reason: string | null = null) {
+  return {
+    status,
+    current_revision: REVISION,
+    latest_revision: LATEST,
+    checked_at: "2026-10-20T09:00:00Z",
+    reason,
+    compare_url: `https://github.com/rehuony/hummingbot-api/compare/${REVISION}...${LATEST}`,
+  };
+}
 
 const CONFIG = {
   account_name: "master_account",
@@ -82,35 +101,6 @@ const CONFIG = {
   global_token: { global_token_name: "USDT", global_token_symbol: "$" },
   rate_limits_share_pct: 100,
   available_sources: ["binance", "gate_io", "kucoin"],
-};
-
-/** A server that could be upgraded, with executors that the restart would destroy. */
-const READY = {
-  image_ref: "hummingbot/hummingbot-api:latest",
-  current_digest: "hummingbot/hummingbot-api@sha256:aaa",
-  available_digest: "sha256:bbb",
-  up_to_date: false,
-  pinned: false,
-  pinned_reason: null,
-  override_file: null,
-  compose: {
-    project: "hummingbot-api",
-    working_dir: "/root/hummingbot-api",
-    config_files: ["/root/hummingbot-api/docker-compose.yml"],
-  },
-  running_executors: 4,
-  running_bots: 2,
-  can_upgrade: true,
-  blocked_reason: null,
-};
-
-/** The default: nothing to do, which is what most of these tests want out of the way. */
-const UP_TO_DATE = {
-  ...READY,
-  up_to_date: true,
-  running_executors: 0,
-  can_upgrade: false,
-  blocked_reason: "Already running the published hummingbot/hummingbot-api:latest.",
 };
 
 let container: HTMLDivElement;
@@ -147,17 +137,12 @@ async function menuValues(label: string): Promise<string[]> {
   return values;
 }
 
-function buttonSaying(text: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll("button")].find((b) =>
-    b.textContent?.includes(text),
-  );
-  if (!button) throw new Error(`no button saying ${text}`);
+/** "Check for updates", or "Retry check" after a failure. */
+function checkButton(): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find((b) => /check/i.test(b.textContent ?? ""));
+  if (!button) throw new Error("no update-check button");
   return button as HTMLButtonElement;
 }
-
-/** The card's own trigger, not the confirm inside the dialog it opens. */
-const upgradeButton = () => buttonSaying("Upgrade") as HTMLButtonElement;
-const confirmButton = () => buttonSaying("Upgrade now") as HTMLButtonElement;
 
 async function click(el: Element) {
   await act(async () => {
@@ -202,11 +187,7 @@ beforeEach(() => {
   getApiServerInfo.mockReset().mockResolvedValue(INFO);
   getApiClientConfig.mockReset().mockResolvedValue(CONFIG);
   updateApiClientConfig.mockReset().mockResolvedValue({ success: true, message: "ok" });
-  getApiUpgradePreflight.mockReset().mockResolvedValue(UP_TO_DATE);
-  startApiUpgrade.mockReset().mockResolvedValue({ run_id: "abc123", phase: "pulling" });
-  getApiUpgradeStatus
-    .mockReset()
-    .mockResolvedValue({ run_id: null, phase: "idle", detail: null, log_tail: [] });
+  checkApiUpdate.mockReset().mockResolvedValue(verdict("up_to_date", "The running source matches main."));
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -224,37 +205,71 @@ describe("ApiServerSettings", () => {
 
     expect(text).toContain("1.0.1");
     expect(text).toContain("20260616");
-    expect(text).toContain("hummingbot/hummingbot-api:latest");
-    expect(text).toContain("sha256:abc123def456");
+    expect(text).toContain("rehuony/hummingbot-api:main");
     // Read-only, and the copy has to say where they actually live.
     expect(text).toContain("Ticker update interval");
     expect(text).toContain("MARKET_DATA_*");
   });
 
-  it("calls an image with no registry digest locally built", async () => {
-    getApiServerInfo.mockResolvedValue({
-      ...INFO,
-      container: { ...INFO.container, digest: null },
-      pinned: true,
-      pinned_reason: "image was built locally (no registry digest)",
-    });
+  it("keeps the local image ID apart from a registry digest that does not exist", async () => {
     await mount();
+    const text = container.textContent ?? "";
 
-    expect(container.textContent).toContain("locally built");
-    expect(container.textContent).toContain("Pinned");
+    expect(text).toContain("sha256:ab12ab12ab12");
+    expect(text).toContain("none (local build)");
   });
 
-  it("says pinning is unknown rather than false when Docker could not be reached", async () => {
+  it("shows the revision short, with the full SHA on hover and a copy button", async () => {
+    await mount();
+
+    const short = [...container.querySelectorAll(`[title="${REVISION}"]`)];
+    expect(short.map((el) => el.textContent)).toContain(REVISION.slice(0, 12));
+    expect(container.textContent).not.toContain(REVISION);
+    expect(container.querySelector('[aria-label="Copy full value"]')).not.toBeNull();
+  });
+
+  it("names the build start and Docker's image creation time separately, in UTC", async () => {
+    await mount();
+    const text = container.textContent ?? "";
+
+    expect(text).toContain("Built (start)");
+    expect(text).toContain("2026-10-20 07:00:00 UTC");
+    expect(text).toContain("Image created (Docker)");
+    // Nanosecond precision from Docker still parses.
+    expect(text).toContain("2026-10-19 23:59:58 UTC");
+  });
+
+  it.each([
+    [true, "uncommitted changes"],
+    [false, "clean"],
+    [null, "unknown"],
+  ])("reports a dirty flag of %s as %s", async (dirty, label) => {
     getApiServerInfo.mockResolvedValue({
       ...INFO,
-      docker_available: false,
-      container: null,
-      pinned: null,
+      container: { ...INFO.container, build: { ...INFO.container.build, dirty } },
     });
     await mount();
 
-    expect(container.textContent).toContain("unknown");
-    expect(container.textContent).not.toContain("Pinned —");
+    expect(container.textContent).toContain(`Working tree${label}`);
+  });
+
+  it("degrades when Docker could not be reached", async () => {
+    getApiServerInfo.mockResolvedValue({ ...INFO, docker_available: false, container: null });
+    await mount();
+
+    expect(container.textContent).toContain("Docker is not reachable");
+    expect(container.textContent).toContain("1.0.1");
+  });
+
+  it("degrades for an API build without provenance labels", async () => {
+    const older = Object.fromEntries(
+      Object.entries(INFO.container).filter(([key]) => key !== "build" && key !== "image_created"),
+    );
+    getApiServerInfo.mockResolvedValue({ ...INFO, container: older });
+    await mount();
+
+    expect(container.textContent).toContain("not recorded in this image");
+    expect(container.textContent).toContain("Image created (Docker)unknown");
   });
 
   it("asks only about the server the navbar points at", async () => {
@@ -388,14 +403,13 @@ describe("ApiServerSettings", () => {
     expect(saveButton().disabled).toBe(true);
   });
 
-  it("tells the operator to upgrade a server whose API predates the panel", async () => {
+  it("tells the operator to deploy a newer build when the API predates the panel", async () => {
     const tooOld = Object.assign(
       new Error("This server's hummingbot-api is older than this panel."),
       { status: 501 },
     );
     getApiServerInfo.mockRejectedValue(tooOld);
     getApiClientConfig.mockRejectedValue(tooOld);
-    getApiUpgradePreflight.mockRejectedValue(tooOld);
     await mount();
 
     expect(container.textContent).toContain("older than this panel");
@@ -414,79 +428,100 @@ describe("ApiServerSettings", () => {
     expect(container.textContent).toContain("timed out");
     expect(container.querySelector(".border-red-500\\/30")).not.toBeNull();
   });
-  // ── Upgrading the server (FEAT-122) ──
-  //
-  // The server owns every judgement about whether an upgrade is safe; this panel's job
-  // is to show its refusal and never to send a request it has already been told would be
-  // refused. So what is pinned here is what the button will *not* do.
+  // ── Source update check ──
 
-  it("refuses a pinned server and names the override file that pins it", async () => {
-    getApiUpgradePreflight.mockResolvedValue({
-      ...READY,
-      pinned: true,
-      override_file: "docker-compose.override.yml",
-      can_upgrade: false,
-      blocked_reason:
-        "This server's image is pinned: compose override file docker-compose.override.yml " +
-        "can pin the image. Upgrade this server over SSH.",
+  it("never checks for updates on its own", async () => {
+    await mount();
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(checkApiUpdate).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("make check-update");
+    expect(container.textContent).toContain("make deploy");
+  });
+
+  it("checks once per press, for the selected server", async () => {
+    let answer: (value: unknown) => void = () => {};
+    checkApiUpdate.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    await mount();
+
+    await click(checkButton());
+    expect(checkButton().disabled).toBe(true);
+    await click(checkButton());
+    expect(checkApiUpdate).toHaveBeenCalledTimes(1);
+    expect(checkApiUpdate).toHaveBeenCalledWith("alpha");
+
+    await act(async () => answer(verdict("update_available", "main has newer changes.")));
+    await click(document.body);
+    expect(container.textContent).toContain("Update available");
+    expect(container.textContent).toContain("Compare on GitHub");
+  });
+
+  it.each([
+    ["up_to_date", "Up to date"],
+    ["update_available", "Update available"],
+    ["ahead", "Ahead of main"],
+    ["diverged", "Diverged from main"],
+    ["unknown", "Cannot compare"],
+    ["error", "Check failed"],
+  ])("labels %s distinctly", async (status, label) => {
+    checkApiUpdate.mockResolvedValue(verdict(status, `because ${status}`));
+    await mount();
+    await click(checkButton());
+
+    expect(container.textContent).toContain(label);
+    expect(container.textContent).toContain(`because ${status}`);
+  });
+
+  it("offers a retry when the API reports a failed check", async () => {
+    checkApiUpdate.mockResolvedValue({
+      ...verdict("error", "GitHub rate limit reached; try the update check later."),
+      latest_revision: null,
+      compare_url: null,
     });
     await mount();
+    await click(checkButton());
 
-    expect(container.textContent).toContain("docker-compose.override.yml");
-    expect(upgradeButton().disabled).toBe(true);
+    expect(container.textContent).toContain("GitHub rate limit reached");
+    expect(checkButton().textContent).toContain("Retry check");
+    await click(checkButton());
+    expect(checkApiUpdate).toHaveBeenCalledTimes(2);
   });
 
-  it("does not offer an upgrade to a trader", async () => {
-    ownerHolder.current = false;
-    getApiUpgradePreflight.mockResolvedValue(READY);
+  it("says a server without the route cannot check yet, not that it is down", async () => {
+    checkApiUpdate.mockRejectedValue(
+      Object.assign(new Error("This server's hummingbot-api cannot check its source for updates yet."), {
+        status: 501,
+      }),
+    );
     await mount();
+    await click(checkButton());
 
-    const button = upgradeButton();
-    expect(button.disabled).toBe(true);
-    expect(button.title).toBe("Only the server's owner can change this.");
+    expect(container.textContent).toContain("cannot check its source for updates yet");
+    expect(container.querySelector(".border-red-500\\/30")).toBeNull();
   });
 
-  it("will not send an upgrade until the executor loss is acknowledged", async () => {
-    getApiUpgradePreflight.mockResolvedValue(READY);
+  it("shows an unreachable server as a failure with a retry", async () => {
+    checkApiUpdate.mockRejectedValue(
+      Object.assign(new Error("Failed to check for updates: connection refused"), { status: 502 }),
+    );
     await mount();
+    await click(checkButton());
 
-    await click(upgradeButton());
-    expect(container.textContent).toContain("4 running executors will be closed");
-    expect(container.textContent).toContain("2 bots keep running");
-
-    // The confirm is dead until the checkbox is ticked, and nothing has been sent.
-    expect(confirmButton().disabled).toBe(true);
-    await click(confirmButton());
-    expect(startApiUpgrade).not.toHaveBeenCalled();
-
-    await click(field("Acknowledge executor loss"));
-    expect(confirmButton().disabled).toBe(false);
-    await click(confirmButton());
-    expect(startApiUpgrade).toHaveBeenCalledWith("alpha", true);
+    expect(container.textContent).toContain("connection refused");
+    expect(container.querySelector(".border-red-500\\/30")).not.toBeNull();
+    expect(checkButton().textContent).toContain("Retry check");
   });
 
-  it("asks for no acknowledgement when nothing is running", async () => {
-    getApiUpgradePreflight.mockResolvedValue({ ...READY, running_executors: 0 });
-    await mount();
-
-    await click(upgradeButton());
-    expect(container.textContent).toContain("No executors are running");
-    expect(container.querySelector('[aria-label="Acknowledge executor loss"]')).toBeNull();
-
-    await click(confirmButton());
-    expect(startApiUpgrade).toHaveBeenCalledWith("alpha", false);
-  });
-
-  it("keeps following the server the run was started on after the navbar moves", async () => {
-    // Repointing the poll at whatever the navbar now shows would report another host's
-    // idle status as this run's outcome.
-    getApiUpgradePreflight.mockResolvedValue({ ...READY, running_executors: 0 });
-    getApiUpgradeStatus.mockResolvedValue({
-      run_id: "abc123",
-      phase: "recreating",
-      detail: "Recreating the hummingbot-api container.",
-      log_tail: [],
-    });
+  it("keeps each server's result to itself, even when it arrives late", async () => {
+    let answerAlpha: (value: unknown) => void = () => {};
+    checkApiUpdate.mockImplementation((s: string) =>
+      s === "alpha"
+        ? new Promise((resolve) => (answerAlpha = resolve))
+        : Promise.resolve(verdict("up_to_date")),
+    );
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const render = async () => {
       await act(async () => {
@@ -496,58 +531,25 @@ describe("ApiServerSettings", () => {
           </QueryClientProvider>,
         );
       });
-      for (let i = 0; i < 20; i++) {
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 5));
-        });
-      }
+      await click(document.body);
     };
 
     await render();
-    await click(upgradeButton());
-    await click(confirmButton());
+    await click(checkButton());
 
     serverHolder.current = "beta";
     await render();
+    // Switching does not check beta on its own, and alpha's pending check is not beta's.
+    expect(checkApiUpdate).toHaveBeenCalledTimes(1);
+    expect(checkButton().disabled).toBe(false);
 
-    expect(getApiUpgradeStatus).toHaveBeenCalledWith("alpha");
-    expect(getApiUpgradeStatus).not.toHaveBeenCalledWith("beta");
-    // And the banner says which server it is talking about.
-    expect(container.textContent).toContain("alpha: recreating");
-  });
+    await act(async () => answerAlpha(verdict("update_available", "alpha is behind")));
+    await click(document.body);
+    expect(container.textContent).not.toContain("alpha is behind");
+    expect(container.textContent).not.toContain("Update available");
 
-  it("shows the helper's log tail when the recreate failed", async () => {
-    getApiUpgradePreflight.mockResolvedValue({ ...READY, running_executors: 0 });
-    getApiUpgradeStatus.mockResolvedValue({
-      run_id: "abc123",
-      phase: "failed",
-      detail: "The recreate failed (exit code 1).",
-      exit_code: 1,
-      log_tail: ["service hummingbot-api: volume not found"],
-    });
-    await mount();
-
-    await click(upgradeButton());
-    await click(confirmButton());
-
-    expect(container.textContent).toContain("volume not found");
-    expect(container.textContent).toContain("exit code 1");
-  });
-
-  it("reports a server that is not answering as restarting, not as broken", async () => {
-    getApiUpgradePreflight.mockResolvedValue({ ...READY, running_executors: 0 });
-    getApiUpgradeStatus.mockResolvedValue({
-      run_id: null,
-      phase: "restarting",
-      detail: "The server is not answering. It is being replaced; this is expected.",
-      log_tail: [],
-    });
-    await mount();
-
-    await click(upgradeButton());
-    await click(confirmButton());
-
-    expect(container.textContent).toContain("restarting");
-    expect(container.textContent).toContain("expected");
+    serverHolder.current = "alpha";
+    await render();
+    expect(container.textContent).toContain("alpha is behind");
   });
 });

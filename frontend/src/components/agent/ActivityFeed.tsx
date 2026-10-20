@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  Loader2,
   MessageCircleQuestion,
   Send,
   SquareTerminal,
@@ -14,7 +13,8 @@ import {
   DELEGATION_STATUS,
   formatDelegationTime,
 } from "@/components/agent/delegationStatus";
-import { api, type DelegationKind, type DelegationSummary } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { delegationsApi, type DelegationKind, type DelegationSummary } from "@/lib/api/delegations";
 import { formatDuration } from "@/lib/formatters";
 
 /** How a kind reads in a row: its glyph and what to call it. */
@@ -138,7 +138,7 @@ export function ActivityFeed({
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["delegation-history", agent ?? "all", active ?? "all"],
-    queryFn: () => api.getDelegationHistory(agent, 100, active),
+    queryFn: () => delegationsApi.getDelegationHistory(agent, 100, active),
     // A finished run never changes; only a live one does.
     refetchInterval: (q) =>
       q.state.data?.delegations.some((d) => d.status === "running") ? 5000 : false,
@@ -180,7 +180,7 @@ export function ActivityFeed({
   if (isLoading) {
     body = (
       <div className="flex items-center gap-2 px-1 py-3 text-xs text-[var(--color-text-muted)]">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner size="xs" />
         Loading history…
       </div>
     );

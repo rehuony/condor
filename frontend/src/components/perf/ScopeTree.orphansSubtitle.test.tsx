@@ -25,7 +25,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ScopeTree } from "./ScopeTree";
-import type { ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import { buildTree, leafFromExecutor, type PerfNode } from "@/lib/perf-tree";
 
 declare global {

@@ -20,13 +20,13 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
-import type { PoolSummary } from "@/lib/api";
+import type { PoolSummary } from "@/lib/api/dex";
 import { Dex } from "./Dex";
 
 const getDexPools = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/dex", () => ({
+  dexApi: {
     getDexChains: async () => [],
     getDexVenues: async () => [],
     getDexPools: (...args: unknown[]) => getDexPools(...args),

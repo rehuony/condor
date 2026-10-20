@@ -1,18 +1,11 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, Loader2, Search } from "lucide-react";
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
+import { Spinner } from "@/components/ui/Spinner";
 import { useBrainLabel } from "@/hooks/useBrainLabel";
-import {
-  api,
-  customAgentKey,
-  parseCustomAgentKey,
-  type AgentBindingOption,
-  type ChatAgentOption,
-  type CustomProvider,
-  type OpenRouterModelOption,
-} from "@/lib/api";
+import { chatApi, customAgentKey, parseCustomAgentKey, type AgentBindingOption, type ChatAgentOption, type CustomProvider, type OpenRouterModelOption } from "@/lib/api/chat";
 
 /**
  * Who is answering. The two fields are orthogonal — a bound Agent brings its
@@ -88,7 +81,7 @@ export function BrainMenuBody({
   // Custom endpoint models, fetched per endpoint on open
   const customModels = useQuery({
     queryKey: ["custom-provider-models", submenu?.kind === "custom" ? submenu.name : null],
-    queryFn: () => api.getCustomProviderModels((submenu as { name: string }).name),
+    queryFn: () => chatApi.getCustomProviderModels((submenu as { name: string }).name),
     enabled: submenu?.kind === "custom",
     staleTime: 5 * 60 * 1000,
   });
@@ -97,8 +90,7 @@ export function BrainMenuBody({
     if (models || loading) return;
     setLoading(true);
     setError(null);
-    api
-      .getOpenRouterModels()
+    chatApi.getOpenRouterModels()
       .then((res) => setModels(res.models))
       .catch(() => setError("Failed to load OpenRouter models"))
       .finally(() => setLoading(false));
@@ -231,7 +223,7 @@ export function BrainMenuBody({
         </button>
         {customModels.isLoading && (
           <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-[var(--color-text-muted)]">
-            <Loader2 className="h-3 w-3 animate-spin" /> Loading models…
+            <Spinner size="xs" /> Loading models…
           </div>
         )}
         {customModels.isError && (
@@ -281,7 +273,7 @@ export function BrainMenuBody({
       </div>
       {loading && (
         <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-[var(--color-text-muted)]">
-          <Loader2 className="h-3 w-3 animate-spin" /> Loading models…
+          <Spinner size="xs" /> Loading models…
         </div>
       )}
       {error && <div className="px-2.5 py-2 text-xs text-red-400">{error}</div>}

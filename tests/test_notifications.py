@@ -24,6 +24,7 @@ from condor.notifications import (
     unread_count,
     user_for_chat,
 )
+from condor.scheduler import ScheduledJob
 from condor.web.models import WebUser
 
 USER_A = 111
@@ -273,6 +274,19 @@ def test_notify_bot_records_a_send(store, known_users):
     assert [n.text for n in list_for(USER_A)] == ["hello"]
 
 
+def test_notify_bot_records_a_rich_message(store, known_users):
+    from aiogram.types import InputRichMessage
+
+    bot = NotifyBot()
+    asyncio.run(
+        bot.send_rich_message(
+            chat_id=USER_A,
+            rich_message=InputRichMessage(markdown="**hello**"),
+        )
+    )
+    assert [n.text for n in list_for(USER_A)] == ["**hello**"]
+
+
 def test_notify_bot_ignores_a_chat_with_no_owner(store, known_users):
     bot = NotifyBot()
 
@@ -326,10 +340,16 @@ def test_resolve_bot_prefers_telegram_when_there_is_a_token(monkeypatch):
 
     monkeypatch.setattr("condor.routine_store.get_routine_store", lambda: _NoBotStore())
 
-    from condor.agents.delegate import resolve_bot
-    from condor.routine_store import _HttpBot
+    from aiogram import Bot
 
-    assert isinstance(resolve_bot(), _HttpBot)
+    from condor.agents.delegate import resolve_bot
+    from condor.telegram import transport
+
+    monkeypatch.setattr(transport, "_standalone", None)
+    bot = resolve_bot()
+    assert isinstance(bot, Bot) and bot.token == "123:abc"
+    assert resolve_bot() is bot
+    asyncio.run(transport.close_standalone_bot())
 
 
 # ── Producers ──
@@ -370,7 +390,7 @@ def test_long_delegation_delivers_its_tail_and_records_only_one_notification(
     store, known_users
 ):
     from condor.agents.delegate import DelegateTask, _completion_text, _notify_done
-    from condor.telegram_text import plain_text
+    from condor.telegram.format import plain_text
 
     result = (
         "结论：等待。\n\n"
@@ -644,8 +664,8 @@ def test_update_notice_does_not_tell_the_dashboard_to_type_update(
 
     monkeypatch.setattr("condor.agents.delegate.resolve_bot", lambda b=None: _Bot())
 
-    class _Ctx:
-        bot = _Bot()
+    def _Ctx():
+        return ScheduledJob(name="update_check", data={"bot": _Bot()})
 
     asyncio.run(update_handler._periodic_update_check(_Ctx()))
 
@@ -698,8 +718,8 @@ def test_pending_update_is_announced_once_not_once_per_hour(
 
     monkeypatch.setattr("condor.agents.delegate.resolve_bot", lambda b=None: _Bot())
 
-    class _Ctx:
-        bot = _Bot()
+    def _Ctx():
+        return ScheduledJob(name="update_check", data={"bot": _Bot()})
 
     # Two consecutive hourly checks over the same pending update: one notice.
     asyncio.run(update_handler._periodic_update_check(_Ctx()))

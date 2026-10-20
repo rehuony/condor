@@ -4,26 +4,13 @@ import { runLabel } from "@/components/agent/lab/runs";
 import { poolLabel } from "@/components/dex/format";
 import { readLpPosition } from "@/components/dex/lp-position";
 import { getDisplayCurrency } from "@/hooks/useDisplayCurrency";
-import type {
-  AgentBrain,
-  AgentDetail,
-  AgentRunRow,
-  BotDetail,
-  BotRunsResponse,
-  BotsPageResponse,
-  ConsolidatedPosition,
-  ConsolidatedPositionsResponse,
-  ControllerInfo,
-  ExecutorInfo,
-  PoolSummary,
-  PortfolioHistoryResponse,
-  PortfolioResponse,
-  ReportGroup,
-  RoutineInfo,
-  RoutineInstance,
-  StrategyDetail,
-  StrategySummary,
-} from "./api";
+import type { ConsolidatedPosition, ConsolidatedPositionsResponse, PortfolioHistoryResponse, PortfolioResponse } from "./api/portfolio";
+import type { BotDetail, BotRunsResponse, BotsPageResponse, ControllerInfo } from "./api/bots";
+import type { ExecutorInfo } from "./api/executors";
+import type { PoolSummary } from "./api/dex";
+import type { AgentBrain, AgentDetail, AgentRunRow, StrategyDetail, StrategySummary } from "./api/agents";
+import type { ReportGroup } from "./api/reports";
+import type { RoutineInfo, RoutineInstance } from "./api/routines";
 import {
   formatAge,
   formatCurrency,
@@ -541,7 +528,9 @@ const ROUTES: {
       // The window is the one the period selector is on, and it lives in the
       // key — captioning it "24h" would put a label on screen that is not.
       const window = String(freshKey(qc, ["portfolio-history"])?.[2] ?? "");
-      const points = history?.points ?? [];
+      const points = (history?.points ?? []).filter((p) =>
+        Number.isFinite(p.total_usd),
+      );
       const first = points[0];
       const last = points[points.length - 1];
       const change =

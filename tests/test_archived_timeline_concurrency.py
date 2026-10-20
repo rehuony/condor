@@ -80,7 +80,7 @@ def wired(monkeypatch):
 def _update_and_context(databases, summaries):
     loading_msg = SimpleNamespace(edit_text=AsyncMock(), delete=AsyncMock(), text=None)
     query = SimpleNamespace(
-        message=SimpleNamespace(reply_text=AsyncMock(return_value=loading_msg))
+        message=SimpleNamespace(answer=AsyncMock(return_value=loading_msg))
     )
     update = SimpleNamespace(
         callback_query=query, effective_chat=SimpleNamespace(id=42)

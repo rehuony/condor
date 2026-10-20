@@ -9,13 +9,13 @@ Provides:
 
 import io
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 # The PnL math is pure and shared with the web routes and the archived_analyzer
 # routine, so it lives in condor/ — re-exported here for existing callers.
 from condor.archived_pnl import calculate_pnl_from_trades, parse_timestamp
+from condor.fetchers.archived_run import extract_bot_name
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +49,6 @@ def _get_pnl_color(pnl: float) -> str:
     elif pnl < 0:
         return DARK_THEME["down_color"]
     return DARK_THEME["neutral_color"]
-
-
-def _extract_bot_name(db_path: str) -> str:
-    """Extract readable bot name from database path."""
-    # db_path: "bots/archived/trend_follower_grid-20251015-155015/data/trend_follower_grid-20251015-155015.sqlite"
-    name = os.path.basename(db_path)
-    if name.endswith(".sqlite"):
-        name = name[:-7]
-    elif name.endswith(".db"):
-        name = name[:-3]
-    return name
 
 
 def get_time_range_from_trades(
@@ -112,7 +101,7 @@ def generate_timeline_chart(
             pnl_data = bot.get("pnl_data", {})
 
             # Get bot name from summary or db_path
-            bot_name = summary.get("bot_name") or _extract_bot_name(db_path)
+            bot_name = summary.get("bot_name") or extract_bot_name(db_path)
 
             # Get time range from trades
             start_time, end_time = get_time_range_from_trades(trades)
@@ -255,7 +244,7 @@ def generate_performance_chart(
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
 
-        bot_name = summary.get("bot_name") or _extract_bot_name(db_path)
+        bot_name = summary.get("bot_name") or extract_bot_name(db_path)
 
         # Calculate PnL from trades
         pnl_data = calculate_pnl_from_trades(trades)
@@ -438,7 +427,7 @@ def generate_report_chart(
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
 
-        bot_name = summary.get("bot_name") or _extract_bot_name(db_path)
+        bot_name = summary.get("bot_name") or extract_bot_name(db_path)
 
         # Calculate PnL from trades
         pnl_data = calculate_pnl_from_trades(trades)

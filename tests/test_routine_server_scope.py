@@ -1,6 +1,6 @@
 """A routine runs against the server it was launched with.
 
-``RoutineStore`` hands every non-Telegram run a ``WebRoutineContext`` built from
+``RoutineStore`` hands every non-Telegram run a pinned ``RoutineContext`` built from
 the run's ``server_name`` — that is the whole point of the class. But the server
 never reached the client:
 
@@ -20,7 +20,7 @@ import pytest
 
 import config_manager as cm_module
 from condor.preferences import get_active_server
-from condor.routine_store import WebRoutineContext
+from routines.base import RoutineContext
 
 LAUNCHED_WITH = "brigado_2"
 CHAT_DEFAULT = "local"
@@ -61,7 +61,7 @@ def cm(monkeypatch):
 
 def test_the_context_exposes_the_launch_server_as_a_preference():
     """The preference API must be able to read what the context wrote."""
-    ctx = WebRoutineContext(LAUNCHED_WITH, bot=object(), chat_id=0)
+    ctx = RoutineContext.pinned(LAUNCHED_WITH, bot=object(), chat_id=0)
 
     assert ctx.server_name == LAUNCHED_WITH
     assert get_active_server(ctx.user_data) == LAUNCHED_WITH
@@ -69,9 +69,9 @@ def test_the_context_exposes_the_launch_server_as_a_preference():
 
 def test_a_routine_run_reaches_the_server_it_was_launched_with(cm):
     """The full chain: context → get_effective_server → get_client_for_chat."""
-    ctx = WebRoutineContext(LAUNCHED_WITH, bot=object(), chat_id=0)
+    ctx = RoutineContext.pinned(LAUNCHED_WITH, bot=object(), chat_id=0)
 
-    client = asyncio.run(cm_module.get_client(ctx._chat_id, context=ctx))
+    client = asyncio.run(cm_module.get_client(ctx.chat_id, user_data=ctx.user_data))
 
     assert client == f"client:{LAUNCHED_WITH}"
     assert cm.asked_for == LAUNCHED_WITH, "the chat default must not win here"

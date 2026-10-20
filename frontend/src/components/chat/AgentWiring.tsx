@@ -14,11 +14,7 @@ import {
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { useBrainLabel } from "@/hooks/useBrainLabel";
 import type { ChatSlot } from "@/hooks/useChatSocket";
-import type {
-  AgentBindingOption,
-  ChatAgentOption,
-  CustomProvider,
-} from "@/lib/api";
+import type { AgentBindingOption, ChatAgentOption, CustomProvider } from "@/lib/api/chat";
 
 /**
  * What the conversation runs on: the model that answers, and the server it

@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { BEFORE_LEDGER, OUTSIDE } from "@/components/perf/agentFilter";
 import type { DeedIndex } from "@/lib/agent-attribution";
-import type { ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
 import {
   collapseGrouping,
   distinguishes,

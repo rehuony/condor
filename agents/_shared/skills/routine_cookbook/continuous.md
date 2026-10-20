@@ -8,7 +8,7 @@ until explicitly stopped.
 ```python
 import asyncio
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
+from routines.base import RoutineContext
 from config_manager import get_client
 import logging
 
@@ -21,14 +21,14 @@ class Config(BaseModel):
     trading_pair: str = Field(default="BTC-USDT", description="Pair to monitor")
     interval_sec: int = Field(default=30, description="Check interval in seconds")
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    chat_id = context._chat_id
+async def run(config: Config, context: RoutineContext) -> str:
+    chat_id = context.chat_id
     await context.bot.send_message(chat_id=chat_id, text="Monitor started ✅")
 
     try:
         while True:
             try:
-                client = await get_client(chat_id, context=context)
+                client = await get_client(chat_id, user_data=context.user_data)
                 if not client:
                     await asyncio.sleep(config.interval_sec)
                     continue

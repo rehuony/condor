@@ -6,17 +6,18 @@ from types import SimpleNamespace
 
 import pytest
 from bs4 import BeautifulSoup
-from telegram.error import BadRequest, RetryAfter
 
-from condor.telegram_text import (
+from condor.telegram.errors import bad_request, rate_limited
+from condor.telegram.format import (
     MAX_MESSAGE_LEN,
+    RICH_MAX_LEN,
     plain_text,
     render_html,
     render_markdown,
-    send_markdown,
-    send_text,
     split_text,
 )
+from condor.telegram.output.runs import RunTarget, register_run
+from condor.telegram.transport import send_markdown, send_text
 
 
 class BalancedHTML(HTMLParser):
@@ -167,7 +168,7 @@ def test_notification_plain_fallback_keeps_the_full_research_url(monkeypatch):
 
     async def send(**kwargs):
         if kwargs.get("parse_mode"):
-            raise BadRequest("Can't parse entities")
+            raise bad_request("Can't parse entities")
         delivered.append(kwargs["text"])
         return SimpleNamespace(message_id=len(delivered))
 
@@ -210,7 +211,7 @@ def test_plain_fallback_keeps_sources_and_splits_expanded_urls():
 
     async def send(**kwargs):
         if kwargs.get("parse_mode"):
-            raise BadRequest("Can't parse entities")
+            raise bad_request("Can't parse entities")
         delivered.append(kwargs["text"])
         return SimpleNamespace(message_id=len(delivered))
 
@@ -221,10 +222,7 @@ def test_plain_fallback_keeps_sources_and_splits_expanded_urls():
     assert all(len(c) <= MAX_MESSAGE_LEN for c in delivered)
 
 
-@pytest.mark.parametrize("http", [False, True])
-def test_rate_limit_retries_the_same_page_without_duplicating_the_rest(
-    http, monkeypatch
-):
+def test_rate_limit_retries_the_same_page_without_duplicating_the_rest(monkeypatch):
     delivered = []
     attempts = 0
     delays = []
@@ -236,24 +234,22 @@ def test_rate_limit_retries_the_same_page_without_duplicating_the_rest(
         nonlocal attempts
         attempts += 1
         if attempts == 2:
-            if http:
-                return {"ok": False, "parameters": {"retry_after": 2}}
-            raise RetryAfter(2)
+            raise rate_limited(2)
         delivered.append(kwargs["text"])
-        return {"ok": True, "result": {"message_id": attempts}}
+        return SimpleNamespace(message_id=attempts)
 
-    monkeypatch.setattr("condor.telegram_text.asyncio.sleep", sleep)
+    monkeypatch.setattr("condor.telegram.transport.asyncio.sleep", sleep)
     source = "第一段\n\n" + "数据" * 4500 + "\n\n完整结尾"
     asyncio.run(send_markdown(SimpleNamespace(send_message=send), 42, source))
     assert "".join(plain_text(p) for p in delivered) == source
     assert delays == [2]
 
 
-def test_http_failure_is_not_silently_reported_as_delivery():
+def test_missing_receipt_is_not_silently_reported_as_delivery():
     async def send(**kwargs):
-        return {"ok": False, "description": "chat not found"}
+        return None
 
-    with pytest.raises(BadRequest, match="chat not found"):
+    with pytest.raises(Exception, match="did not acknowledge"):
         asyncio.run(send_markdown(SimpleNamespace(send_message=send), 42, "result"))
 
 
@@ -276,6 +272,67 @@ def test_markdown_v2_is_passed_through_without_rewriting_escapes():
     assert delivered[0]["parse_mode"] == "MarkdownV2"
 
 
+def test_markdown_uses_a_rich_message_and_keeps_tables():
+    delivered = []
+    nudged = []
+
+    async def send_rich(**kwargs):
+        delivered.append(kwargs["rich_message"].markdown)
+        return SimpleNamespace(message_id=len(delivered))
+
+    register_run(
+        RunTarget(
+            chat_id=42,
+            user_id=1,
+            conversation_id="c",
+            request_id="r",
+            nudge=lambda: nudged.append(1),
+        )
+    )
+    source = "| 币种 | 风险 |\n| --- | --- |\n| **ABC** | [解锁](https://example.com/unlock) |"
+    asyncio.run(send_markdown(SimpleNamespace(send_rich_message=send_rich), 42, source))
+    assert delivered == [source]
+    assert "|" in delivered[0]
+    assert nudged == [1]
+
+
+def test_rich_markdown_splits_at_the_native_limit():
+    delivered = []
+
+    async def send_rich(**kwargs):
+        delivered.append(kwargs["rich_message"].markdown)
+        return SimpleNamespace(message_id=len(delivered))
+
+    source = "段\n\n" + ("数据🪙\n" * 7000)
+    asyncio.run(send_markdown(SimpleNamespace(send_rich_message=send_rich), 42, source))
+    assert len(delivered) > 1
+    assert "".join(delivered) == source
+    assert all(
+        len(chunk.encode("utf-16-le")) // 2 <= RICH_MAX_LEN for chunk in delivered
+    )
+
+
+def test_unparseable_rich_markdown_falls_back_to_html():
+    delivered = []
+
+    async def send_rich(**kwargs):
+        raise bad_request("Can't parse entities")
+
+    async def send(**kwargs):
+        delivered.append(kwargs)
+        return SimpleNamespace(message_id=len(delivered))
+
+    asyncio.run(
+        send_markdown(
+            SimpleNamespace(send_rich_message=send_rich, send_message=send),
+            42,
+            "**ok**",
+        )
+    )
+    assert delivered[0].get("parse_mode") == "HTML"
+    assert "<b>ok</b>" in delivered[0]["text"]
+
+
 def test_markdown_v2_split_entity_falls_back_per_page_without_losing_text():
     attempts = []
     delivered = []
@@ -284,7 +341,7 @@ def test_markdown_v2_split_entity_falls_back_per_page_without_losing_text():
     async def send(**kwargs):
         attempts.append(kwargs)
         if kwargs.get("parse_mode"):
-            raise BadRequest("Can't parse entities: unclosed bold entity")
+            raise bad_request("Can't parse entities: unclosed bold entity")
         delivered.append(kwargs["text"])
         return SimpleNamespace(message_id=len(delivered))
 
@@ -302,37 +359,3 @@ def test_markdown_v2_split_entity_falls_back_per_page_without_losing_text():
     assert [call.get("parse_mode") for call in attempts] == ["MarkdownV2", None] * len(
         delivered
     )
-
-
-def test_http_bot_forwards_preview_and_keyboard_changes(monkeypatch):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-    from condor.routine_store import _HttpBot
-
-    calls = []
-
-    async def post(method, data, files=None):
-        calls.append((method, data))
-        return {"ok": True}
-
-    bot = _HttpBot()
-    monkeypatch.setattr(bot, "_post", post)
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Stop", callback_data="agent:cancel")]]
-    )
-
-    async def drive():
-        await bot.send_message(chat_id=42, text="result", disable_web_page_preview=True)
-        await bot.edit_message_text(
-            chat_id=42, message_id=1, text="working", reply_markup=keyboard
-        )
-        await bot.edit_message_text(
-            chat_id=42, message_id=1, text="done", reply_markup=None
-        )
-        await bot.delete_message(chat_id=42, message_id=2)
-
-    asyncio.run(drive())
-    assert calls[0][1]["disable_web_page_preview"] is True
-    assert calls[1][1]["reply_markup"] == keyboard.to_dict()
-    assert calls[2][1]["reply_markup"] == {"inline_keyboard": []}
-    assert calls[3] == ("deleteMessage", {"chat_id": 42, "message_id": 2})

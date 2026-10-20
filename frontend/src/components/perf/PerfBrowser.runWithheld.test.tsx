@@ -18,14 +18,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ControllerInfo, StrategyUnavailable } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { StrategyUnavailable } from "@/lib/api/agents";
 import type { FleetOwner } from "@/lib/agent-attribution";
 
 /** What the run ledger answers; each case sets it before rendering. */
 let unavailable: StrategyUnavailable = "";
 
-vi.mock("@/lib/api", () => ({
-  api: new Proxy(
+/** Every domain module answers with the same stub: any read resolves to
+ * an empty object. */
+function stubApi() {
+  return new Proxy(
     {},
     {
       get: (_target, name) =>
@@ -39,8 +42,15 @@ vi.mock("@/lib/api", () => ({
               })
           : () => Promise.resolve({}),
     },
-  ),
-}));
+  );
+}
+
+vi.mock("@/lib/api/bots", () => ({ botsApi: stubApi() }));
+vi.mock("@/lib/api/performance", () => ({ performanceApi: stubApi() }));
+vi.mock("@/lib/api/executors", () => ({ executorsApi: stubApi() }));
+vi.mock("@/lib/api/market", () => ({ marketApi: stubApi() }));
+vi.mock("@/lib/api/agents", () => ({ agentsApi: stubApi() }));
+vi.mock("@/lib/api/archived", () => ({ archivedApi: stubApi() }));
 
 vi.mock("@/components/bots/PnlEvolutionChart", () => ({ PnlEvolutionChart: () => null }));
 vi.mock("@/components/bots/ControllerPnlChart", () => ({ ControllerPnlChart: () => null }));

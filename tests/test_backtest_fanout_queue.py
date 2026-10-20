@@ -384,7 +384,9 @@ def _run_optimizer(monkeypatch, server, n_variations=6):
     monkeypatch.setattr(core, "DEFAULT_POLL_INTERVAL", 0.0)
 
     config = mm.Config(server_name=SERVER, n_variations=n_variations)
-    summary = asyncio.run(mm.run(config, SimpleNamespace(_chat_id=1)))
+    summary = asyncio.run(
+        mm.run(config, SimpleNamespace(chat_id=1, user_data={}, bot=None))
+    )
     return summary, FakeReportBuilder.last
 
 

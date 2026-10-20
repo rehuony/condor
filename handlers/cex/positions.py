@@ -4,10 +4,13 @@ CEX Trading - Positions management
 
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_clob_account
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_error_message,
@@ -17,13 +20,13 @@ from utils.telegram_formatters import (
 logger = logging.getLogger(__name__)
 
 
-async def handle_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_positions(update: Update, context: Context) -> None:
     """Handle get positions operation"""
     try:
         from config_manager import get_client
 
         chat_id = update.effective_chat.id
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Get all positions
         result = await client.trading.get_positions(limit=100)
@@ -34,8 +37,10 @@ async def handle_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             message = r"📊 *Perpetual Positions*" + "\n\n" + r"No positions found\."
             keyboard = [
                 [
-                    InlineKeyboardButton("🔄 Refresh", callback_data="cex:positions"),
-                    InlineKeyboardButton("« Back", callback_data="cex:trade"),
+                    InlineKeyboardButton(
+                        text="🔄 Refresh", callback_data="cex:positions"
+                    ),
+                    InlineKeyboardButton(text="« Back", callback_data="cex:trade"),
                 ]
             ]
         else:
@@ -75,14 +80,19 @@ async def handle_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 callback_data = f"cex:close_position:{i}"
 
                 keyboard.append(
-                    [InlineKeyboardButton(button_label, callback_data=callback_data)]
+                    [
+                        InlineKeyboardButton(
+                            text=button_label, callback_data=callback_data
+                        )
+                    ]
                 )
 
             if len(positions) > 5:
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            "⋯ Show More Positions", callback_data="cex:positions_list"
+                            text="⋯ Show More Positions",
+                            callback_data="cex:positions_list",
                         )
                     ]
                 )
@@ -90,12 +100,14 @@ async def handle_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             # Add refresh and back buttons
             keyboard.append(
                 [
-                    InlineKeyboardButton("🔄 Refresh", callback_data="cex:positions"),
-                    InlineKeyboardButton("« Back", callback_data="cex:trade"),
+                    InlineKeyboardButton(
+                        text="🔄 Refresh", callback_data="cex:positions"
+                    ),
+                    InlineKeyboardButton(text="« Back", callback_data="cex:trade"),
                 ]
             )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             message, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -110,7 +122,7 @@ async def handle_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def handle_trade_position(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, position_index: int
+    update: Update, context: Context, position_index: int
 ) -> None:
     """Handle quick trade for a specific position - opens trade menu with position details pre-filled"""
     from .trade import show_trade_menu
@@ -170,7 +182,7 @@ async def handle_trade_position(
 
 
 async def handle_close_position(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, position_index: int
+    update: Update, context: Context, position_index: int
 ) -> None:
     """Handle closing a specific position"""
     try:
@@ -251,13 +263,13 @@ async def handle_close_position(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✅ Confirm Close",
+                    text="✅ Confirm Close",
                     callback_data=f"cex:confirm_close:{position_index}",
                 ),
-                InlineKeyboardButton("❌ Cancel", callback_data="cex:positions"),
+                InlineKeyboardButton(text="❌ Cancel", callback_data="cex:positions"),
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             confirm_message, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -272,7 +284,7 @@ async def handle_close_position(
 
 
 async def handle_confirm_close_position(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, position_index: int
+    update: Update, context: Context, position_index: int
 ) -> None:
     """Confirm and execute closing a position"""
     from ._shared import invalidate_cache
@@ -308,7 +320,7 @@ async def handle_confirm_close_position(
         from config_manager import get_client
 
         chat_id = update.effective_chat.id
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Place market order to close position
         result = await client.trading.place_order(
@@ -338,11 +350,13 @@ async def handle_confirm_close_position(
 
         keyboard = [
             [
-                InlineKeyboardButton("📊 Positions", callback_data="cex:positions"),
-                InlineKeyboardButton("« Back", callback_data="cex:trade"),
+                InlineKeyboardButton(
+                    text="📊 Positions", callback_data="cex:positions"
+                ),
+                InlineKeyboardButton(text="« Back", callback_data="cex:trade"),
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             success_msg, parse_mode="MarkdownV2", reply_markup=reply_markup

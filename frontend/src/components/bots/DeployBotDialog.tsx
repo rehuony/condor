@@ -13,12 +13,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Label } from "@/components/ui/Field";
+import { Spinner } from "@/components/ui/Spinner";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
-import {
-  api,
-  type ControllerConfigSummary,
-} from "@/lib/api";
+import { botsApi, type ControllerConfigSummary } from "@/lib/api/bots";
 
 // ── Helpers ──
 
@@ -66,7 +65,7 @@ export function ConfigEditor({
 
   const { data, isLoading } = useQuery({
     queryKey: ["config-detail", server, configId],
-    queryFn: () => api.getConfigDetail(server, configId),
+    queryFn: () => botsApi.getConfigDetail(server, configId),
     enabled: expanded,
   });
 
@@ -112,7 +111,7 @@ export function ConfigEditor({
     return (
       <div className="rounded-lg border border-[var(--color-border)] p-4">
         <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+          <Spinner size="md" />
           Loading {configId}...
         </div>
       </div>
@@ -301,7 +300,7 @@ export function DeployBotDialog({
 
   const { data, isLoading } = useQuery({
     queryKey: ["available-configs", server],
-    queryFn: () => api.getAvailableConfigs(server),
+    queryFn: () => botsApi.getAvailableConfigs(server),
     enabled: open,
   });
 
@@ -351,9 +350,9 @@ export function DeployBotDialog({
   const deployMutation = useMutation({
     mutationFn: async () => {
       for (const [configId, edits] of dirtyConfigs) {
-        await api.updateConfig(server, configId, edits);
+        await botsApi.updateConfig(server, configId, edits);
       }
-      return api.deployBot(server, {
+      return botsApi.deployBot(server, {
         bot_name: botName,
         controllers_config: Array.from(selected),
         account_name: accountName,
@@ -464,7 +463,7 @@ export function DeployBotDialog({
 
             {isLoading ? (
               <div className="flex h-24 items-center justify-center text-[var(--color-text-muted)]">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+                <Spinner size="lg" />
               </div>
             ) : unselectedConfigs.length === 0 ? (
               <div className="flex h-16 items-center justify-center text-[var(--color-text-muted)]">
@@ -517,7 +516,7 @@ export function DeployBotDialog({
             {showAdvanced && (
               <div className="mt-3 space-y-3">
                 <div>
-                  <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Bot Name</label>
+                  <Label>Bot Name</Label>
                   <input
                     type="text"
                     value={botName}
@@ -527,7 +526,7 @@ export function DeployBotDialog({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Account</label>
+                    <Label>Account</Label>
                     <input
                       type="text"
                       value={accountName}
@@ -536,7 +535,7 @@ export function DeployBotDialog({
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Image</label>
+                    <Label>Image</Label>
                     <input
                       type="text"
                       value={image}
@@ -547,7 +546,7 @@ export function DeployBotDialog({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Max Global Drawdown</label>
+                    <Label>Max Global Drawdown</Label>
                     <input
                       type="number"
                       value={maxGlobalDrawdown}
@@ -557,7 +556,7 @@ export function DeployBotDialog({
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Max Controller Drawdown</label>
+                    <Label>Max Controller Drawdown</Label>
                     <input
                       type="number"
                       value={maxControllerDrawdown}
@@ -600,7 +599,7 @@ export function DeployBotDialog({
             <button
               onClick={() => deployMutation.mutate()}
               disabled={!hasSelected || !botName.trim() || deployMutation.isPending}
-              className="flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white transition-opacity disabled:opacity-40"
+              className="flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--on-primary)] transition-opacity disabled:opacity-40"
             >
               <Rocket className="h-4 w-4" />
               {deployMutation.isPending

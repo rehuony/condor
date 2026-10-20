@@ -12,7 +12,7 @@
 // and never a guess.
 
 import { runParam } from "@/components/perf/agentFilter";
-import type { DeploymentRow } from "@/lib/api";
+import type { DeploymentRow } from "@/lib/api/agents";
 
 /**
  * Bots first, then the controllers those bots ran, then standalone executors.

@@ -25,6 +25,7 @@ from condor.preferences import (
     set_portfolio_days,
     set_wallet_networks,
 )
+from tests.conftest import patch_agents
 
 USER_ID = 4242
 WALLET = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
@@ -56,6 +57,21 @@ def test_previously_unsynced_setters_reach_config(cm):
     assert stored["dex"]["last_pool"] == {"trading_pair": "SOL-USDC"}
     assert stored["executors"]["deployed_pairs"] == ["SOL-USDC"]
     assert stored["executors"]["last_grid"] == {"total_amount_quote": 100}
+
+
+def test_a_setter_that_changes_nothing_does_not_write_config(cm, monkeypatch):
+    """Storing the stored value again costs no config.yml dump."""
+    user_data = {"_user_id": USER_ID}
+    set_portfolio_days(user_data, 7)
+    saves = []
+    monkeypatch.setattr(cm, "_save_config", lambda: saves.append(1))
+
+    set_portfolio_days(user_data, 7)
+    assert saves == []
+
+    set_portfolio_days(user_data, 14)
+    assert saves == [1]
+    assert cm.get_user_preferences(USER_ID)["portfolio"]["days"] == 14
 
 
 def test_wallets_survive_a_reset_of_the_pickle(cm):
@@ -182,7 +198,7 @@ def test_temporary_telegram_fallback_does_not_overwrite_a_shared_choice(
     telegram = SimpleNamespace(user_data={"_user_id": USER_ID})
     agents.set_active_llm(telegram, "claude-acp:sonnet")
     telegram.user_data.update(agent_llm="gemini", agent_llm_auto="claude-acp:sonnet")
-    monkeypatch.setattr(agents, "_is_agent_available", lambda key: key == "gemini")
+    patch_agents(monkeypatch, "_is_agent_available", lambda key: key == "gemini")
 
     assert agents._reclaim_default_agent(telegram) == "gemini"
     assert prefs_module.get_active_agent_key(USER_ID) == "claude-acp:sonnet"
@@ -191,7 +207,7 @@ def test_temporary_telegram_fallback_does_not_overwrite_a_shared_choice(
     prefs_module.set_active_agent_key(
         prefs_module.load_user_data_for(USER_ID), "gemini"
     )
-    monkeypatch.setattr(agents, "_is_agent_available", lambda key: True)
+    patch_agents(monkeypatch, "_is_agent_available", lambda key: True)
     assert agents._reclaim_default_agent(telegram) == "gemini"
     assert "agent_llm_auto" not in telegram.user_data
 
@@ -202,7 +218,7 @@ def test_telegram_recovers_the_users_model_when_its_cli_returns(cm, monkeypatch)
     telegram = SimpleNamespace(user_data={"_user_id": USER_ID})
     agents.set_active_llm(telegram, "claude-acp:sonnet")
     telegram.user_data.update(agent_llm="gemini", agent_llm_auto="claude-acp:sonnet")
-    monkeypatch.setattr(agents, "_is_agent_available", lambda key: True)
+    patch_agents(monkeypatch, "_is_agent_available", lambda key: True)
 
     assert agents._reclaim_default_agent(telegram) == "claude-acp:sonnet"
     assert "agent_llm_auto" not in telegram.user_data

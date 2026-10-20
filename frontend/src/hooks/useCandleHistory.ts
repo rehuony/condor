@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, errorStatus, type CandleData } from "@/lib/api";
+import { errorStatus } from "@/lib/api";
+import { marketApi, type CandleData } from "@/lib/api/market";
 import { candleChannelKey, candleStore } from "@/lib/candle-store";
 import {
   historyPage,
@@ -86,7 +87,7 @@ export function useCandleHistory({
       while (!signal.aborted) {
         try {
           publish({ status: "loading", error: null, retryAt: null });
-          const rows = await api.getCandles(
+          const rows = await marketApi.getCandles(
             server!, connector, pair, interval, 1000, range.from, range.to, poolAddress, signal,
           );
           if (signal.aborted) throw new DOMException("Aborted", "AbortError");

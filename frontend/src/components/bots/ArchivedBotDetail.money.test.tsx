@@ -22,13 +22,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
-import type { ArchivedBotPerformance, ArchivedExecutor } from "@/lib/api";
+import type { ArchivedExecutor } from "@/lib/api/executors";
+import type { ArchivedBotPerformance } from "@/lib/api/archived";
 
 const getArchivedBotPerformance = vi.fn();
 const getArchivedExecutors = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/archived", () => ({
+  archivedApi: {
     getArchivedBotPerformance: (...a: unknown[]) => getArchivedBotPerformance(...a),
     getArchivedExecutors: (...a: unknown[]) => getArchivedExecutors(...a),
     getArchivedControllers: () => Promise.resolve({ controllers: [] }),

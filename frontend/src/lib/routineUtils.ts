@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { RoutineInfo } from "@/lib/api";
+import type { RoutineInfo } from "@/lib/api/routines";
 import { ROUTINE_CONFIG_KEY_PREFIX } from "@/lib/sessionState";
 
 // ── Config persistence ──

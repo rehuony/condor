@@ -18,14 +18,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentBrain, SkillProposal } from "@/lib/api";
+import type { AgentBrain, SkillProposal } from "@/lib/api/agents";
 
 const getAgentBrain = vi.fn();
 const acceptAgentSkillProposal = vi.fn();
 const discardAgentSkillProposal = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgentBrain: (...args: unknown[]) => getAgentBrain(...args),
     acceptAgentSkillProposal: (...args: unknown[]) =>
       acceptAgentSkillProposal(...args),

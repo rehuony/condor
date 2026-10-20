@@ -15,9 +15,8 @@ Structure:
 import logging
 from typing import Any, Awaitable, Callable
 
-from telegram import Update
-from telegram.ext import CallbackQueryHandler, ContextTypes
-
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import Context, Update
 from handlers import clear_all_input_states
 from utils.auth import hummingbot_api_required, restricted
 
@@ -181,7 +180,7 @@ logger = logging.getLogger(__name__)
 
 @restricted
 @hummingbot_api_required
-async def bots_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def bots_command(update: Update, context: Context) -> None:
     """
     Handle /bots command - Display bots dashboard
 
@@ -200,7 +199,7 @@ async def bots_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error("No message object available for bots_command")
         return
 
-    await msg.reply_chat_action("typing")
+    await msg.bot.send_chat_action(chat_id=msg.chat.id, action="typing")
 
     # Check if specific bot name was provided
     if update.message and context.args and len(context.args) > 0:
@@ -215,13 +214,13 @@ async def bots_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             client, _ = await get_bots_client(chat_id, context.user_data)
             bot_status = await client.bot_orchestration.get_bot_status(bot_name)
             response_message = format_bot_status(bot_status)
-            await msg.reply_text(response_message, parse_mode="MarkdownV2")
+            await msg.answer(response_message, parse_mode="MarkdownV2")
         except Exception as e:
             logger.error(f"Error fetching bot status: {e}", exc_info=True)
             error_message = format_error_message(
                 f"Failed to fetch bot status: {str(e)}"
             )
-            await msg.reply_text(error_message, parse_mode="MarkdownV2")
+            await msg.answer(error_message, parse_mode="MarkdownV2")
         return
 
     # Show the interactive menu
@@ -230,14 +229,14 @@ async def bots_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 @restricted
 @hummingbot_api_required
-async def new_bot_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def new_bot_command(update: Update, context: Context) -> None:
     """Handle /new_bot command - Show controller configs menu for creating new bots"""
     clear_all_input_states(context)
     msg = update.message or (
         update.callback_query.message if update.callback_query else None
     )
     if msg:
-        await msg.reply_chat_action("typing")
+        await msg.bot.send_chat_action(chat_id=msg.chat.id, action="typing")
     await show_controller_configs_menu(update, context)
 
 
@@ -245,7 +244,7 @@ async def new_bot_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # CALLBACK ACTION DISPATCH TABLES
 # ============================================
 
-HandlerFunc = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
+HandlerFunc = Callable[[Update, Context], Awaitable[None]]
 ParamHandlerFunc = Callable[..., Awaitable[None]]
 
 # A parameter parser reads one value out of a callback. It receives the tail of
@@ -450,7 +449,7 @@ PARAMETERIZED_ACTIONS: dict[str, tuple[ParamHandlerFunc, tuple[ParamParser, ...]
 
 
 async def _handle_parameterized_action(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, action_parts: list[str]
+    update: Update, context: Context, action_parts: list[str]
 ) -> bool:
     """
     Dispatch an action that carries parameters.
@@ -486,9 +485,7 @@ async def _handle_parameterized_action(
 
 
 @restricted
-async def bots_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def bots_callback_handler(update: Update, context: Context) -> None:
     """Handle inline button callbacks - Routes to appropriate handler"""
     query = update.callback_query
     await query.answer()
@@ -513,11 +510,11 @@ async def bots_callback_handler(
             return
 
         logger.warning(f"Unknown bots action: {action}")
-        await query.message.reply_text(f"Unknown action: {action}")
+        await query.message.answer(f"Unknown action: {action}")
 
     except Exception as e:
         # Ignore "message is not modified" errors
-        if "not modified" in str(e).lower():
+        if is_not_modified(e):
             logger.debug(f"Message not modified (ignored): {e}")
             return
 
@@ -526,7 +523,7 @@ async def bots_callback_handler(
 
         error_message = format_error_message(f"Operation failed: {str(e)}")
         try:
-            await query.message.reply_text(error_message, parse_mode="MarkdownV2")
+            await query.message.answer(error_message, parse_mode="MarkdownV2")
         except Exception as reply_error:
             logger.warning(f"Failed to send error message: {reply_error}")
 
@@ -576,9 +573,7 @@ def get_text_input_handler(state: str | None):
 
 
 @restricted
-async def bots_message_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> bool:
+async def bots_message_handler(update: Update, context: Context) -> bool:
     """Consume a controller form value, or let ordinary chat continue."""
     state = context.user_data.get("bots_state")
     handler = get_text_input_handler(state)
@@ -594,23 +589,12 @@ async def bots_message_handler(
         from utils.telegram_formatters import format_error_message
 
         error_message = format_error_message(f"Failed to process input: {str(e)}")
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(error_message, parse_mode="MarkdownV2")
     return True
-
-
-# ============================================
-# HANDLER FACTORIES
-# ============================================
-
-
-def get_bots_callback_handler():
-    """Get the callback query handler for bots menu"""
-    return CallbackQueryHandler(bots_callback_handler, pattern="^bots:")
 
 
 __all__ = [
     "bots_command",
     "bots_callback_handler",
     "bots_message_handler",
-    "get_bots_callback_handler",
 ]

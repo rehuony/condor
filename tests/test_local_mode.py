@@ -473,30 +473,29 @@ def test_auth_mode_reports_the_mode_without_a_session(client, monkeypatch):
 # ── Boot without Telegram ──
 
 
-def test_job_queue_runs_on_an_uninitialized_application():
-    """Local mode's whole boot rests on this PTB behaviour, so pin it.
+def test_scheduler_runs_without_the_application():
+    """Local mode's whole boot rests on this, so pin it.
 
-    Scheduled routines, update checks and signals are all ``job_queue`` jobs.
-    Local mode never calls ``initialize()``/``start()`` (nothing polls), it just
-    starts the queue — a PTB release that breaks that must fail here rather than
-    in someone's install.
+    Scheduled routines, update checks and signals are all scheduler jobs. Local
+    mode never calls ``initialize()``/``start()`` on the Application (nothing
+    polls); ``startup()`` just starts the scheduler.
     """
-    from telegram.ext import Application
+    from condor.scheduler import Scheduler
 
     async def scenario():
-        application = Application.builder().token("0:local").build()
+        scheduler = Scheduler()
         fired = asyncio.Event()
 
-        async def _job(_context):
+        async def _job(_job):
             fired.set()
 
-        # Scheduled *before* the queue starts, exactly as ``startup()`` does.
-        application.job_queue.run_once(_job, 0)
-        await application.job_queue.start()
+        # Scheduled *before* the scheduler starts, exactly as ``startup()`` does.
+        scheduler.once(_job, 0, name="probe")
+        scheduler.start()
         try:
             await asyncio.wait_for(fired.wait(), timeout=5)
         finally:
-            await application.job_queue.stop()
+            scheduler.shutdown()
 
     asyncio.run(scenario())
 

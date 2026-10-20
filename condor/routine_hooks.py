@@ -51,6 +51,7 @@ from typing import Any
 
 from condor import paths
 from condor.fsutil import atomic_write_json
+from condor.telegram.transport import as_input_file
 
 logger = logging.getLogger(__name__)
 
@@ -359,7 +360,7 @@ async def dispatch(
             buf.name = slug
             await bot.send_document(
                 chat_id=int(chat_id),
-                document=buf,
+                document=as_input_file(buf),
             )
         except Exception as e:  # noqa: BLE001
             logger.error(

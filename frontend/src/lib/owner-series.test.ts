@@ -15,7 +15,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ControllerInfo, ControllerPerformanceSnapshot } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ControllerPerformanceSnapshot } from "@/lib/api/performance";
 import {
   FOCUS_RADIUS_PX,
   alignedZeroDomains,

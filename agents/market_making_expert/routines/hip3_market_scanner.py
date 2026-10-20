@@ -6,9 +6,9 @@ import math
 
 import aiohttp
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from config_manager import get_client
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,9 @@ async def _fetch_book_depth(session, coin, ctx_mid, within_bps):
         return 0.0, 0.0
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     # Client is optional — only used for report persistence, not for the scan itself.
-    client = await get_client(context._chat_id, context=context)
+    client = await get_client(context.chat_id, user_data=context.user_data)
 
     issuer = config.issuer.lower()
     issuer_upper = issuer.upper()

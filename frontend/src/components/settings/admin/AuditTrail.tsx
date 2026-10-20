@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 
+import { Disclosure } from "@/components/ui/Disclosure";
+import { Spinner } from "@/components/ui/Spinner";
 import { ADMIN_AUDIT_KEY, type AuditEntry, adminApi } from "@/lib/admin-api";
 import { formatRelativeTime } from "@/lib/formatters";
 
@@ -52,58 +53,50 @@ export function AuditTrail() {
   });
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left"
-      >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
-        )}
-        <span className="text-sm font-semibold text-[var(--color-text)]">
-          Audit log
-        </span>
-        <span className="text-xs text-[var(--color-text-muted)]">
-          who granted what to whom
-        </span>
-      </button>
-
-      {open && (
-        <div className="border-t border-[var(--color-border)] px-4 py-3">
-          {isLoading ? (
-            <div className="flex justify-center py-4 text-[var(--color-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" />
-            </div>
-          ) : entries.length === 0 ? (
-            <p className="py-2 text-xs text-[var(--color-text-muted)]">
-              Nothing recorded yet.
-            </p>
-          ) : (
-            <ul className="space-y-1.5">
-              {entries.map((entry, i) => (
-                <li
-                  key={`${entry.timestamp}-${i}`}
-                  className="flex flex-wrap items-baseline gap-x-1.5 text-xs"
-                >
-                  <span className="font-medium text-[var(--color-text)]">
-                    {entry.actor_name || `User ${entry.actor_id ?? "?"}`}
-                  </span>
-                  <span className="text-[var(--color-text-muted)]">
-                    {describe(entry)}
-                  </span>
-                  <span className="ml-auto shrink-0 text-[var(--color-text-muted)]">
-                    {formatRelativeTime(entry.timestamp || null, "—")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+    <Disclosure
+      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+      open={open}
+      onOpenChange={setOpen}
+      summary={
+        <>
+          <span className="text-sm font-semibold text-[var(--color-text)]">
+            Audit log
+          </span>
+          <span className="text-xs text-[var(--color-text-muted)]">
+            who granted what to whom
+          </span>
+        </>
+      }
+      bodyClassName="border-t border-[var(--color-border)] px-4 py-3"
+    >
+      {isLoading ? (
+        <div className="flex justify-center py-4 text-[var(--color-text-muted)]">
+          <Spinner />
         </div>
+      ) : entries.length === 0 ? (
+        <p className="py-2 text-xs text-[var(--color-text-muted)]">
+          Nothing recorded yet.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {entries.map((entry, i) => (
+            <li
+              key={`${entry.timestamp}-${i}`}
+              className="flex flex-wrap items-baseline gap-x-1.5 text-xs"
+            >
+              <span className="font-medium text-[var(--color-text)]">
+                {entry.actor_name || `User ${entry.actor_id ?? "?"}`}
+              </span>
+              <span className="text-[var(--color-text-muted)]">
+                {describe(entry)}
+              </span>
+              <span className="ml-auto shrink-0 text-[var(--color-text-muted)]">
+                {formatRelativeTime(entry.timestamp || null, "—")}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
-    </div>
+    </Disclosure>
   );
 }

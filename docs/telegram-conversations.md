@@ -9,6 +9,7 @@ dashboard. A model must support image input to inspect pictures.
 | Input | Behavior |
 | --- | --- |
 | Text | Sent as the user's question, with its original whitespace. |
+| Rich formatted message | Converts paragraphs, lists, tables, quotes, and code into text, including in replies and active forms. Rich messages containing media blocks are refused as a whole. |
 | Photo, with or without a caption | Downloads one suitable photo variant and sends the actual image pixels alongside the caption. |
 | Image file or static sticker | Validates PNG, JPEG, GIF, or WebP content before sending it to the model. |
 | Photo album | Collects the album into one ordered turn with its captions and images. |
@@ -64,8 +65,9 @@ sending them.
   answer. Already accepted queued turns retain the existing runtime semantics.
   Native image/audio work that has already started finishes under its resource
   limit; cancellation does not release its worker capacity early.
-- A plain `-` resets the conversation even when that text replies to another
-  message. Captions and transcriptions cannot accidentally invoke this control.
+- A plain `-`, including in a rich formatted paragraph, resets the conversation
+  even when that text replies to another message. Captions and transcriptions
+  cannot accidentally invoke this control.
 - Actual trading/configuration forms retain priority and require text. Attachments
   or replies containing attachments receive a `/cancel` hint without changing
   the form. The explicit bot configuration upload flow still accepts its file.
@@ -78,35 +80,35 @@ sending them.
 
 ## Agent replies
 
-Replies show silent progress and typing during execution, then deliver the final
-answer as new messages. The optional `edit` mode also shows a throttled preview.
-Raw reasoning and tool logs are hidden. Voice transcripts remain in the final
-answer, including partial or failed responses.
+Replies stream as a native rich-message draft (composer stop in the bottom
+right) and finish as a new rich message. Raw reasoning and tool logs are
+hidden. Voice transcripts remain in the final answer, including partial or
+failed responses.
 
-Stop controls end generation and preserve the conversation; they do not undo
-completed actions or stop trading. Preview failures do not rerun work. Unknown
+`/stop` and the native composer stop end generation and preserve the
+conversation; they do not undo completed actions or stop trading. Unknown
 final delivery is not blindly retried; the saved conversation remains available
 in the dashboard.
 
-See [Telegram agent reply delivery](telegram-reply-delivery.md) for settings,
-request ownership, notification behavior, delivery guarantees and verification.
+See [Telegram agent reply delivery](telegram-reply-delivery.md) for request
+ownership, notification behavior, delivery guarantees and verification.
 
 ## Implementation and lifecycle
 
-`handlers/messages.py` owns dispatch and form priority. `condor/telegram_input.py`
-normalizes messages and resolves bounded media. `condor/telegram_ingress.py` owns
+`handlers/messages.py` owns dispatch and form priority. `condor/telegram/input.py`
+normalizes messages and resolves bounded media. `condor/telegram/ingress.py` owns
 album collection, admission, and preparation cancellation. The agent handler
 creates the existing `PromptRequest` and consumes runtime events for delivery.
 `condor.runtime` remains responsible for durable acceptance, conversation ordering,
 model capability checks, and history.
 
 Tasks, locks, binary payloads, and HTTP clients stay outside Telegram persistence
-and outside reloadable handler modules. Shutdown closes admission before PTB
-drains queued updates, cancels handler work, and drains actual decoder/transcriber
+and outside reloadable handler modules. Shutdown closes admission before the
+aiogram dispatcher drains queued updates, cancels handler work, and drains actual decoder/transcriber
 workers. Closed services cannot be lazily reopened by a late update.
 
 Restart Condor when changing handler registration or startup/shutdown lifecycle.
 
 The transport contracts follow the [Telegram Bot API Message model](https://core.telegram.org/bots/api#message),
 [getFile download API](https://core.telegram.org/bots/api#getfile), and
-[python-telegram-bot application lifecycle](https://docs.python-telegram-bot.org/en/stable/telegram.ext.application.html#telegram.ext.Application.stop).
+[aiogram dispatcher polling lifecycle](https://docs.aiogram.dev/en/latest/dispatcher/dispatcher.html).

@@ -1,19 +1,4 @@
-/**
- * The browser half of Web Push (FEAT-083).
- *
- * Registering the service worker, asking for permission, and turning the
- * browser's `PushSubscription` into the four fields `condor/push.py` stores.
- * Kept out of the Settings component so the component stays a component — the
- * only exports there are the pane itself.
- *
- * Everything here is guarded, because none of it exists on an insecure origin.
- * Condor is commonly reached over a tailnet at `http://host:8088`, where
- * `navigator.serviceWorker` is not merely restricted, it is *absent*: the
- * feature is not degraded there, it is missing, and `pushSupport()` is what
- * lets Settings say so instead of rendering a switch that cannot work.
- */
-
-import { api } from "@/lib/api";
+import { notificationsApi } from "@/lib/api/notifications";
 
 /** Why push is (not) available here. The Settings pane renders one per case. */
 export type PushSupport =
@@ -127,7 +112,7 @@ export async function subscribe(): Promise<void> {
   const permission = await Notification.requestPermission();
   if (permission !== "granted") throw new PermissionDeniedError();
 
-  const { public_key } = await api.getVapidKey();
+  const { public_key } = await notificationsApi.getVapidKey();
   const reg = await registration();
   await navigator.serviceWorker.ready;
 
@@ -138,7 +123,7 @@ export async function subscribe(): Promise<void> {
     applicationServerKey: decodeVapidKey(public_key),
   });
 
-  await api.pushSubscribe({
+  await notificationsApi.pushSubscribe({
     endpoint: subscription.endpoint,
     p256dh: encodeKey(subscription, "p256dh"),
     auth: encodeKey(subscription, "auth"),
@@ -156,7 +141,7 @@ export async function subscribe(): Promise<void> {
 export async function unsubscribe(): Promise<void> {
   const subscription = await currentSubscription();
   if (!subscription) return;
-  await api.pushUnsubscribe(subscription.endpoint);
+  await notificationsApi.pushUnsubscribe(subscription.endpoint);
   await subscription.unsubscribe();
 }
 

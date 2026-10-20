@@ -30,8 +30,10 @@ declare global {
 const SERVER = "prod";
 
 const addCredential = vi.fn<(server: string, data: unknown) => Promise<{ added: boolean }>>();
-vi.mock("@/lib/api", () => ({
-  api: { addCredential: (server: string, data: unknown) => addCredential(server, data) },
+vi.mock("@/lib/api/settings", () => ({
+  settingsApi: {
+    addCredential: (server: string, data: unknown) => addCredential(server, data),
+  },
 }));
 
 const discoverWallets = vi.fn();

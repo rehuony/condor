@@ -1,11 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
-  ChevronDown,
-  ChevronRight,
   Download,
   Globe,
-  Loader2,
   Play,
   RefreshCw,
   Square,
@@ -13,9 +10,14 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { venuesQueryKey } from "@/components/market/useVenues";
+import { Card } from "@/components/ui/Card";
+import { Disclosure } from "@/components/ui/Disclosure";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { INPUT_CLASS, Label } from "@/components/ui/Field";
+import { Spinner } from "@/components/ui/Spinner";
 import { useServer } from "@/hooks/useServer";
 import { OWNER_ONLY_HINT, useServerPermission } from "@/hooks/useServerPermission";
-import { api } from "@/lib/api";
+import { settingsApi } from "@/lib/api/settings";
 
 const IMAGE_OPTIONS = [
   { label: "Development", value: "hummingbot/gateway:development" },
@@ -62,12 +64,12 @@ function NetworkConfigEditor({ server, networkId }: { server: string; networkId:
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["gateway-network-config", server, networkId],
-    queryFn: () => api.getGatewayNetworkConfig(server, networkId),
+    queryFn: () => settingsApi.getGatewayNetworkConfig(server, networkId),
   });
 
   const saveMut = useMutation({
     mutationFn: (config: Record<string, unknown>) =>
-      api.updateGatewayNetworkConfig(server, networkId, config),
+      settingsApi.updateGatewayNetworkConfig(server, networkId, config),
     onSuccess: () => {
       setDraft({});
       qc.invalidateQueries({ queryKey: ["gateway-network-config", server, networkId] });
@@ -77,7 +79,7 @@ function NetworkConfigEditor({ server, networkId }: { server: string; networkId:
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 p-3 text-xs text-[var(--color-text-muted)]">
-        <Loader2 className="h-3 w-3 animate-spin" /> Loading config...
+        <Spinner size="xs" /> Loading config...
       </div>
     );
   }
@@ -181,9 +183,9 @@ function NetworkConfigEditor({ server, networkId }: { server: string; networkId:
           onClick={save}
           disabled={changed.length === 0 || saveMut.isPending || !isOwner}
           title={isOwner ? undefined : OWNER_ONLY_HINT}
-          className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {saveMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+          {saveMut.isPending ? <Spinner size="xs" /> : <Check className="h-3 w-3" />}
           Save {changed.length > 0 ? `(${changed.length})` : ""}
         </button>
         {changed.length > 0 && (
@@ -213,7 +215,7 @@ function GatewayNetworks({ server, running }: { server: string; running: boolean
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["gateway-networks", server],
-    queryFn: () => api.getGatewayNetworks(server),
+    queryFn: () => settingsApi.getGatewayNetworks(server),
     enabled: open && running,
   });
 
@@ -221,70 +223,61 @@ function GatewayNetworks({ server, running }: { server: string; running: boolean
   const chains = [...new Set(networks.map((n) => n.chain))].sort();
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between p-3 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
-      >
+    <Disclosure
+      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+      buttonClassName="justify-between p-3 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
+      chevron="end"
+      chevronClassName="h-4 w-4"
+      open={open}
+      onOpenChange={setOpen}
+      summary={
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4" />
           <span className="font-medium">Networks & RPC</span>
         </div>
-        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-      </button>
-      {open && (
-        <div className="border-t border-[var(--color-border)] p-3 space-y-3">
-          {!running ? (
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Start the Gateway to view and edit network configuration.
-            </p>
-          ) : isLoading ? (
-            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-              <Loader2 className="h-3 w-3 animate-spin" /> Loading networks...
-            </div>
-          ) : error ? (
-            <p className="text-xs text-[var(--color-red)]">{(error as Error).message}</p>
-          ) : (
-            chains.map((chain) => (
-              <div key={chain}>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                  {chain}
-                </p>
-                <div className="space-y-1">
-                  {networks
-                    .filter((n) => n.chain === chain)
-                    .map((n) => (
-                      <div
-                        key={n.network_id}
-                        className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]"
-                      >
-                        <button
-                          onClick={() =>
-                            setExpanded(expanded === n.network_id ? null : n.network_id)
-                          }
-                          className="flex w-full items-center justify-between px-3 py-2 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
-                        >
-                          <span className="font-mono">{n.network}</span>
-                          {expanded === n.network_id ? (
-                            <ChevronDown className="h-3 w-3" />
-                          ) : (
-                            <ChevronRight className="h-3 w-3" />
-                          )}
-                        </button>
-                        {expanded === n.network_id && (
-                          <div className="border-t border-[var(--color-border)]">
-                            <NetworkConfigEditor server={server} networkId={n.network_id} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ))
-          )}
+      }
+      bodyClassName="border-t border-[var(--color-border)] p-3 space-y-3"
+    >
+      {!running ? (
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Start the Gateway to view and edit network configuration.
+        </p>
+      ) : isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+          <Spinner size="xs" /> Loading networks...
         </div>
+      ) : error ? (
+        <p className="text-xs text-[var(--color-red)]">{(error as Error).message}</p>
+      ) : (
+        chains.map((chain) => (
+          <div key={chain}>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              {chain}
+            </p>
+            <div className="space-y-1">
+              {networks
+                .filter((n) => n.chain === chain)
+                .map((n) => (
+                  <Disclosure
+                    className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]"
+                    buttonClassName="justify-between px-3 py-2 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
+                    chevron="end"
+                    chevronClassName="h-3 w-3"
+                    open={expanded === n.network_id}
+                    onOpenChange={(o) => setExpanded(o ? n.network_id : null)}
+                    summary={
+                      <span className="font-mono">{n.network}</span>
+                    }
+                    bodyClassName="border-t border-[var(--color-border)]"
+                  >
+                    <NetworkConfigEditor server={server} networkId={n.network_id} />
+                  </Disclosure>
+                ))}
+            </div>
+          </div>
+        ))
       )}
-    </div>
+    </Disclosure>
   );
 }
 
@@ -309,7 +302,7 @@ export function GatewaySettings() {
   // Poll pull status while pulling
   const { data: pullStatus } = useQuery({
     queryKey: ["gateway-pull-status", server],
-    queryFn: () => api.getGatewayPullStatus(server!),
+    queryFn: () => settingsApi.getGatewayPullStatus(server!),
     enabled: !!server && isPulling,
     refetchInterval: 1500,
   });
@@ -334,7 +327,7 @@ export function GatewaySettings() {
 
   const { data: status, isLoading } = useQuery({
     queryKey: ["gateway-status", server],
-    queryFn: () => api.getGatewayStatus(server!),
+    queryFn: () => settingsApi.getGatewayStatus(server!),
     enabled: !!server,
     refetchInterval: 10000,
   });
@@ -355,7 +348,7 @@ export function GatewaySettings() {
 
   const { data: logsData, isFetching: fetchingLogs } = useQuery({
     queryKey: ["gateway-logs", server],
-    queryFn: () => api.getGatewayLogs(server!),
+    queryFn: () => settingsApi.getGatewayLogs(server!),
     enabled: !!server && showLogs,
   });
 
@@ -363,7 +356,7 @@ export function GatewaySettings() {
 
   const startMut = useMutation({
     mutationFn: () =>
-      api.startGateway(server!, {
+      settingsApi.startGateway(server!, {
         image: image === "custom" ? customImage : image,
         port,
       }),
@@ -371,18 +364,18 @@ export function GatewaySettings() {
   });
 
   const stopMut = useMutation({
-    mutationFn: () => api.stopGateway(server!),
+    mutationFn: () => settingsApi.stopGateway(server!),
     onSuccess: () => { invalidate(); setConfirmStop(false); },
   });
 
   const restartMut = useMutation({
-    mutationFn: () => api.restartGateway(server!),
+    mutationFn: () => settingsApi.restartGateway(server!),
     onSuccess: invalidate,
   });
 
   const pullMut = useMutation({
     mutationFn: () =>
-      api.pullGatewayImage(server!, { image: resolvedPullImage }),
+      settingsApi.pullGatewayImage(server!, { image: resolvedPullImage }),
     onSuccess: () => {
       setIsPulling(true);
     },
@@ -390,9 +383,9 @@ export function GatewaySettings() {
 
   if (!server) {
     return (
-      <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+      <EmptyState>
         Select a server first.
-      </p>
+      </EmptyState>
     );
   }
 
@@ -402,7 +395,7 @@ export function GatewaySettings() {
   return (
     <div className="space-y-4">
       {/* Status */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <Card>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span
@@ -433,7 +426,7 @@ export function GatewaySettings() {
                   title={isOwner ? undefined : OWNER_ONLY_HINT}
                   className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {restartMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  {restartMut.isPending ? <Spinner size="xs" /> : <RefreshCw className="h-3 w-3" />}
                   Restart
                 </button>
                 {confirmStop ? (
@@ -467,7 +460,7 @@ export function GatewaySettings() {
             ) : (
               <button
                 onClick={() => setShowDeploy(!showDeploy)}
-                className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80"
+                className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80"
               >
                 <Play className="h-3 w-3" /> Deploy
               </button>
@@ -504,124 +497,124 @@ export function GatewaySettings() {
         {restartMut.error && (
           <p className="mt-3 text-xs text-[var(--color-red)]">{restartMut.error.message}</p>
         )}
-      </div>
+      </Card>
 
       {/* Pull Image */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <button
-          onClick={() => setShowPull(!showPull)}
-          className="flex w-full items-center justify-between p-3 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
-        >
+      <Disclosure
+        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+        buttonClassName="justify-between p-3 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
+        chevron="end"
+        chevronClassName="h-4 w-4"
+        open={showPull}
+        onOpenChange={setShowPull}
+        summary={
           <div className="flex items-center gap-2">
             <Download className="h-4 w-4" />
             <span className="font-medium">Pull Image</span>
             {pulling && (
               <span className="flex items-center gap-1 text-xs text-[var(--color-primary)]">
-                <Loader2 className="h-3 w-3 animate-spin" /> pulling...
+                <Spinner size="xs" /> pulling...
               </span>
             )}
           </div>
-          {showPull ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </button>
-        {showPull && (
-          <div className="border-t border-[var(--color-border)] p-4 space-y-3">
-            <div className="flex flex-wrap items-end gap-2">
-              {IMAGE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setPullImage(opt.value)}
-                  disabled={pulling}
-                  className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                    pullImage === opt.value
-                      ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
-                      : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-border-hover)]"
-                  } disabled:opacity-50`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-              <button
-                onClick={() => setPullImage("custom")}
-                disabled={pulling}
-                className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                  pullImage === "custom"
-                    ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
-                    : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-border-hover)]"
-                } disabled:opacity-50`}
-              >
-                Custom
-              </button>
-              {pullImage !== "custom" && (
-                <button
-                  onClick={() => pullMut.mutate()}
-                  disabled={pulling || !isOwner}
-                  title={isOwner ? undefined : OWNER_ONLY_HINT}
-                  className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {pulling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                  Pull
-                </button>
-              )}
-            </div>
-            {pullImage === "custom" && (
-              <div className="flex items-center gap-2">
-                <input
-                  value={pullCustomImage}
-                  onChange={(e) => setPullCustomImage(e.target.value)}
-                  disabled={pulling}
-                  className="flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none disabled:opacity-50"
-                  placeholder="org/image:tag"
-                />
-                <button
-                  onClick={() => pullMut.mutate()}
-                  disabled={pulling || !pullCustomImage || !isOwner}
-                  title={isOwner ? undefined : OWNER_ONLY_HINT}
-                  className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {pulling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                  Pull
-                </button>
-              </div>
-            )}
-
-            {/* Pull progress */}
-            {isPulling && activePull && (
-              <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5 text-[var(--color-primary)]">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Pulling {resolvedPullImage}
-                  </span>
-                  <span className="text-[var(--color-text-muted)]">
-                    {formatDuration(activePull.duration_seconds)}
-                  </span>
-                </div>
-                <p className="text-xs text-[var(--color-text-muted)] font-mono truncate">
-                  {activePull.progress}
-                </p>
-              </div>
-            )}
-            {isPulling && !activePull && (
-              <div className="flex items-center gap-1.5 text-xs text-[var(--color-primary)]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Starting pull...
-              </div>
-            )}
-
-            {pullDone && (
-              <p className="flex items-center gap-1 text-xs text-emerald-400">
-                <Check className="h-3 w-3" /> Image pulled successfully.
-              </p>
-            )}
-            {!isPulling && pullMut.error && (
-              <p className="text-xs text-[var(--color-red)]">{pullMut.error.message}</p>
-            )}
-            {!isPulling && activePull?.status === "failed" && (
-              <p className="text-xs text-[var(--color-red)]">Pull failed: {activePull.progress}</p>
-            )}
+        }
+        bodyClassName="border-t border-[var(--color-border)] p-4 space-y-3"
+      >
+        <div className="flex flex-wrap items-end gap-2">
+          {IMAGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setPullImage(opt.value)}
+              disabled={pulling}
+              className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                pullImage === opt.value
+                  ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-border-hover)]"
+              } disabled:opacity-50`}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <button
+            onClick={() => setPullImage("custom")}
+            disabled={pulling}
+            className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+              pullImage === "custom"
+                ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-border-hover)]"
+            } disabled:opacity-50`}
+          >
+            Custom
+          </button>
+          {pullImage !== "custom" && (
+            <button
+              onClick={() => pullMut.mutate()}
+              disabled={pulling || !isOwner}
+              title={isOwner ? undefined : OWNER_ONLY_HINT}
+              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pulling ? <Spinner size="xs" /> : <Download className="h-3 w-3" />}
+              Pull
+            </button>
+          )}
+        </div>
+        {pullImage === "custom" && (
+          <div className="flex items-center gap-2">
+            <input
+              value={pullCustomImage}
+              onChange={(e) => setPullCustomImage(e.target.value)}
+              disabled={pulling}
+              className="flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none disabled:opacity-50"
+              placeholder="org/image:tag"
+            />
+            <button
+              onClick={() => pullMut.mutate()}
+              disabled={pulling || !pullCustomImage || !isOwner}
+              title={isOwner ? undefined : OWNER_ONLY_HINT}
+              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pulling ? <Spinner size="xs" /> : <Download className="h-3 w-3" />}
+              Pull
+            </button>
           </div>
         )}
-      </div>
+
+        {/* Pull progress */}
+        {isPulling && activePull && (
+          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5 text-[var(--color-primary)]">
+                <Spinner size="xs" />
+                Pulling {resolvedPullImage}
+              </span>
+              <span className="text-[var(--color-text-muted)]">
+                {formatDuration(activePull.duration_seconds)}
+              </span>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] font-mono truncate">
+              {activePull.progress}
+            </p>
+          </div>
+        )}
+        {isPulling && !activePull && (
+          <div className="flex items-center gap-1.5 text-xs text-[var(--color-primary)]">
+            <Spinner size="xs" />
+            Starting pull...
+          </div>
+        )}
+
+        {pullDone && (
+          <p className="flex items-center gap-1 text-xs text-emerald-400">
+            <Check className="h-3 w-3" /> Image pulled successfully.
+          </p>
+        )}
+        {!isPulling && pullMut.error && (
+          <p className="text-xs text-[var(--color-red)]">{pullMut.error.message}</p>
+        )}
+        {!isPulling && activePull?.status === "failed" && (
+          <p className="text-xs text-[var(--color-red)]">Pull failed: {activePull.progress}</p>
+        )}
+      </Disclosure>
 
       {/* Deploy form */}
       {showDeploy && !running && (
@@ -629,7 +622,7 @@ export function GatewaySettings() {
           <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Deploy Gateway</h3>
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Image</label>
+              <Label>Image</Label>
               <div className="flex flex-wrap gap-2">
                 {IMAGE_OPTIONS.map((opt) => (
                   <button
@@ -666,12 +659,12 @@ export function GatewaySettings() {
             </div>
 
             <div className="w-32">
-              <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Port</label>
+              <Label>Port</Label>
               <input
                 type="number"
                 value={port}
                 onChange={(e) => setPort(parseInt(e.target.value) || 15888)}
-                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                className={INPUT_CLASS}
               />
             </div>
 
@@ -684,9 +677,9 @@ export function GatewaySettings() {
               onClick={() => startMut.mutate()}
               disabled={startMut.isPending || (image === "custom" && !customImage) || !isOwner}
               title={isOwner ? undefined : OWNER_ONLY_HINT}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {startMut.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+              {startMut.isPending && <Spinner size="xs" />}
               Start Gateway
             </button>
 
@@ -701,33 +694,33 @@ export function GatewaySettings() {
       <GatewayNetworks server={server} running={running} />
 
       {/* Logs */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <button
-          onClick={() => setShowLogs(!showLogs)}
-          className="flex w-full items-center justify-between p-3 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
-        >
+      <Disclosure
+        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+        buttonClassName="justify-between p-3 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
+        chevron="end"
+        chevronClassName="h-4 w-4"
+        open={showLogs}
+        onOpenChange={setShowLogs}
+        summary={
           <span className="font-medium">Logs</span>
-          {showLogs ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </button>
-        {showLogs && (
-          <div className="border-t border-[var(--color-border)] p-3">
-            {fetchingLogs ? (
-              <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                <Loader2 className="h-3 w-3 animate-spin" /> Loading logs...
-              </div>
-            ) : (
-              <pre className="max-h-64 overflow-auto rounded bg-[var(--color-bg)] p-3 text-xs text-[var(--color-text-muted)] font-mono leading-relaxed whitespace-pre-wrap break-all">
-                {typeof logsData?.logs === "string"
-                  ? (logsData.logs || "No logs available")
-                      .split("\n")
-                      .map((line) => line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*/, ""))
-                      .join("\n")
-                  : JSON.stringify(logsData?.logs, null, 2) || "No logs available"}
-              </pre>
-            )}
+        }
+        bodyClassName="border-t border-[var(--color-border)] p-3"
+      >
+        {fetchingLogs ? (
+          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            <Spinner size="xs" /> Loading logs...
           </div>
+        ) : (
+          <pre className="max-h-64 overflow-auto rounded bg-[var(--color-bg)] p-3 text-xs text-[var(--color-text-muted)] font-mono leading-relaxed whitespace-pre-wrap break-all">
+            {typeof logsData?.logs === "string"
+              ? (logsData.logs || "No logs available")
+                  .split("\n")
+                  .map((line) => line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*/, ""))
+                  .join("\n")
+              : JSON.stringify(logsData?.logs, null, 2) || "No logs available"}
+          </pre>
         )}
-      </div>
+      </Disclosure>
     </div>
   );
 }

@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Check, ChevronDown, Loader2, Plus, Send, X } from "lucide-react";
+import { Bell, Check, Plus, Send, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { Disclosure } from "@/components/ui/Disclosure";
+import { Spinner } from "@/components/ui/Spinner";
 import { SelectField } from "@/components/ui/select-field";
-import { type RoutineHooks, api } from "@/lib/api";
+import { routinesApi, type RoutineHooks } from "@/lib/api/routines";
 
 interface Props {
   routineName: string;
@@ -125,7 +127,7 @@ function HooksForm({ routineName }: { routineName: string }) {
 
   const { data: saved } = useQuery({
     queryKey: ["routine-hooks", routineName],
-    queryFn: () => api.getRoutineHooks(routineName),
+    queryFn: () => routinesApi.getRoutineHooks(routineName),
   });
 
   useEffect(() => {
@@ -133,7 +135,7 @@ function HooksForm({ routineName }: { routineName: string }) {
   }, [saved, routineName]);
 
   const saveMutation = useMutation({
-    mutationFn: () => api.saveRoutineHooks(routineName, hooks),
+    mutationFn: () => routinesApi.saveRoutineHooks(routineName, hooks),
     onSuccess: (data) => {
       setHooks(data);
       qc.invalidateQueries({ queryKey: ["routine-hooks", routineName] });
@@ -192,10 +194,10 @@ function HooksForm({ routineName }: { routineName: string }) {
             type="button"
             disabled={saveMutation.isPending}
             onClick={() => saveMutation.mutate()}
-            className="flex shrink-0 items-center gap-1.5 rounded bg-[var(--color-primary)] px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1.5 rounded bg-[var(--color-primary)] px-4 py-1.5 text-xs font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
           >
             {saveMutation.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner size="sm" />
             ) : saveMutation.isSuccess ? (
               <Check className="h-3.5 w-3.5" />
             ) : null}
@@ -220,25 +222,24 @@ export function RoutineHooksPanel({ routineName, collapsible = true }: Props) {
   }
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)]">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
-      >
-        <Bell className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
-        <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
-          Notifications
-        </span>
-        <ChevronDown
-          className={`ml-auto h-4 w-4 text-[var(--color-text-muted)] transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-      {open && (
-        <div className="border-t border-[var(--color-border)] px-3 py-3">
-          <HooksForm routineName={routineName} />
-        </div>
-      )}
-    </div>
+    <Disclosure
+      className="rounded-lg border border-[var(--color-border)]"
+      buttonClassName="gap-2 px-3 py-2"
+      chevron="end"
+      chevronClassName="ml-auto h-4 w-4 text-[var(--color-text-muted)]"
+      open={open}
+      onOpenChange={setOpen}
+      summary={
+        <>
+          <Bell className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
+          <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+            Notifications
+          </span>
+        </>
+      }
+      bodyClassName="border-t border-[var(--color-border)] px-3 py-3"
+    >
+      <HooksForm routineName={routineName} />
+    </Disclosure>
   );
 }

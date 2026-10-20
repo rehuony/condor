@@ -14,7 +14,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ControllerInfo, ControllerPerformanceSnapshot } from "./api";
+import type { ControllerInfo } from "./api/bots";
+import type { ControllerPerformanceSnapshot } from "./api/performance";
 import { controllerKey } from "./controller-identity";
 import type { ClosedOutcome } from "./pnl-chart";
 import {

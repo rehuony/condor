@@ -52,7 +52,7 @@ def test_only_agent_content_can_be_kept():
     # No local layer, so "keeping" it would be a quieter way of losing it.
     assert keep(components.CONDOR, "main.py") is False
     assert keep(components.CONDOR, "agents/_shared/skills/x/SKILL.md") is False
-    assert keep(components.HUMMINGBOT_API, "agents/scout/AGENT.md") is False
+    assert keep("another-component", "agents/scout/AGENT.md") is False
 
 
 def test_keep_mine_is_offered_only_when_every_path_can_take_it():
@@ -266,12 +266,6 @@ async def test_work_left_in_a_stash_is_reported_by_the_next_preflight(
         components,
         "_table",
         lambda: {
-            components.HUMMINGBOT_API: components.Component(
-                components.HUMMINGBOT_API,
-                "Hummingbot API",
-                str(repo / "no-such-api"),
-                service="hummingbot-api",
-            ),
             components.CONDOR: components.Component(
                 components.CONDOR, "Condor", str(repo)
             ),
@@ -291,12 +285,6 @@ async def test_a_clean_checkout_gets_no_stash_warning(repo, monkeypatch):
         components,
         "_table",
         lambda: {
-            components.HUMMINGBOT_API: components.Component(
-                components.HUMMINGBOT_API,
-                "Hummingbot API",
-                str(repo / "no-such-api"),
-                service="hummingbot-api",
-            ),
             components.CONDOR: components.Component(
                 components.CONDOR, "Condor", str(repo)
             ),

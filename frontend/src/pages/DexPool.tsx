@@ -26,6 +26,7 @@ import { useVenues } from "@/components/market/useVenues";
 import { ChartRangeToolbar } from "@/components/trade/ChartRangeToolbar";
 import { TradeBottomPane } from "@/components/trade/TradeBottomPane";
 import { TradeChart, type ChartPriceAxis } from "@/components/trade/TradeChart";
+import { IconButton } from "@/components/ui/IconButton";
 import { useDexUpstream } from "@/hooks/useDexUpstream";
 import { useMainControllerData } from "@/hooks/useMainControllerData";
 import { usePairBalances } from "@/hooks/usePairBalances";
@@ -36,7 +37,8 @@ import {
   useServerPermission,
 } from "@/hooks/useServerPermission";
 import { useCondorWebSocket } from "@/hooks/useWebSocket";
-import { api, type DexTokenConflict } from "@/lib/api";
+import { executorsApi } from "@/lib/api/executors";
+import { dexApi, type DexTokenConflict } from "@/lib/api/dex";
 import { connectorCapabilities } from "@/lib/connector-capabilities";
 import { LOOKBACK_OPTIONS } from "@/lib/gridExecutor";
 import { executorsQuery } from "@/lib/queryClient";
@@ -126,7 +128,7 @@ export function DexPool() {
     error: poolError,
   } = useQuery({
     queryKey: ["dex-pool-by-address", server, network, address],
-    queryFn: () => api.getDexPoolByAddress(server!, address, network),
+    queryFn: () => dexApi.getDexPoolByAddress(server!, address, network),
     enabled: !!server && !!network && !!address,
     staleTime: 60 * 1000,
   });
@@ -139,8 +141,7 @@ export function DexPool() {
   const { data: tokenVerdicts } = useQuery({
     queryKey: ["dex-ensure-tokens", server, network, pool?.address],
     queryFn: () =>
-      api
-        .ensureDexTokens(server!, network, [
+      dexApi.ensureDexTokens(server!, network, [
           pool!.base_token_address,
           pool!.quote_token_address,
         ])
@@ -188,7 +189,7 @@ export function DexPool() {
 
   const addTokenMutation = useMutation({
     mutationFn: (vars: { address: string; symbol?: string; replace?: boolean }) =>
-      api.addDexToken(server!, network, vars.address, vars.symbol, vars.replace),
+      dexApi.addDexToken(server!, network, vars.address, vars.symbol, vars.replace),
     onSuccess: (data, vars) => {
       if (data.verdict === "added" || data.verdict === "listed") {
         setTokenConflict(null);
@@ -218,7 +219,7 @@ export function DexPool() {
   // `has_bins` is decided by the same predicate the route gates on.
   const { data: depth } = useQuery({
     queryKey: ["dex-pool-bins", server, network, address, pool?.dex_id],
-    queryFn: () => api.getPoolBins(server!, address, network, pool?.dex_id ?? ""),
+    queryFn: () => dexApi.getPoolBins(server!, address, network, pool?.dex_id ?? ""),
     enabled: !!server && !!address && !!pool?.has_bins,
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
@@ -325,7 +326,7 @@ export function DexPool() {
           ? // No isSpot: an LP position has no leverage, and connector is the network.
             lpConfig.buildPayload(network, pair)
           : orderConfig.buildPayload(network, pair, true);
-      return api.createExecutor(server, payload);
+      return executorsApi.createExecutor(server, payload);
     },
     onSuccess: (data) => {
       active.save();
@@ -472,13 +473,13 @@ export function DexPool() {
 
       {/* Top bar */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--color-border)] px-3 py-2">
-        <button
+        <IconButton
+          label="Back to pools"
+          size="sm"
           onClick={() => navigate("/dex")}
-          className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          title="Back to pools"
         >
           <ArrowLeft className="h-4 w-4" />
-        </button>
+        </IconButton>
         <div className="flex flex-col">
           <span className="text-sm font-semibold">{pairLabel}</span>
           {/* The address identifies the pool the way the ticker never can, so it
@@ -705,7 +706,7 @@ export function DexPool() {
             <button
               onClick={() => createMutation.mutate()}
               disabled={!active.validation.valid || createMutation.isPending || !pair}
-              className="w-full rounded-lg bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-lg bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-[var(--on-primary)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {createMutation.isPending
                 ? "Creating…"

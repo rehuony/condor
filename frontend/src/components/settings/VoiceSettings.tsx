@@ -1,16 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2, Mic, Volume2 } from "lucide-react";
+import { Check, Mic, Volume2 } from "lucide-react";
 import { useState, useEffect } from "react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import { SelectField } from "@/components/ui/select-field";
-import { api } from "@/lib/api";
-import type { VoicePrefs } from "@/lib/api";
+import { settingsApi, type VoicePrefs } from "@/lib/api/settings";
 
 export function VoiceSettings() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["voice-settings"],
-    queryFn: () => api.getVoiceSettings(),
+    queryFn: () => settingsApi.getVoiceSettings(),
   });
 
   const [form, setForm] = useState<VoicePrefs>({
@@ -27,7 +27,7 @@ export function VoiceSettings() {
   }, [data]);
 
   const mutation = useMutation({
-    mutationFn: (prefs: Partial<VoicePrefs>) => api.updateVoiceSettings(prefs),
+    mutationFn: (prefs: Partial<VoicePrefs>) => settingsApi.updateVoiceSettings(prefs),
     onSuccess: (res) => {
       qc.setQueryData(["voice-settings"], (old: typeof data) =>
         old ? { ...old, voice: res.voice } : old,
@@ -44,7 +44,7 @@ export function VoiceSettings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -136,10 +136,10 @@ export function VoiceSettings() {
       <button
         onClick={handleSave}
         disabled={mutation.isPending}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--on-primary)] transition-opacity hover:opacity-90 disabled:opacity-50"
       >
         {mutation.isPending ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner />
         ) : saved ? (
           <>
             <Check className="h-4 w-4" />

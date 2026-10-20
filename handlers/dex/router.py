@@ -6,11 +6,15 @@ Dispatches to appropriate handlers based on action patterns.
 """
 
 import logging
+from functools import partial
 from typing import Awaitable, Callable
 
-from telegram import Update
-from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
-
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    Update,
+)
+from handlers._routing import PrefixRoute, dispatch_action, none_if_all, noop
 from utils.auth import restricted
 from utils.telegram_formatters import format_error_message
 
@@ -153,7 +157,6 @@ from .swap import (
 logger = logging.getLogger(__name__)
 
 # Type alias for handler functions
-HandlerFunc = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
 
 
 # ============================================
@@ -226,18 +229,54 @@ def _is_slow_action(action: str) -> bool:
     return action in SLOW_ACTIONS or action.startswith(SLOW_PREFIXES)
 
 
+async def _copy_pool_address(update: Update, context: Context, _rest: str) -> None:
+    query = update.callback_query
+    selected_pool = context.user_data.get("selected_pool", {})
+    pool_address = selected_pool.get(
+        "pool_address", selected_pool.get("address", "N/A")
+    )
+    await query.answer("Address sent below ⬇️")
+    await query.message.answer(f"`{pool_address}`", parse_mode="Markdown")
+
+
+async def _add_position_from_pool(update: Update, context: Context) -> None:
+    query = update.callback_query
+    await query.answer("Loading position form...")
+    selected_pool = context.user_data.get("selected_pool", {})
+    if selected_pool:
+        pool_address = selected_pool.get(
+            "pool_address", selected_pool.get("address", "")
+        )
+        context.user_data["add_position_params"] = {
+            "connector": selected_pool.get("connector", "meteora"),
+            "network": "solana-mainnet-beta",
+            "pool_address": pool_address,
+            "lower_price": "",
+            "upper_price": "",
+            "amount_base": "10%",
+            "amount_quote": "10%",
+            "strategy_type": "0",
+        }
+    await show_add_position_menu(update, context)
+
+
 # ============================================
 # CALLBACK ACTION DISPATCH TABLE
 # ============================================
 
 # Simple action -> handler mapping (no parameters)
-SIMPLE_ACTIONS: dict[str, HandlerFunc] = {
+SIMPLE_ACTIONS: dict[str, Callable[[Update, Context], Awaitable[None]]] = {
     # Menu
     "main_menu": handle_swap,
     "close": handle_close,
     "refresh": handle_refresh,
-    "noop": lambda u, c: None,  # No-op for page indicators
-    "lpm_noop": lambda u, c: None,
+    "noop": noop,  # No-op for page indicators
+    "lpm_noop": noop,
+    "swap_hist_page_prev": partial(handle_swap_hist_page, direction="prev"),
+    "swap_hist_page_next": partial(handle_swap_hist_page, direction="next"),
+    "lp_hist_page_prev": partial(handle_lp_hist_page, direction="prev"),
+    "lp_hist_page_next": partial(handle_lp_hist_page, direction="next"),
+    "add_position_from_pool": _add_position_from_pool,
     # Swap
     "swap": handle_swap,
     "swap_refresh": handle_swap_refresh,
@@ -326,7 +365,7 @@ SIMPLE_ACTIONS: dict[str, HandlerFunc] = {
 
 
 async def _handle_switch_to_cex(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, connector_name: str
+    update: Update, context: Context, connector_name: str
 ) -> None:
     """Switch from DEX to CEX trading"""
     from condor.preferences import (
@@ -354,286 +393,116 @@ async def _handle_switch_to_cex(
 # ============================================
 
 
-async def _handle_parameterized_action(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, action: str
-) -> bool:
+def _filter(
+    handler: Callable[..., Awaitable[None]], filter_type: str
+) -> Callable[..., Awaitable[None]]:
+    """Bind the history filter name; the button carries only the value."""
+
+    async def run(update: Update, context: Context, value: str) -> None:
+        await handler(update, context, filter_type, value)
+
+    return run
+
+
+def _with_default(default: str) -> Callable[[str], tuple[str, str]]:
+    """Parse ``{first}[:{second}]`` into a pair, filling in ``default``."""
+
+    def parse(rest: str) -> tuple[str, str]:
+        parts = rest.split(":")
+        return parts[0], parts[1] if len(parts) > 1 else default
+
+    return parse
+
+
+def _instance_and_int(rest: str) -> tuple[str, int] | None:
+    """Parse ``{instance_id}:{index}``; None when the index is missing."""
+    parts = rest.split(":")
+    if len(parts) < 2:
+        return None
+    return parts[0], int(parts[1])
+
+
+def _instance_and_str(rest: str) -> tuple[str, str] | None:
+    parts = rest.split(":")
+    if len(parts) < 2:
+        return None
+    return parts[0], parts[1]
+
+
+def _pair(
+    handler: Callable[..., Awaitable[None]], **kwargs
+) -> Callable[..., Awaitable[None]]:
+    """Adapt a two-parameter handler to the ``(update, context, parsed)`` shape.
+
+    A ``None`` parse result means the callback carried too few parts; it is
+    consumed silently, as the missing-parameter branches always were.
     """
-    Handle actions that require parameter extraction.
-    Returns True if action was handled, False otherwise.
-    """
-    query = update.callback_query
 
-    # Swap connector selection: swap_connector_{name}
-    if action.startswith("swap_connector_"):
-        connector_name = action.replace("swap_connector_", "")
-        await handle_swap_connector_select(update, context, connector_name)
-        return True
+    async def run(update: Update, context: Context, parsed) -> None:
+        if parsed is not None:
+            await handler(update, context, *parsed, **kwargs)
 
-    # Swap network selection: swap_network_{id}
-    if action.startswith("swap_network_"):
-        network_id = action.replace("swap_network_", "")
-        await handle_swap_network_select(update, context, network_id)
-        return True
+    return run
 
-    # Switch to CEX: switch_cex_{connector}
-    if action.startswith("switch_cex_"):
-        connector_name = action.replace("switch_cex_", "")
-        await _handle_switch_to_cex(update, context, connector_name)
-        return True
 
-    # Swap history filters
-    if action.startswith("swap_hist_set_pair_"):
-        value = action.replace("swap_hist_set_pair_", "")
-        await handle_swap_hist_set_filter(update, context, "pair", value)
-        return True
-    if action.startswith("swap_hist_set_connector_"):
-        value = action.replace("swap_hist_set_connector_", "")
-        await handle_swap_hist_set_filter(update, context, "connector", value)
-        return True
-    if action.startswith("swap_hist_set_status_"):
-        value = action.replace("swap_hist_set_status_", "")
-        await handle_swap_hist_set_filter(update, context, "status", value)
-        return True
+async def _pos_view_tf(
+    update: Update, context: Context, parsed: tuple[str, str]
+) -> None:
+    pos_index, timeframe = parsed
+    await handle_pos_view(update, context, pos_index, timeframe=timeframe)
 
-    # Swap history pagination
-    if action == "swap_hist_page_prev":
-        await handle_swap_hist_page(update, context, "prev")
-        return True
-    if action == "swap_hist_page_next":
-        await handle_swap_hist_page(update, context, "next")
-        return True
 
-    # LP history filters
-    if action.startswith("lp_hist_set_pair_"):
-        value = action.replace("lp_hist_set_pair_", "")
-        await handle_lp_hist_set_filter(update, context, "pair", value)
-        return True
-    if action.startswith("lp_hist_set_connector_"):
-        value = action.replace("lp_hist_set_connector_", "")
-        await handle_lp_hist_set_filter(update, context, "connector", value)
-        return True
-    if action.startswith("lp_hist_set_status_"):
-        value = action.replace("lp_hist_set_status_", "")
-        await handle_lp_hist_set_filter(update, context, "status", value)
-        return True
-
-    # LP history pagination
-    if action == "lp_hist_page_prev":
-        await handle_lp_hist_page(update, context, "prev")
-        return True
-    if action == "lp_hist_page_next":
-        await handle_lp_hist_page(update, context, "next")
-        return True
-
-    # LP position view: lp_pos_view:{index}
-    if action.startswith("lp_pos_view:"):
-        pos_index = int(action.split(":")[1])
-        await handle_lp_pos_view(update, context, pos_index)
-        return True
-
-    # Pool selection: pool_select:{index}
-    if action.startswith("pool_select:"):
-        pool_index = int(action.split(":")[1])
-        await handle_pool_select(update, context, pool_index)
-        return True
-
-    # Pool timeframe: pool_tf:{timeframe}
-    if action.startswith("pool_tf:"):
-        timeframe = action.split(":")[1]
-        await handle_pool_detail_refresh(update, context, timeframe=timeframe)
-        return True
-
-    # Plot liquidity: plot_liquidity:{percentile}
-    if action.startswith("plot_liquidity:"):
-        percentile = int(action.split(":")[1])
-        await handle_plot_liquidity(update, context, percentile)
-        return True
-
-    # Position view: pos_view:{index}
-    if action.startswith("pos_view:"):
-        pos_index = action.split(":")[1]
-        await handle_pos_view(update, context, pos_index)
-        return True
-
-    # Position view with timeframe: pos_view_tf:{index}:{timeframe}
-    if action.startswith("pos_view_tf:"):
-        parts = action.split(":")
-        pos_index = parts[1]
-        timeframe = parts[2] if len(parts) > 2 else "1h"
-        await handle_pos_view(update, context, pos_index, timeframe=timeframe)
-        return True
-
-    # Position view pool: pos_view_pool:{index}
-    if action.startswith("pos_view_pool:"):
-        pos_index = action.split(":")[1]
-        await handle_pos_view_pool(update, context, pos_index)
-        return True
-
-    # Position actions
-    if action.startswith("pos_collect:"):
-        pos_index = action.split(":")[1]
-        await handle_pos_collect_fees(update, context, pos_index)
-        return True
-    if action.startswith("pos_close:"):
-        pos_index = action.split(":")[1]
-        await handle_pos_close_confirm(update, context, pos_index)
-        return True
-    if action.startswith("pos_close_exec:"):
-        pos_index = action.split(":")[1]
-        await handle_pos_close_execute(update, context, pos_index)
-        return True
-
-    # Position timeframe in add menu: pos_tf:{timeframe}
-    if action.startswith("pos_tf:"):
-        timeframe = action.split(":")[1]
-        await handle_pos_refresh(update, context, timeframe=timeframe)
-        return True
-
-    # Copy pool address
-    if action.startswith("copy_pool:"):
-        selected_pool = context.user_data.get("selected_pool", {})
-        pool_address = selected_pool.get(
-            "pool_address", selected_pool.get("address", "N/A")
-        )
-        await query.answer("Address sent below ⬇️")
-        await query.message.reply_text(f"`{pool_address}`", parse_mode="Markdown")
-        return True
-
-    # Add position from pool
-    if action == "add_position_from_pool":
-        await query.answer("Loading position form...")
-        selected_pool = context.user_data.get("selected_pool", {})
-        if selected_pool:
-            pool_address = selected_pool.get(
-                "pool_address", selected_pool.get("address", "")
-            )
-            context.user_data["add_position_params"] = {
-                "connector": selected_pool.get("connector", "meteora"),
-                "network": "solana-mainnet-beta",
-                "pool_address": pool_address,
-                "lower_price": "",
-                "upper_price": "",
-                "amount_base": "10%",
-                "amount_quote": "10%",
-                "strategy_type": "0",
-            }
-        await show_add_position_menu(update, context)
-        return True
-
-    # GeckoTerminal handlers
-    if action.startswith("gecko_set_network:"):
-        network = action.split(":")[1]
-        await handle_gecko_set_network(update, context, network)
-        return True
-    if action.startswith("gecko_trending_"):
-        network = action.replace("gecko_trending_", "")
-        network = None if network == "all" else network
-        await show_trending_pools(update, context, network)
-        return True
-    if action.startswith("gecko_top_"):
-        network = action.replace("gecko_top_", "")
-        await show_top_pools(update, context, network)
-        return True
-    if action.startswith("gecko_new_"):
-        network = action.replace("gecko_new_", "")
-        network = None if network == "all" else network
-        await show_new_pools(update, context, network)
-        return True
-    if action.startswith("gecko_net_"):
-        network = action.replace("gecko_net_", "")
-        await show_network_menu(update, context, network)
-        return True
-    if action.startswith("gecko_search_set_net:"):
-        network = action.split(":")[1]
-        await handle_gecko_search_set_network(update, context, network)
-        return True
-    if action.startswith("gecko_pool:"):
-        pool_index = int(action.split(":")[1])
-        await show_pool_detail(update, context, pool_index)
-        return True
-    if action.startswith("gecko_token:"):
-        token_type = action.split(":")[1]
-        await handle_gecko_token_info(update, context, token_type)
-        return True
-    if action.startswith("gecko_ohlcv:"):
-        timeframe = action.split(":")[1]
-        await show_ohlcv_chart(update, context, timeframe)
-        return True
-    if action.startswith("gecko_combined:"):
-        timeframe = action.split(":")[1]
-        await show_gecko_combined(update, context, timeframe)
-        return True
-    if action.startswith("gecko_pool_tf:"):
-        timeframe = action.split(":")[1]
-        await handle_gecko_pool_tf(update, context, timeframe)
-        return True
-
-    # Pool OHLCV: pool_ohlcv:{timeframe}:{currency}
-    if action.startswith("pool_ohlcv:"):
-        parts = action.split(":")
-        timeframe = parts[1]
-        currency = parts[2] if len(parts) > 2 else "usd"
-        await handle_pool_ohlcv(update, context, timeframe, currency)
-        return True
-
-    # Pool combined chart: pool_combined:{timeframe}:{currency}
-    if action.startswith("pool_combined:"):
-        parts = action.split(":")
-        timeframe = parts[1]
-        currency = parts[2] if len(parts) > 2 else "usd"
-        await handle_pool_combined_chart(update, context, timeframe, currency)
-        return True
-
-    # LP Monitor handlers
-    if action.startswith("lpm_skip:"):
-        cache_key = action.split(":")[1]
-        await handle_lpm_skip(update, context, cache_key)
-        return True
-    if action.startswith("lpm_nav:"):
-        parts = action.split(":")
-        if len(parts) >= 3:
-            instance_id = parts[1]
-            new_index = int(parts[2])
-            await handle_lpm_navigation(update, context, instance_id, new_index)
-        return True
-    if action.startswith("lpm_dismiss:"):
-        await handle_lpm_dismiss(update, context)
-        return True
-    if action.startswith("lpm_detail:"):
-        parts = action.split(":")
-        if len(parts) >= 3:
-            instance_id = parts[1]
-            index = int(parts[2])
-            await handle_lpm_detail(update, context, instance_id, index)
-        return True
-    if action.startswith("lpm_collect:"):
-        cache_key = action.replace("lpm_collect:", "")
-        await handle_lpm_collect_fees(update, context, cache_key)
-        return True
-    if action.startswith("lpm_rebalance_confirm:"):
-        cache_key = action.replace("lpm_rebalance_confirm:", "")
-        await handle_lpm_rebalance_execute(update, context, cache_key)
-        return True
-    if action.startswith("lpm_rebalance:"):
-        cache_key = action.replace("lpm_rebalance:", "")
-        await handle_lpm_rebalance(update, context, cache_key)
-        return True
-    if action.startswith("lpm_oor:"):
-        parts = action.split(":")
-        if len(parts) >= 3:
-            instance_id = parts[1]
-            index = int(parts[2])
-            await handle_lpm_oor_navigation(update, context, instance_id, index)
-        return True
-    if action.startswith("lpm_cancel_countdown:"):
-        parts = action.split(":")
-        if len(parts) >= 3:
-            instance_id = parts[1]
-            pos_id = parts[2]
-            await handle_lpm_cancel_countdown(update, context, instance_id, pos_id)
-        return True
-
-    return False
+#: Prefixed actions in match order; a longer prefix precedes a shorter one it
+#: starts with (``lpm_rebalance_confirm:`` before ``lpm_rebalance:``).
+PREFIX_ACTIONS: tuple[PrefixRoute, ...] = (
+    ("swap_connector_", handle_swap_connector_select, str),
+    ("swap_network_", handle_swap_network_select, str),
+    ("switch_cex_", _handle_switch_to_cex, str),
+    ("swap_hist_set_pair_", _filter(handle_swap_hist_set_filter, "pair"), str),
+    (
+        "swap_hist_set_connector_",
+        _filter(handle_swap_hist_set_filter, "connector"),
+        str,
+    ),
+    ("swap_hist_set_status_", _filter(handle_swap_hist_set_filter, "status"), str),
+    ("lp_hist_set_pair_", _filter(handle_lp_hist_set_filter, "pair"), str),
+    ("lp_hist_set_connector_", _filter(handle_lp_hist_set_filter, "connector"), str),
+    ("lp_hist_set_status_", _filter(handle_lp_hist_set_filter, "status"), str),
+    ("lp_pos_view:", handle_lp_pos_view, int),
+    ("pool_select:", handle_pool_select, int),
+    ("pool_tf:", lambda u, c, tf: handle_pool_detail_refresh(u, c, timeframe=tf), str),
+    ("plot_liquidity:", handle_plot_liquidity, int),
+    ("pos_view_tf:", _pos_view_tf, _with_default("1h")),
+    ("pos_view_pool:", handle_pos_view_pool, str),
+    ("pos_view:", handle_pos_view, str),
+    ("pos_collect:", handle_pos_collect_fees, str),
+    ("pos_close_exec:", handle_pos_close_execute, str),
+    ("pos_close:", handle_pos_close_confirm, str),
+    ("pos_tf:", lambda u, c, tf: handle_pos_refresh(u, c, timeframe=tf), str),
+    ("copy_pool:", _copy_pool_address, str),
+    ("gecko_set_network:", handle_gecko_set_network, str),
+    ("gecko_trending_", show_trending_pools, none_if_all),
+    ("gecko_top_", show_top_pools, str),
+    ("gecko_new_", show_new_pools, none_if_all),
+    ("gecko_net_", show_network_menu, str),
+    ("gecko_search_set_net:", handle_gecko_search_set_network, str),
+    ("gecko_pool_tf:", handle_gecko_pool_tf, str),
+    ("gecko_pool:", show_pool_detail, int),
+    ("gecko_token:", handle_gecko_token_info, str),
+    ("gecko_ohlcv:", show_ohlcv_chart, str),
+    ("gecko_combined:", show_gecko_combined, str),
+    ("pool_ohlcv:", _pair(handle_pool_ohlcv), _with_default("usd")),
+    ("pool_combined:", _pair(handle_pool_combined_chart), _with_default("usd")),
+    ("lpm_skip:", handle_lpm_skip, str),
+    ("lpm_nav:", _pair(handle_lpm_navigation), _instance_and_int),
+    ("lpm_dismiss:", lambda u, c, _rest: handle_lpm_dismiss(u, c), str),
+    ("lpm_detail:", _pair(handle_lpm_detail), _instance_and_int),
+    ("lpm_collect:", handle_lpm_collect_fees, str),
+    ("lpm_rebalance_confirm:", handle_lpm_rebalance_execute, str),
+    ("lpm_rebalance:", handle_lpm_rebalance, str),
+    ("lpm_oor:", _pair(handle_lpm_oor_navigation), _instance_and_int),
+    ("lpm_cancel_countdown:", _pair(handle_lpm_cancel_countdown), _instance_and_str),
+)
 
 
 # ============================================
@@ -677,9 +546,7 @@ CLEAR_STATE_AFTER = frozenset(
 
 
 @restricted
-async def dex_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def dex_callback_handler(update: Update, context: Context) -> None:
     """Handle inline button callbacks - Routes to appropriate sub-module."""
     query = update.callback_query
     await query.answer()
@@ -695,32 +562,28 @@ async def dex_callback_handler(
 
         # Show typing indicator for slow operations
         if _is_slow_action(action):
-            await query.message.reply_chat_action("typing")
+            await query.message.bot.send_chat_action(
+                chat_id=query.message.chat.id, action="typing"
+            )
 
-        # Try simple action dispatch first
-        if action in SIMPLE_ACTIONS:
-            handler = SIMPLE_ACTIONS[action]
-            if handler is not None:
-                await handler(update, context)
-            return
-
-        # Try parameterized action handlers
-        if await _handle_parameterized_action(update, context, action):
+        if await dispatch_action(
+            update, context, action, SIMPLE_ACTIONS, PREFIX_ACTIONS
+        ):
             return
 
         # Unknown action
-        await query.message.reply_text(f"Unknown action: {action}")
+        await query.message.answer(f"Unknown action: {action}")
 
     except Exception as e:
         # Ignore "message is not modified" errors - they're harmless
-        if "not modified" in str(e).lower():
+        if is_not_modified(e):
             logger.debug(f"Message not modified (ignored): {e}")
             return
 
         logger.error(f"Error in DEX callback handler: {e}", exc_info=True)
         error_message = format_error_message(f"Operation failed: {str(e)}")
         try:
-            await query.message.reply_text(error_message, parse_mode="MarkdownV2")
+            await query.message.answer(error_message, parse_mode="MarkdownV2")
         except Exception as reply_error:
             logger.warning(f"Failed to send error message: {reply_error}")
 
@@ -731,9 +594,7 @@ async def dex_callback_handler(
 
 
 @restricted
-async def dex_message_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def dex_message_handler(update: Update, context: Context) -> None:
     """Handle user text input - Routes to appropriate processor."""
     dex_state = context.user_data.get("dex_state")
 
@@ -753,24 +614,9 @@ async def dex_message_handler(
         if handler:
             await handler(update, context, user_input)
         else:
-            await update.message.reply_text(f"Unknown state: {dex_state}")
+            await update.message.answer(f"Unknown state: {dex_state}")
 
     except Exception as e:
         logger.error(f"Error processing DEX input: {e}", exc_info=True)
         error_message = format_error_message(f"Failed to process input: {str(e)}")
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
-
-
-# ============================================
-# HANDLER FACTORIES
-# ============================================
-
-
-def get_dex_callback_handler() -> CallbackQueryHandler:
-    """Get the callback query handler for DEX menu."""
-    return CallbackQueryHandler(dex_callback_handler, pattern="^dex:")
-
-
-def get_dex_message_handler() -> MessageHandler:
-    """Returns the message handler for DEX text input."""
-    return MessageHandler(filters.TEXT & ~filters.COMMAND, dex_message_handler)
+        await update.message.answer(error_message, parse_mode="MarkdownV2")

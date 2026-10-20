@@ -19,18 +19,17 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Ticker } from "@/lib/api";
+import type { Ticker } from "@/lib/api/market";
 import { changeColumnLabel } from "@/lib/marketChange";
 import { MarketBrowser, type MarketPick } from "./MarketBrowser";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
     getTickers: vi.fn(async () => ({
       connector: "binance",
       tickers: TICKERS,
       updated_at: 1,
     })),
-    // No rules: every ticker is offered, which keeps the fixture to one place.
     getTradingRules: vi.fn(async () => ({ connector: "binance", rules: [] })),
   },
 }));

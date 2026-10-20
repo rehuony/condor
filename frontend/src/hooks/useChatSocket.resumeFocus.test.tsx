@@ -21,10 +21,14 @@ import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    listConversations: () => Promise.resolve([]),
+vi.mock("@/lib/api/chat", () => ({
+  chatApi: {
     getSessionOptions: () => Promise.resolve({ default_agent: "claude-code" }),
+  },
+}));
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    listConversations: () => Promise.resolve([]),
     getConversation: () => Promise.resolve({ meta: {}, turns: [] }),
   },
 }));

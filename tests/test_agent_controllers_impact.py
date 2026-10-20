@@ -450,7 +450,7 @@ def test_an_overwrite_confirmation_carries_the_recorded_impact(
         async def send_message(self, **kwargs):
             sent.update(kwargs)
 
-    from condor.runtime.channels import TelegramChannel
+    from condor.telegram.approvals import TelegramChannel
 
     asyncio.run(TelegramChannel(_Bot(), 42).deliver(pending))
     assert expected in sent["text"]

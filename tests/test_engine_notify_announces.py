@@ -18,6 +18,7 @@ import pytest
 from condor import notifications, paths
 from condor.agents import engine as engine_module
 from condor.notifications import list_for
+from condor.telegram.types import NO_LINK_PREVIEW
 
 OWNER = 111
 
@@ -58,7 +59,9 @@ def test_notify_reaches_telegram_and_the_bell_once(store, known_users, monkeypat
     msg = "Agent scout.scalp_3 blocked: max drawdown"
     asyncio.run(engine_module.TickEngine._notify(_engine(), msg))
 
-    assert sent == [{"chat_id": OWNER, "text": msg, "disable_web_page_preview": True}]
+    assert sent == [
+        {"chat_id": OWNER, "text": msg, "link_preview_options": NO_LINK_PREVIEW}
+    ]
     items = list_for(OWNER)
     assert len(items) == 1
     assert items[0].text == msg

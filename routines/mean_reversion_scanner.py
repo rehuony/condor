@@ -8,7 +8,8 @@ import logging
 import aiohttp
 import numpy as np
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
+
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -282,8 +283,8 @@ def format_results(results: list[dict], sort_by: str, show_n: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    chat_id = context._chat_id
+async def run(config: Config, context: RoutineContext) -> str:
+    chat_id = context.chat_id
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
     async with aiohttp.ClientSession(headers=headers) as session:

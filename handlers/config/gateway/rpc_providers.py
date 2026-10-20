@@ -2,10 +2,13 @@
 Gateway RPC Providers management - API keys and RPC provider configuration
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_active_server
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 
 from ._shared import escape_markdown_v2, logger
 
@@ -27,14 +30,14 @@ RPC_PROVIDERS = {
 }
 
 
-async def show_rpc_providers_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_rpc_providers_menu(query, context: Context) -> None:
     """Show RPC Providers configuration menu"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading RPC providers...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -75,7 +78,7 @@ async def show_rpc_providers_menu(query, context: ContextTypes.DEFAULT_TYPE) -> 
             provider_buttons.append(
                 [
                     InlineKeyboardButton(
-                        button_text, callback_data=f"gateway_rpc_{provider_key}"
+                        text=button_text, callback_data=f"gateway_rpc_{provider_key}"
                     )
                 ]
             )
@@ -91,13 +94,13 @@ async def show_rpc_providers_menu(query, context: ContextTypes.DEFAULT_TYPE) -> 
         keyboard = provider_buttons + [
             [
                 InlineKeyboardButton(
-                    "🔗 Custom URL", callback_data="gateway_rpc_url_menu"
+                    text="🔗 Custom URL", callback_data="gateway_rpc_url_menu"
                 )
             ],
-            [InlineKeyboardButton("« Back", callback_data="config_gateway")],
+            [InlineKeyboardButton(text="« Back", callback_data="config_gateway")],
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -106,14 +109,16 @@ async def show_rpc_providers_menu(query, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Error showing RPC providers: {e}", exc_info=True)
         error_text = f"❌ Error loading RPC providers: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="config_gateway")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_rpc_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_rpc_action(query, context: Context) -> None:
     """Handle RPC provider actions"""
     action_data = query.data.replace("gateway_rpc_", "")
 
@@ -147,9 +152,7 @@ async def handle_rpc_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await query.answer("Unknown action")
 
 
-async def show_provider_details(
-    query, context: ContextTypes.DEFAULT_TYPE, provider_key: str
-) -> None:
+async def show_provider_details(query, context: Context, provider_key: str) -> None:
     """Show details for a specific RPC provider"""
     try:
         from config_manager import get_config_manager
@@ -159,7 +162,7 @@ async def show_provider_details(
             await query.answer("❌ Unknown provider")
             return
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -217,7 +220,7 @@ async def show_provider_details(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "🔑 Update API Key",
+                        text="🔑 Update API Key",
                         callback_data=f"gateway_rpc_setkey_{provider_key}",
                     )
                 ]
@@ -226,7 +229,7 @@ async def show_provider_details(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "➕ Add API Key",
+                        text="➕ Add API Key",
                         callback_data=f"gateway_rpc_setkey_{provider_key}",
                     )
                 ]
@@ -238,7 +241,7 @@ async def show_provider_details(
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            "⬜ Deactivate (use custom URL)",
+                            text="⬜ Deactivate (use custom URL)",
                             callback_data=f"gateway_rpc_deactivate_{provider_key}",
                         )
                     ]
@@ -247,17 +250,17 @@ async def show_provider_details(
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            "✅ Activate as RPC Provider",
+                            text="✅ Activate as RPC Provider",
                             callback_data=f"gateway_rpc_activate_{provider_key}",
                         )
                     ]
                 )
 
         keyboard.append(
-            [InlineKeyboardButton("« Back", callback_data="gateway_rpc_providers")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_providers")]
         )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -267,17 +270,15 @@ async def show_provider_details(
         logger.error(f"Error showing provider details: {e}", exc_info=True)
         error_text = f"❌ Error: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back", callback_data="gateway_rpc_providers")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_providers")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def prompt_api_key_input(
-    query, context: ContextTypes.DEFAULT_TYPE, provider_key: str
-) -> None:
+async def prompt_api_key_input(query, context: Context, provider_key: str) -> None:
     """Prompt user to enter API key"""
     provider_info = RPC_PROVIDERS.get(provider_key)
     if not provider_info:
@@ -295,19 +296,23 @@ async def prompt_api_key_input(
     # Store state for input handling
     context.user_data["awaiting_rpc_input"] = provider_key
     context.user_data["rpc_message_id"] = query.message.message_id
-    context.user_data["rpc_chat_id"] = query.message.chat_id
+    context.user_data["rpc_chat_id"] = query.message.chat.id
 
     keyboard = [
-        [InlineKeyboardButton("✖ Cancel", callback_data=f"gateway_rpc_{provider_key}")]
+        [
+            InlineKeyboardButton(
+                text="✖ Cancel", callback_data=f"gateway_rpc_{provider_key}"
+            )
+        ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await query.message.edit_text(
         message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
     )
 
 
-async def handle_rpc_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_rpc_input(update: Update, context: Context) -> None:
     """Handle text input for API key or node URL"""
     input_type = context.user_data.get("awaiting_rpc_input")
     if not input_type:
@@ -330,7 +335,7 @@ async def handle_rpc_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def _handle_api_key_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, provider_key: str
+    update: Update, context: Context, provider_key: str
 ) -> None:
     """Handle API key input"""
     # Always clear state at the start to prevent stuck states
@@ -350,14 +355,14 @@ async def _handle_api_key_input(
 
         if not provider_info:
             logger.error(f"Unknown provider: {provider_key}")
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=f"❌ Unknown provider: {provider_key}",
             )
             return
 
         if not api_key:
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id, text="❌ API key cannot be empty"
             )
             return
@@ -365,7 +370,7 @@ async def _handle_api_key_input(
         # Show saving message
         if message_id and chat_id:
             try:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"💾 Saving {provider_info['name']} API key...",
@@ -406,20 +411,20 @@ async def _handle_api_key_input(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🔄 Restart Gateway", callback_data="gateway_restart"
+                    text="🔄 Restart Gateway", callback_data="gateway_restart"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "« Back", callback_data=f"gateway_rpc_{provider_key}"
+                    text="« Back", callback_data=f"gateway_rpc_{provider_key}"
                 )
             ],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         if message_id and chat_id:
             try:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=success_text,
@@ -428,14 +433,14 @@ async def _handle_api_key_input(
                 )
             except Exception as edit_err:
                 logger.warning(f"Could not edit message, sending new: {edit_err}")
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=success_text,
                     parse_mode="MarkdownV2",
                     reply_markup=reply_markup,
                 )
         else:
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=success_text,
                 parse_mode="MarkdownV2",
@@ -447,7 +452,7 @@ async def _handle_api_key_input(
     except Exception as e:
         logger.error(f"Error handling API key input: {e}", exc_info=True)
         try:
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=f"❌ Error saving API key: {str(e)}",
             )
@@ -455,9 +460,7 @@ async def _handle_api_key_input(
             logger.error(f"Could not send error message: {send_err}")
 
 
-async def _handle_url_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, input_type: str
-) -> None:
+async def _handle_url_input(update: Update, context: Context, input_type: str) -> None:
     """Handle node URL input"""
     # Always clear state at the start to prevent stuck states
     message_id = context.user_data.pop("rpc_message_id", None)
@@ -476,14 +479,14 @@ async def _handle_url_input(
         logger.info(f"Processing URL input for network: {network_id}")
 
         if not node_url:
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id, text="❌ URL cannot be empty"
             )
             return
 
         # Basic URL validation
         if not node_url.startswith(("http://", "https://")):
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="❌ URL must start with http:// or https://",
             )
@@ -492,7 +495,7 @@ async def _handle_url_input(
         # Show saving message
         if message_id and chat_id:
             try:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"💾 Saving node URL for {network_id}...",
@@ -535,13 +538,13 @@ async def _handle_url_input(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "✅ Yes, use new URL",
+                        text="✅ Yes, use new URL",
                         callback_data=f"gateway_rpc_url_activate_{network_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        f"Keep using {current_rpc}",
+                        text=f"Keep using {current_rpc}",
                         callback_data="gateway_rpc_url_menu",
                     )
                 ],
@@ -554,17 +557,21 @@ async def _handle_url_input(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "🔄 Restart Gateway", callback_data="gateway_restart"
+                        text="🔄 Restart Gateway", callback_data="gateway_restart"
                     )
                 ],
-                [InlineKeyboardButton("« Back", callback_data="gateway_rpc_url_menu")],
+                [
+                    InlineKeyboardButton(
+                        text="« Back", callback_data="gateway_rpc_url_menu"
+                    )
+                ],
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         if message_id and chat_id:
             try:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=success_text,
@@ -573,14 +580,14 @@ async def _handle_url_input(
                 )
             except Exception as edit_err:
                 logger.warning(f"Could not edit message, sending new: {edit_err}")
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=success_text,
                     parse_mode="MarkdownV2",
                     reply_markup=reply_markup,
                 )
         else:
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=success_text,
                 parse_mode="MarkdownV2",
@@ -592,16 +599,14 @@ async def _handle_url_input(
     except Exception as e:
         logger.error(f"Error handling URL input: {e}", exc_info=True)
         try:
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id, text=f"❌ Error saving URL: {str(e)}"
             )
         except Exception as send_err:
             logger.error(f"Could not send error message: {send_err}")
 
 
-async def activate_provider(
-    query, context: ContextTypes.DEFAULT_TYPE, provider_key: str
-) -> None:
+async def activate_provider(query, context: Context, provider_key: str) -> None:
     """Activate a provider as the RPC provider for its chain"""
     try:
         from config_manager import get_config_manager
@@ -613,7 +618,7 @@ async def activate_provider(
 
         await query.answer("Activating provider...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -634,9 +639,7 @@ async def activate_provider(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def deactivate_provider(
-    query, context: ContextTypes.DEFAULT_TYPE, provider_key: str
-) -> None:
+async def deactivate_provider(query, context: Context, provider_key: str) -> None:
     """Deactivate a provider, reverting to custom URL"""
     try:
         from config_manager import get_config_manager
@@ -648,7 +651,7 @@ async def deactivate_provider(
 
         await query.answer("Deactivating provider...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -667,16 +670,14 @@ async def deactivate_provider(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def activate_custom_url(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def activate_custom_url(query, context: Context, network_id: str) -> None:
     """Activate custom URL as the RPC provider for a network"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Activating custom URL...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -693,12 +694,12 @@ async def activate_custom_url(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🔄 Restart Gateway", callback_data="gateway_restart"
+                    text="🔄 Restart Gateway", callback_data="gateway_restart"
                 )
             ],
-            [InlineKeyboardButton("« Back", callback_data="gateway_rpc_url_menu")],
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_url_menu")],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             success_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -715,7 +716,7 @@ async def activate_custom_url(
 
 
 async def show_url_networks_menu(
-    query, context: ContextTypes.DEFAULT_TYPE, show_all: bool = False
+    query, context: Context, show_all: bool = False
 ) -> None:
     """Show networks menu for custom URL configuration"""
     try:
@@ -725,7 +726,7 @@ async def show_url_networks_menu(
 
         await query.answer("Loading networks...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -740,7 +741,11 @@ async def show_url_networks_menu(
                 "_Ensure Gateway is running\\._"
             )
             keyboard = [
-                [InlineKeyboardButton("« Back", callback_data="gateway_rpc_providers")]
+                [
+                    InlineKeyboardButton(
+                        text="« Back", callback_data="gateway_rpc_providers"
+                    )
+                ]
             ]
         else:
             # Get default networks from config
@@ -768,7 +773,7 @@ async def show_url_networks_menu(
                 network_buttons.append(
                     [
                         InlineKeyboardButton(
-                            network_id, callback_data=f"gateway_rpc_url_net_{idx}"
+                            text=network_id, callback_data=f"gateway_rpc_url_net_{idx}"
                         )
                     ]
                 )
@@ -782,13 +787,13 @@ async def show_url_networks_menu(
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            f"🌐 All Networks ({len(all_networks)})",
+                            text=f"🌐 All Networks ({len(all_networks)})",
                             callback_data="gateway_rpc_url_all",
                         )
                     ],
                     [
                         InlineKeyboardButton(
-                            "« Back", callback_data="gateway_rpc_providers"
+                            text="« Back", callback_data="gateway_rpc_providers"
                         )
                     ],
                 ]
@@ -801,12 +806,12 @@ async def show_url_networks_menu(
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            "« Back", callback_data="gateway_rpc_providers"
+                            text="« Back", callback_data="gateway_rpc_providers"
                         )
                     ]
                 ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -816,17 +821,15 @@ async def show_url_networks_menu(
         logger.error(f"Error showing URL networks menu: {e}", exc_info=True)
         error_text = f"❌ Error loading networks: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back", callback_data="gateway_rpc_providers")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_providers")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def show_network_rpc_config(
-    query, context: ContextTypes.DEFAULT_TYPE, network_idx: int
-) -> None:
+async def show_network_rpc_config(query, context: Context, network_idx: int) -> None:
     """Show RPC configuration for a specific network"""
     try:
         from config_manager import get_config_manager
@@ -841,7 +844,7 @@ async def show_network_rpc_config(
         network_item = network_list[network_idx]
         network_id = extract_network_id(network_item)
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -876,13 +879,14 @@ async def show_network_rpc_config(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✏️ Edit URL", callback_data=f"gateway_rpc_url_edit_{network_id}"
+                    text="✏️ Edit URL",
+                    callback_data=f"gateway_rpc_url_edit_{network_id}",
                 )
             ],
-            [InlineKeyboardButton("« Back", callback_data="gateway_rpc_url_menu")],
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_url_menu")],
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -892,17 +896,15 @@ async def show_network_rpc_config(
         logger.error(f"Error showing network RPC config: {e}", exc_info=True)
         error_text = f"❌ Error: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back", callback_data="gateway_rpc_url_menu")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_url_menu")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def prompt_node_url_input(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def prompt_node_url_input(query, context: Context, network_id: str) -> None:
     """Prompt user to enter custom node URL"""
     network_escaped = escape_markdown_v2(network_id)
 
@@ -916,12 +918,12 @@ async def prompt_node_url_input(
     # Store state for input handling
     context.user_data["awaiting_rpc_input"] = f"url_{network_id}"
     context.user_data["rpc_message_id"] = query.message.message_id
-    context.user_data["rpc_chat_id"] = query.message.chat_id
+    context.user_data["rpc_chat_id"] = query.message.chat.id
 
     keyboard = [
-        [InlineKeyboardButton("✖ Cancel", callback_data="gateway_rpc_url_menu")]
+        [InlineKeyboardButton(text="✖ Cancel", callback_data="gateway_rpc_url_menu")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await query.message.edit_text(
         message_text, parse_mode="MarkdownV2", reply_markup=reply_markup

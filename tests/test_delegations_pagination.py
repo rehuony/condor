@@ -2,8 +2,7 @@
 
 from types import SimpleNamespace
 
-from bs4 import BeautifulSoup
-
+from condor.telegram.format import RICH_MAX_LEN
 from handlers.delegations import _detail_text_and_keyboard
 
 
@@ -11,7 +10,7 @@ def test_every_result_page_is_reachable_without_repeating_the_internal_task():
     dt = SimpleNamespace(
         status="done",
         error="",
-        result="开头\n\n" + "分析🪙 " * 2100 + "\n\n最终结论",
+        result="开头\n\n" + "分析🪙 " * 16000 + "\n\n最终结论",
         agent_slug="fundamental_analyst",
         server_name="local",
         task_id="internal-task-id",
@@ -20,13 +19,13 @@ def test_every_result_page_is_reachable_without_repeating_the_internal_task():
     texts = []
     page = 0
     while True:
-        html, keyboard = _detail_text_and_keyboard(dt, 4, page)
-        visible = BeautifulSoup(html, "html.parser").get_text()
-        assert len(visible.encode("utf-16-le")) // 2 <= 4096
+        markdown, keyboard = _detail_text_and_keyboard(dt, 4, page)
+        assert len(markdown.encode("utf-16-le")) // 2 <= RICH_MAX_LEN + 200
         assert (
-            "internal instructions" not in visible and "internal-task-id" not in visible
+            "internal instructions" not in markdown
+            and "internal-task-id" not in markdown
         )
-        texts.append(visible.split("\n\n", 1)[1])
+        texts.append(markdown.split("\n\n", 1)[1])
         buttons = [b for row in keyboard.inline_keyboard for b in row]
         next_buttons = [b for b in buttons if b.text == "→"]
         if not next_buttons:
@@ -45,7 +44,19 @@ def test_failed_task_detail_keeps_its_recoverable_progress():
         result="Saved report; verification pending",
         agent_slug="scout",
     )
-    html, _ = _detail_text_and_keyboard(dt, 0, 999)
-    assert "Timed out" in html
-    assert "Saved report; verification pending" in html
-    assert "task incomplete" in html
+    markdown, _ = _detail_text_and_keyboard(dt, 0, 999)
+    assert "Timed out" in markdown
+    assert "Saved report; verification pending" in markdown
+    assert "task incomplete" in markdown
+
+
+def test_detail_keeps_markdown_tables():
+    dt = SimpleNamespace(
+        status="done",
+        error="",
+        result="| 币种 | 风险 |\n| --- | --- |\n| ABC | 高 |",
+        agent_slug="scout",
+    )
+    markdown, _ = _detail_text_and_keyboard(dt, 0)
+    assert "| 币种 | 风险 |" in markdown
+    assert "| ABC | 高 |" in markdown

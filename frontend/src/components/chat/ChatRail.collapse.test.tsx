@@ -19,7 +19,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type AgentSummary } from "@/lib/api";
+import type { AgentSummary } from "@/lib/api/agents";
+import { conversationsApi } from "@/lib/api/conversations";
 import { ChatRail } from "./ChatRail";
 import { WorkspacePaneOutlet, WorkspacePaneProvider } from "./WorkspacePane";
 import { WorkspaceSheet } from "./WorkspaceSheet";
@@ -111,7 +112,7 @@ beforeEach(() => {
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
   // The conversation list fetches its own history; this test is about the rail.
-  vi.spyOn(api, "listConversations").mockResolvedValue([]);
+  vi.spyOn(conversationsApi, "listConversations").mockResolvedValue([]);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);

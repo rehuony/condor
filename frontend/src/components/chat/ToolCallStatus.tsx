@@ -1,4 +1,5 @@
 import { Check, ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
+import { Spinner } from "@/components/ui/Spinner";
 import type { RunStep, ToolCall } from "@/hooks/useChatSocket";
 import { useLiveDisclosure } from "@/hooks/useLiveDisclosure";
 import { formatToolName, toolCallState } from "@/lib/formatters";
@@ -141,7 +142,7 @@ export function RunStrip({
         ) : (
           <ChevronRight className="h-3 w-3 shrink-0" />
         )}
-        {running && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+        {running && <Spinner size="xs" />}
         {thought && <span>{thinking ? "Thinking..." : "Thought"}</span>}
         {thought && toolCalls.length > 0 && <span aria-hidden="true">·</span>}
         {toolCalls.length > 0 && (

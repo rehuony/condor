@@ -5,8 +5,7 @@ import {
   declaredServerOf,
   tickCountdownLabel,
 } from "@/components/agent/workspace/fleet";
-import { api } from "@/lib/api";
-import type { AgentSummary, StrategyUnavailable } from "@/lib/api";
+import { agentsApi, type AgentSummary, type StrategyUnavailable } from "@/lib/api/agents";
 import type { FleetOwner, LiveLoop } from "@/lib/agent-attribution";
 import { formatRelativeTime } from "@/lib/formatters";
 
@@ -136,7 +135,7 @@ export function loopsOnServer(
 export function useLiveLoops(): { loops: LiveFleetOwner[]; isLoading: boolean } {
   const { data, isLoading } = useQuery({
     queryKey: ["fleet-map"],
-    queryFn: () => api.getFleetMap(),
+    queryFn: () => agentsApi.getFleetMap(),
     refetchInterval: 5000,
   });
   const loops = useMemo(

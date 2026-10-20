@@ -20,8 +20,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PaneView } from "./paneUrl";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgent: () =>
       Promise.resolve({ slug: "brigado", name: "Brigado", strategies: [] }),
     getStrategy: () => Promise.resolve({ slug: "grid", name: "SOL grid" }),

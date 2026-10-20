@@ -19,8 +19,8 @@ from pydantic import BaseModel, Field
 import condor.reports as reports
 from condor import primitives, routine_store
 from condor.reports import ReportBuilder, rendering
-from condor.routine_store import RoutineStore, WebRoutineContext
-from routines.base import RoutineInfo, RoutineResult
+from condor.routine_store import RoutineStore
+from routines.base import RoutineContext, RoutineInfo, RoutineResult
 
 
 class _Config(BaseModel):
@@ -317,7 +317,7 @@ def test_the_nested_run_inherits_the_callers_context(library, store):
         return "done"
 
     library("inner", inner)
-    ctx = WebRoutineContext("some-server", bot=None, chat_id=99)
+    ctx = RoutineContext.pinned("some-server", bot=None, chat_id=99)
 
     async def caller():
         with primitives.bind_context(ctx):
@@ -337,8 +337,8 @@ def test_an_explicit_context_wins_over_the_inherited_one(library, store):
         return "done"
 
     library("inner", inner)
-    inherited = WebRoutineContext("a", bot=None, chat_id=1)
-    explicit = WebRoutineContext("b", bot=None, chat_id=2)
+    inherited = RoutineContext.pinned("a", bot=None, chat_id=1)
+    explicit = RoutineContext.pinned("b", bot=None, chat_id=2)
 
     async def caller():
         with primitives.bind_context(inherited):
@@ -605,27 +605,24 @@ def test_start_routine_validates_config_before_backgrounding_anything(library, s
 # ── the Telegram runner's context (CORR-205) ──
 
 
-class _PTBContext:
+def _telegram_context(chat_id, owner_id, server):
     """The shape ``handlers.routines._execute_routine`` hands a routine.
 
     The delivery chat and the owner differ in a group, and the server lives in
     the owner's preferences rather than in a ``server_name`` attribute.
     """
+    from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY
 
-    def __init__(self, chat_id, owner_id, server):
-        from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY
-
-        self._chat_id = chat_id
-        self._owner_id = owner_id
-        self._user_data = {
+    return RoutineContext(
+        chat_id=chat_id,
+        owner_id=owner_id,
+        instance_id="",
+        user_data={
             USER_PREFERENCES_KEY: {"general": {"active_server": server}},
             SERVER_PIN_KEY: True,
-        }
-        self.bot = None
-
-    @property
-    def user_data(self):
-        return self._user_data
+        },
+        bot=None,
+    )
 
 
 def test_a_nested_call_inherits_the_telegram_runners_own_context(library, store):
@@ -636,7 +633,7 @@ def test_a_nested_call_inherits_the_telegram_runners_own_context(library, store)
         return "done"
 
     library("inner", inner)
-    ptb = _PTBContext(chat_id=-100, owner_id=42, server="prod")
+    ptb = _telegram_context(chat_id=-100, owner_id=42, server="prod")
 
     async def caller():
         with primitives.bind_context(ptb):
@@ -654,7 +651,7 @@ def test_a_nested_call_in_a_group_is_owned_by_the_starter_not_the_group(
         return await _save_report("nested")
 
     library("inner", inner)
-    ptb = _PTBContext(chat_id=-100, owner_id=42, server="prod")
+    ptb = _telegram_context(chat_id=-100, owner_id=42, server="prod")
 
     async def caller():
         with primitives.bind_context(ptb):
@@ -680,7 +677,7 @@ def test_start_routine_forwards_the_telegram_owner_and_resolved_server(
         return ""
 
     library("inner", inner)
-    ptb = _PTBContext(chat_id=-100, owner_id=42, server="prod")
+    ptb = _telegram_context(chat_id=-100, owner_id=42, server="prod")
 
     async def caller():
         with primitives.bind_context(ptb):
@@ -707,7 +704,7 @@ def test_start_routine_still_reads_a_web_contexts_server_name(
     library("inner", inner)
 
     async def caller():
-        with primitives.bind_context(WebRoutineContext("web", bot=None, chat_id=7)):
+        with primitives.bind_context(RoutineContext.pinned("web", bot=None, chat_id=7)):
             return await primitives.start_routine("inner")
 
     asyncio.run(caller())

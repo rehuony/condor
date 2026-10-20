@@ -17,7 +17,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RunRail } from "./RunRail";
-import type { AgentRunRow } from "@/lib/api";
+import type { AgentRunRow } from "@/lib/api/agents";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;

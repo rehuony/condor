@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, CalendarDays, Check, ChevronDown, Code2, Copy, Download, FileText, Loader2 } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarDays, Check, ChevronDown, Code2, Copy, Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { ResearchImage, ResearchMarkdown } from "@/components/research-markdown";
+import { Spinner } from "@/components/ui/Spinner";
 import { copyText } from "@/lib/clipboard";
 import { downloadResearchFile, getResearchFile } from "@/lib/research-api";
 import { researchHref, researchLink } from "@/lib/research-links";
@@ -90,7 +91,7 @@ function ResearchFileView({ path }: { path: string }) {
           {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
         </button>
         <button className={`${ICON_ACTION} shrink-0`} title="Download original" disabled={!file || downloading} onClick={() => void download()}>
-          {downloading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+          {downloading ? <Spinner /> : <Download className="h-4 w-4" aria-hidden="true" />}
           <span className="sr-only">Download</span>
         </button>
       </nav>
@@ -121,7 +122,7 @@ function ResearchFileView({ path }: { path: string }) {
 
           {isPending && (
             <p role="status" className="flex items-center justify-center gap-2 py-16 text-sm text-[var(--color-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading file…
+              <Spinner /> Loading file…
             </p>
           )}
           {error && (

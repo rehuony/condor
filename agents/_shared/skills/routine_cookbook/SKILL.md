@@ -120,7 +120,7 @@ If the scope is ambiguous, clarify it before writing code.
 
 ```python
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
+from routines.base import RoutineContext
 from config_manager import get_client
 import logging
 
@@ -133,8 +133,8 @@ class Config(BaseModel):
     trading_pair: str = Field(default="BTC-USDT", description="Trading pair")
     connector_name: str = Field(default="binance_perpetual", description="Exchange")
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    client = await get_client(context._chat_id, context=context)
+async def run(config: Config, context: RoutineContext) -> str:
+    client = await get_client(context.chat_id, user_data=context.user_data)
     if not client:
         return "No server available"
     # ... work ...
@@ -163,7 +163,7 @@ class Config(BaseModel):
 class Config(BaseModel):
     network: str = Field(default="mainnet-beta", description="Solana network")
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     rpc_url = os.environ["HELIUS_RPC_URL"]      # env, or config.yml, or get_client()
 ```
 

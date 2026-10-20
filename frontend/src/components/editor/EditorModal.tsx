@@ -7,7 +7,6 @@ import {
   FileText,
   FolderClosed,
   FolderOpen,
-  Loader2,
   Plus,
   RotateCcw,
   Save,
@@ -28,10 +27,13 @@ import {
   NewConfigDialog,
   UploadDialog,
 } from "@/components/editor/EditorDialogs";
+import { IconButton } from "@/components/ui/IconButton";
+import { Spinner } from "@/components/ui/Spinner";
+import { FULLSCREEN_LAYER_TOP } from "@/components/ui/dialog";
 import { useDismissOnOutsideClick } from "@/hooks/useDismissOnOutsideClick";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useServer } from "@/hooks/useServer";
-import { api, type ControllerConfigSummary } from "@/lib/api";
+import { botsApi, type ControllerConfigSummary } from "@/lib/api/bots";
 import { configToYaml, validateYamlMapping } from "@/lib/configYaml";
 
 // ── Types ──
@@ -314,9 +316,9 @@ function EditorPane({
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (tab.file.kind === "config" && tab.file.configId) {
-        await api.updateConfigYaml(server, tab.file.configId, tab.content);
+        await botsApi.updateConfigYaml(server, tab.file.configId, tab.content);
       } else if (tab.file.kind === "controller" && tab.file.controllerType && tab.file.controllerName) {
-        await api.updateControllerSource(server, tab.file.controllerType, tab.file.controllerName, tab.content);
+        await botsApi.updateControllerSource(server, tab.file.controllerType, tab.file.controllerName, tab.content);
       }
     },
     onSuccess: () => {
@@ -347,7 +349,7 @@ function EditorPane({
   if (!tab.loaded) {
     return (
       <div className="flex items-center justify-center h-full text-[var(--color-text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -405,13 +407,14 @@ function EditorPane({
               {saveMutation.error instanceof Error ? saveMutation.error.message : "Save failed"}
             </span>
           )}
-          <button
+          <IconButton
+            label="Delete"
+            size="sm"
+            tone="danger"
             onClick={() => onDelete(tab.file)}
-            className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-red)] hover:bg-[var(--color-red)]/10 transition-colors"
-            title="Delete"
           >
             <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          </IconButton>
           {isDirty && !tab.readOnly && (
             <button
               onClick={handleReset}
@@ -425,10 +428,10 @@ function EditorPane({
             <button
               onClick={handleSave}
               disabled={!canSave || saveMutation.isPending}
-              className="flex items-center gap-1 rounded bg-[var(--color-primary)] px-2.5 py-1 text-xs font-medium text-white transition-opacity disabled:opacity-40"
+              className="flex items-center gap-1 rounded bg-[var(--color-primary)] px-2.5 py-1 text-xs font-medium text-[var(--on-primary)] transition-opacity disabled:opacity-40"
             >
               {saveMutation.isPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner size="xs" />
               ) : saveMutation.isSuccess && !isDirty ? (
                 <Check className="h-3 w-3" />
               ) : (
@@ -472,20 +475,19 @@ function ModalShell({
 }) {
   return (
     <div
-      className={`fixed inset-0 z-[60] flex-col bg-[var(--color-bg)] ${open ? "flex" : "hidden"}`}
+      className={open ? FULLSCREEN_LAYER_TOP : "hidden"}
     >
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
         <div className="flex items-center gap-2">
           <TerminalSquare className="h-4 w-4 text-[var(--color-text-muted)]" />
           <h2 className="text-sm font-semibold">Controllers &amp; configs</h2>
         </div>
-        <button
+        <IconButton
+          label="Close (Esc)"
           onClick={onClose}
-          className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          title="Close (Esc)"
         >
           <X className="h-4 w-4" />
-        </button>
+        </IconButton>
       </div>
       {children}
     </div>
@@ -524,7 +526,7 @@ export function EditorModal({ open, onClose }: { open: boolean; onClose: () => v
   // Fetch available controllers + configs
   const { data, isLoading } = useQuery({
     queryKey: ["available-configs", server],
-    queryFn: () => api.getAvailableConfigs(server!),
+    queryFn: () => botsApi.getAvailableConfigs(server!),
     enabled: !!server,
   });
 
@@ -708,7 +710,7 @@ export function EditorModal({ open, onClose }: { open: boolean; onClose: () => v
     return (
       <ModalShell open={open} onClose={onClose}>
         <div className="flex flex-1 items-center justify-center text-[var(--color-text-muted)]">
-          <Loader2 className="h-5 w-5 animate-spin rounded-full" />
+          <Spinner size="lg" />
         </div>
       </ModalShell>
     );
@@ -731,20 +733,20 @@ export function EditorModal({ open, onClose }: { open: boolean; onClose: () => v
                 )}
               </span>
               <div className="flex items-center gap-0.5">
-                <button
+                <IconButton
+                  label="Upload file"
+                  size="sm"
                   onClick={() => setShowUpload(true)}
-                  className="p-1 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-                  title="Upload file"
                 >
                   <Upload className="h-3.5 w-3.5" />
-                </button>
-                <button
+                </IconButton>
+                <IconButton
+                  label="New config from template"
+                  size="sm"
                   onClick={() => setNewConfigTarget({})}
-                  className="p-1 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-                  title="New config from template"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                </button>
+                </IconButton>
               </div>
             </div>
             {/* View toggle */}
@@ -962,13 +964,13 @@ function FileContentLoader({
 
   const controllerQuery = useQuery({
     queryKey: ["controller-source", server, tab.file.controllerType, tab.file.controllerName],
-    queryFn: () => api.getControllerSource(server, tab.file.controllerType!, tab.file.controllerName!),
+    queryFn: () => botsApi.getControllerSource(server, tab.file.controllerType!, tab.file.controllerName!),
     enabled: tab.file.kind === "controller" && !tab.loaded && !loadedRef.current,
   });
 
   const configQuery = useQuery({
     queryKey: ["config-detail", server, tab.file.configId],
-    queryFn: () => api.getConfigDetail(server, tab.file.configId!),
+    queryFn: () => botsApi.getConfigDetail(server, tab.file.configId!),
     enabled: tab.file.kind === "config" && !tab.loaded && !loadedRef.current,
   });
 

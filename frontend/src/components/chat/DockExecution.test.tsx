@@ -25,29 +25,38 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ControllerInfo, ExecutorInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ExecutorInfo } from "@/lib/api/executors";
 
 const getBots = vi.fn();
 const getExecutors = vi.fn();
 const stopControllers = vi.fn();
 const startControllers = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/bots", () => ({
+  botsApi: {
     getBots: (...a: unknown[]) => getBots(...a),
-    // The panel reads its fleet through `useFleetData` now (FEAT-114), which
-    // walks the executors a page at a time under the key `/bots` already
-    // holds — the whole point of the swap being that the two hosts share one
-    // set of queries rather than doubling them.
+    stopControllers: (...a: unknown[]) => stopControllers(...a),
+    startControllers: (...a: unknown[]) => startControllers(...a),
+  },
+}));
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
     getExecutorsPage: async (...a: unknown[]) => ({
       executors: await getExecutors(...a),
       next_cursor: null,
     }),
+  },
+}));
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getRates: () => Promise.resolve({ rates: {} }),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getFleetMap: () => Promise.resolve({ owners: [], deeds: { bots: {}, since: 0 } }),
     getAgents: () => Promise.resolve([]),
-    stopControllers: (...a: unknown[]) => stopControllers(...a),
-    startControllers: (...a: unknown[]) => startControllers(...a),
-    getRates: () => Promise.resolve({ rates: {} }),
   },
 }));
 

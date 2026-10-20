@@ -16,9 +16,9 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from config_manager import get_config_manager
+from routines.base import RoutineContext
 
 CATEGORY = "Bot Analysis"
 
@@ -124,8 +124,6 @@ def _resolve_servers(cm, context, filter_str: str) -> list:
     user_id = None
     if context is not None:
         user_data = context.user_data
-        if user_data is None:
-            user_data = getattr(context, "_user_data", None)
         if user_data:
             user_id = user_data.get("_user_id")
 
@@ -170,7 +168,7 @@ def _entries(raw):
         yield level, msg, dt, logger
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     cm = get_config_manager()
     server_names = _resolve_servers(cm, context, config.servers)
     if not server_names:

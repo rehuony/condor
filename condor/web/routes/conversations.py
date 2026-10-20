@@ -15,6 +15,7 @@ list, so changes here need a full bot restart.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -78,7 +79,9 @@ async def list_conversations(
     One keyspace across surfaces, so a chat started in Telegram is listed here
     exactly like one started in the dashboard.
     """
-    return conversations.list_conversations(_owner(user, user_id), limit=limit)
+    return await asyncio.to_thread(
+        conversations.list_conversations, _owner(user, user_id), limit=limit
+    )
 
 
 @router.get("/{conversation_id}")
@@ -91,7 +94,9 @@ async def get_conversation(
     """One conversation's meta plus the tail of its transcript."""
     owner_id = _owner(user, user_id)
     meta = _meta_or_404(owner_id, conversation_id)
-    transcript = conversations.read_transcript(owner_id, conversation_id, limit=limit)
+    transcript = await asyncio.to_thread(
+        conversations.read_transcript, owner_id, conversation_id, limit=limit
+    )
     return {
         "meta": meta.model_dump(mode="json"),
         "turns": [t.model_dump(mode="json") for t in transcript],
@@ -170,7 +175,9 @@ async def upload_attachment(
 
     data = await file.read()
     try:
-        stored = attachments.save(owner_id, conversation_id, data)
+        stored = await asyncio.to_thread(
+            attachments.save, owner_id, conversation_id, data
+        )
     except attachments.TooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc))
     except attachments.UnsupportedTypeError as exc:
@@ -198,7 +205,9 @@ async def get_attachment(
     owner_id = _owner(user, user_id)
     _meta_or_404(owner_id, conversation_id)
     try:
-        data, mime = attachments.load(owner_id, conversation_id, attachment_id)
+        data, mime = await asyncio.to_thread(
+            attachments.load, owner_id, conversation_id, attachment_id
+        )
     except attachments.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     # Private by construction (a per-user path behind a bearer token), and the

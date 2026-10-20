@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
-import type { RoutineInstance } from "@/lib/api";
+import { archivedApi } from "@/lib/api/archived";
+import { routinesApi, type RoutineInstance } from "@/lib/api/routines";
 
 /** The one thing that charts an archived run in Condor (FEAT-079). */
 export const ARCHIVED_ROUTINE = "archived_analyzer";
@@ -45,7 +45,7 @@ export function useArchivedReport(
   // cadence and stops the moment the instance settles.
   const { data: instance } = useQuery({
     queryKey: ["routine-instance", instanceId],
-    queryFn: () => api.getRoutineInstance(instanceId!),
+    queryFn: () => routinesApi.getRoutineInstance(instanceId!),
     enabled: !!instanceId,
     refetchInterval: (query) =>
       IN_FLIGHT.has(query.state.data?.status ?? "running") ? 2000 : false,
@@ -55,7 +55,7 @@ export function useArchivedReport(
 
   const { data: stored, isLoading } = useQuery({
     queryKey: ["archived-report", server, dbPath, controllerId, settled],
-    queryFn: () => api.getArchivedReport(server!, dbPath, controllerId),
+    queryFn: () => archivedApi.getArchivedReport(server!, dbPath, controllerId),
     enabled: !!server && !!dbPath,
     staleTime: Infinity,
   });
@@ -64,7 +64,7 @@ export function useArchivedReport(
     mutationFn: () =>
       // `chart: false` because the dashboard embeds the report itself — no
       // Telegram photo, no kaleido render nobody will look at.
-      api.runRoutine(server!, ARCHIVED_ROUTINE, {
+      routinesApi.runRoutine(server!, ARCHIVED_ROUTINE, {
         mode: "detail",
         db_path: dbPath,
         controller_id: controllerId,

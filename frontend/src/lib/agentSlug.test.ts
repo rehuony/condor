@@ -6,7 +6,7 @@ import {
   normalizeAgentSlug,
   slotFor,
 } from "@/lib/agentSlug";
-import { CHAT_SLUG } from "@/lib/api";
+import { CHAT_SLUG } from "@/lib/api/agents";
 
 describe("normalizeAgentSlug", () => {
   it("maps the registry's name for Condor onto the chat's empty slug", () => {

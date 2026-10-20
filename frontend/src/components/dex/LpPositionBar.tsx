@@ -7,7 +7,7 @@ import {
   readLpPosition,
   type LpPosition,
 } from "./lp-position";
-import { type ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import { formatPnl, formatPriceSig, isExecutorActive, pnlColor } from "@/lib/formatters";
 
 interface Props {

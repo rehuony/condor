@@ -3,6 +3,7 @@ import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy } from "lucide-re
 import { useState } from "react";
 
 import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { IconButton } from "@/components/ui/IconButton";
 import {
   ADMIN_AUDIT_KEY,
   ADMIN_PEOPLE_KEY,
@@ -165,19 +166,18 @@ export function PersonRow({
           </button>
         )}
 
-        <button
-          type="button"
+        <IconButton
+          label={expanded ? `Collapse ${name}` : `Expand ${name}`}
+          size="sm"
           onClick={onToggle}
           aria-expanded={expanded}
-          aria-label={expanded ? `Collapse ${name}` : `Expand ${name}`}
-          className="shrink-0 rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
         >
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
             <ChevronRight className="h-4 w-4" />
           )}
-        </button>
+        </IconButton>
       </div>
 
       {expanded && (

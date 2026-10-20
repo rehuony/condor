@@ -22,12 +22,16 @@ import { ServerContext } from "@/hooks/useServer";
 
 const getPendingConfirmations = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    listConversations: () => Promise.resolve([]),
+vi.mock("@/lib/api/chat", () => ({
+  chatApi: {
     getSessionOptions: () => Promise.resolve({ default_agent: "claude-code" }),
-    getConversation: () => Promise.resolve({ meta: {}, turns: [] }),
     getPendingConfirmations: () => getPendingConfirmations(),
+  },
+}));
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    listConversations: () => Promise.resolve([]),
+    getConversation: () => Promise.resolve({ meta: {}, turns: [] }),
   },
 }));
 

@@ -3,7 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 
 import { SelectField } from "@/components/ui/select-field";
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
-import type { RoutineInfo, RoutineInstance } from "@/lib/api";
+import type { RoutineInfo, RoutineInstance } from "@/lib/api/routines";
 import {
   formatRoutineName,
   formatScope,

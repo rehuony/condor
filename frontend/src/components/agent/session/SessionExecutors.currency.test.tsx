@@ -21,7 +21,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentExecutorRow, PositionHeld } from "@/lib/api";
+import type { PositionHeld } from "@/lib/api/executors";
+import type { AgentExecutorRow } from "@/lib/api/agents";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -32,11 +33,15 @@ const state = vi.hoisted(() => ({
   positions: [] as PositionHeld[],
 }));
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
+    getPositionsHeld: vi.fn(async () => ({ positions: state.positions, summary: {} })),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getStrategySessionExecutors: vi.fn(async () => ({ executors: state.executors })),
     getSessionSnapshots: vi.fn(async () => ({ snapshots: [] })),
-    getPositionsHeld: vi.fn(async () => ({ positions: state.positions, summary: {} })),
   },
 }));
 vi.mock("@/hooks/useAgentExecutors", () => ({

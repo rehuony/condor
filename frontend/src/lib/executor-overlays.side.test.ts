@@ -21,7 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExecutorInfo } from "./api";
+import type { ExecutorInfo } from "./api/executors";
 import { computeMultiOverlays } from "./executor-overlays";
 
 const UP = "#22c55e";

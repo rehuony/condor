@@ -17,7 +17,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RoutineInstance } from "@/lib/api";
+import type { RoutineInstance } from "@/lib/api/routines";
 import { RoutineResultView } from "./RoutineResultView";
 
 declare global {

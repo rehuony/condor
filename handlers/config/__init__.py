@@ -4,15 +4,17 @@ Configuration management command handlers
 
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, ContextTypes
-
-from utils.auth import restricted
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def clear_config_state(context: ContextTypes.DEFAULT_TYPE) -> None:
+def clear_config_state(context: Context) -> None:
     """
     Clear all config-related state from user context.
     Call this when starting other commands to prevent state pollution.
@@ -29,18 +31,26 @@ def _get_start_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
     """Build the start menu inline keyboard."""
     keyboard = [
         [
-            InlineKeyboardButton("🔌 Servers", callback_data="start:config_servers"),
-            InlineKeyboardButton("🔑 Keys", callback_data="start:config_keys"),
-            InlineKeyboardButton("🌐 Gateway", callback_data="start:config_gateway"),
+            InlineKeyboardButton(
+                text="🔌 Servers", callback_data="start:config_servers"
+            ),
+            InlineKeyboardButton(text="🔑 Keys", callback_data="start:config_keys"),
+            InlineKeyboardButton(
+                text="🌐 Gateway", callback_data="start:config_gateway"
+            ),
         ],
     ]
     if is_admin:
-        keyboard.append([InlineKeyboardButton("👑 Admin", callback_data="start:admin")])
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="start:cancel")])
-    return InlineKeyboardMarkup(keyboard)
+        keyboard.append(
+            [InlineKeyboardButton(text="👑 Admin", callback_data="start:admin")]
+        )
+    keyboard.append(
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="start:cancel")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-async def _show_start_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _show_start_menu(query, context: Context) -> None:
     """
     Show the /start menu (replaces config menu for Back navigation).
     Mirrors the logic from main.py start() but for callback query context.
@@ -52,7 +62,7 @@ async def _show_start_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     from utils.telegram_formatters import escape_markdown_v2
 
     user_id = query.from_user.id
-    chat_id = query.message.chat_id
+    chat_id = query.message.chat.id
     cm = get_config_manager()
     is_admin = cm.is_admin(user_id)
 
@@ -154,9 +164,7 @@ async def _show_start_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def config_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def config_callback_handler(update: Update, context: Context) -> None:
     """
     Handle callback queries from config menu buttons - Routes to appropriate sub-module
     """
@@ -190,10 +198,8 @@ async def config_callback_handler(
         await admin_callback_handler(update, context)
 
 
-# Create callback handler instance for registration
-def get_config_callback_handler():
-    """Get the callback query handler for config menu"""
-    return CallbackQueryHandler(
-        config_callback_handler,
-        pattern="^config_|^modify_field_|^add_server_|^api_server_|^api_key_|^gateway_|^admin:",
-    )
+#: The callback data this module answers; ``main.register_handlers`` routes
+#: it here after the per-module ``^admin:`` handler has had its turn.
+CONFIG_CALLBACK_PATTERN = (
+    "^config_|^modify_field_|^add_server_|^api_server_|^api_key_|^gateway_|^admin:"
+)

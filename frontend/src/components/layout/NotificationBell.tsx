@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { NOTIFICATIONS_KEY } from "@/hooks/useChatSocket";
-import { api, type AppNotification, type NotificationsResponse } from "@/lib/api";
+import { notificationsApi, type AppNotification, type NotificationsResponse } from "@/lib/api/notifications";
 import { setAppBadge } from "@/lib/appBadge";
 import { useAuth } from "@/lib/auth";
 import { formatRelativeTime } from "@/lib/formatters";
@@ -55,7 +55,7 @@ export function NotificationBell() {
 
   const { data } = useQuery<NotificationsResponse>({
     queryKey: NOTIFICATIONS_KEY,
-    queryFn: () => api.getNotifications(50),
+    queryFn: () => notificationsApi.getNotifications(50),
     // A push keeps this fresh while a tab is open; the poll is the floor for
     // when it cannot — a dropped socket, a proxy that killed the upgrade — so
     // the badge is right within a minute regardless. Slow on purpose, and not
@@ -85,7 +85,7 @@ export function NotificationBell() {
   useEffect(() => onPushNavigate((link) => navigate(link)), [navigate]);
 
   const markRead = useMutation({
-    mutationFn: (ids?: string[]) => api.markNotificationsRead(ids),
+    mutationFn: (ids?: string[]) => notificationsApi.markNotificationsRead(ids),
     onSuccess: (res) => {
       queryClient.setQueryData<NotificationsResponse>(NOTIFICATIONS_KEY, (prev) =>
         prev
@@ -98,7 +98,7 @@ export function NotificationBell() {
   // Clearing deletes the history for good, so it asks first, outside the menu.
   const [confirmClear, setConfirmClear] = useState(false);
   const clearAll = useMutation({
-    mutationFn: () => api.clearNotifications(),
+    mutationFn: () => notificationsApi.clearNotifications(),
     onSuccess: () => {
       queryClient.setQueryData<NotificationsResponse>(NOTIFICATIONS_KEY, { items: [], unread: 0 });
       setConfirmClear(false);

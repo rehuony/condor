@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, type DexUpstream } from "@/lib/api";
+import { dexApi, type DexUpstream } from "@/lib/api/dex";
 
 /** Idle poll. Reads process-local counters, so it costs nothing upstream. */
 const POLL_HEALTHY_MS = 20_000;
@@ -61,7 +61,7 @@ export function useDexUpstream(server: string | null): DexUpstreamState {
     // counters move — and comparing them is something the fetch already knows
     // how to do without a render pass in between.
     queryFn: async () => {
-      const state = await api.getDexUpstream(server!);
+      const state = await dexApi.getDexUpstream(server!);
       const counter = state.throttled_calls + state.count_429;
       const previous = lastCounter.current;
       lastCounter.current = counter;

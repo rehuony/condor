@@ -13,6 +13,9 @@ This repository is maintained for the owner's personal use. Focus on daily workf
 **Note: This project uses `uv` as the package manager and Python environment tool.**
 
 ```bash
+# List operational commands (setup, run/stop/restart, doctor, check-update, update)
+make help
+
 # Install dependencies
 uv sync --locked --dev
 
@@ -54,7 +57,7 @@ Telegram → main.py → handlers/ → config_manager.py → Hummingbot Backend 
 
 **Entry Point** (`main.py`):
 - Runs Telegram bot + FastAPI web dashboard concurrently via `_run_dual()`
-- Uses `SafePicklePersistence` for state persistence across restarts
+- Uses `condor.telegram.state.UserStateStore` for per-user state across restarts
 - Auto-reloads handlers on file changes via `watchfiles`
 - Web dashboard served on `WEB_PORT` (configurable via env)
 
@@ -80,7 +83,7 @@ clear_all_input_states(context)  # Prevents state pollution between features
 
 **User Preferences** (`condor/preferences.py`):
 - Centralized preference management with type-safe TypedDict definitions
-- Auto-persists via Telegram's PicklePersistence
+- Auto-persists via `UserStateStore` (flushed every 10s and on shutdown)
 - Functions: `get_portfolio_prefs()`, `set_clob_last_order()`, `get_dex_swap_defaults()`, etc.
 
 **Context State Keys**:
@@ -190,7 +193,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   - `ADMIN_USER_ID` - Primary admin user ID (required)
   - `OPENAI_API_KEY` - Optional for AI features
 - `config.yml` - Unified config: servers, users, permissions, chat defaults (auto-created on first run)
-- `condor_bot_data.pickle` - Persisted user preferences and state (auto-generated)
+- `data/condor_state.pickle` - Persisted user preferences and state (auto-generated)
 
 ## Routines
 
@@ -206,13 +209,13 @@ Terminal-like interface for running Python scripts. Auto-discovered from `routin
 **One-shot Routine:**
 ```python
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
+from routines.base import RoutineContext
 
 class Config(BaseModel):
     """Check arbitrage opportunity"""
     trading_pair: str = Field(default="SOL-USDC", description="Pair to check")
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     # Runs once, returns result
     # Can be scheduled to repeat (every 30s, 5m, daily, etc.)
     return f"Checked {config.trading_pair}"
@@ -222,7 +225,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
 ```python
 import asyncio
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
+from routines.base import RoutineContext
 from config_manager import get_client
 
 CONTINUOUS = True  # Mark as continuous
@@ -232,8 +235,8 @@ class Config(BaseModel):
     trading_pair: str = Field(default="BTC-USDT", description="Pair to monitor")
     interval_sec: int = Field(default=10, description="Check interval")
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    chat_id = context._chat_id
+async def run(config: Config, context: RoutineContext) -> str:
+    chat_id = context.chat_id
 
     # context.bot is always available (real bot or HTTP fallback)
     await context.bot.send_message(chat_id=chat_id, text="Monitor started")
@@ -246,17 +249,19 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
         return "Stopped"
 ```
 
+**`RoutineContext`** (`routines/base.py`): every runner hands `run()` the same dataclass — `chat_id` (where messages go), `owner_id` (whose `user_data`/preferences the run uses; differs from `chat_id` in a group), `instance_id`, `user_data` (the owner's live dict), `bot`, and `server_name` (set for web/MCP/code runs pinned to a server). Resolve the API client with `get_client(context.chat_id, user_data=context.user_data)`.
+
 **Execution Contexts:**
 
 Routines run in 3 contexts. `context.bot` is **never None** — always safe to call:
 
 | Context | `context.bot` | Trigger |
 |---------|---------------|---------|
-| Telegram | Real bot (python-telegram-bot) | `/routines` command |
-| Web Dashboard | `_HttpBot` (HTTP fallback via `TELEGRAM_TOKEN`) | Web API |
-| MCP | `_HttpBot` (HTTP fallback via `TELEGRAM_TOKEN`) | `manage_routines` tool |
+| Telegram | Live aiogram `Bot` | `/routines` command |
+| Web Dashboard | Standalone aiogram `Bot` built from `TELEGRAM_TOKEN` (`condor.telegram.transport.standalone_bot`) | Web API |
+| MCP | Standalone aiogram `Bot` built from `TELEGRAM_TOKEN` | `manage_routines` tool |
 
-`_HttpBot` supports: `send_message`, `send_photo`, `send_document`, `edit_message_text`.
+With no token at all, `NotifyBot` records the message on the dashboard bell instead.
 
 **Features:**
 - Text-based config editing (`key=value` pattern)

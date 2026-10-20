@@ -4,7 +4,7 @@ import { act, Profiler, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CandleData } from "@/lib/api";
+import type { CandleData } from "@/lib/api/market";
 
 const queryData = new Map<string, unknown>();
 const candles = new Map<string, CandleData[]>();

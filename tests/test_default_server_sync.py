@@ -19,7 +19,7 @@ import pytest
 
 import config_manager as cm_module
 from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY, set_active_server
-from condor.routine_store import WebRoutineContext
+from routines.base import RoutineContext
 
 CHAT_ID = 4242
 WEB_PICK = "brigado_2"
@@ -106,7 +106,7 @@ def test_a_run_pinned_to_a_server_is_never_re_resolved(cm):
     # TELEGRAM_PICK: the launch server is the answer, or the run files its
     # results under a server it never touched.
     cm._data["chat_defaults"][CHAT_ID] = TELEGRAM_PICK
-    ctx = WebRoutineContext(WEB_PICK, bot=object(), chat_id=CHAT_ID)
+    ctx = RoutineContext.pinned(WEB_PICK, bot=object(), chat_id=CHAT_ID)
 
     assert ctx.user_data[SERVER_PIN_KEY] is True
     assert cm_module.get_effective_server(CHAT_ID, ctx.user_data) == WEB_PICK
@@ -186,7 +186,7 @@ def test_a_pinned_run_is_not_rewritten_by_the_gate(auth, cm):
     from condor.preferences import get_active_server
 
     cm._data["chat_defaults"][CHAT_ID] = TELEGRAM_PICK
-    ctx = WebRoutineContext(WEB_PICK, bot=object(), chat_id=CHAT_ID)
+    ctx = RoutineContext.pinned(WEB_PICK, bot=object(), chat_id=CHAT_ID)
 
     @auth.restricted
     async def handler(update, context):

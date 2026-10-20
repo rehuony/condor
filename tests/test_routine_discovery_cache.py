@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import routines.base as base
 from routines.base import discover_routines, discover_routines_from_path
+from tests.conftest import patch_routines
 
 ROUTINE_TEMPLATE = '''
 from pydantic import BaseModel
@@ -196,7 +197,7 @@ class TestRoutinesMenuRender:
             seen.append(dict(kwargs))
             return real(*args, **kwargs)
 
-        monkeypatch.setattr(hr, "discover_routines", spy)
+        patch_routines(monkeypatch, "discover_routines", spy)
         return seen
 
     @staticmethod
@@ -204,7 +205,7 @@ class TestRoutinesMenuRender:
         async def noop(*args, **kwargs):
             return None
 
-        message = SimpleNamespace(edit_text=noop, reply_text=noop)
+        message = SimpleNamespace(edit_text=noop, answer=noop)
         return SimpleNamespace(
             effective_chat=SimpleNamespace(id=1),
             message=None,

@@ -15,14 +15,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkspaceAlert } from "@/components/agent/workspace/views";
-import type { AgentRunRow } from "@/lib/api";
+import type { AgentRunRow } from "@/lib/api/agents";
 
 const getSessionJournal = vi.fn();
 const getSessionActions = vi.fn();
 const getStrategySessionExecutors = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getSessionJournal: (...a: unknown[]) => getSessionJournal(...a),
     getSessionActions: (...a: unknown[]) => getSessionActions(...a),
     getStrategySessionExecutors: (...a: unknown[]) => getStrategySessionExecutors(...a),

@@ -1,0 +1,27 @@
+# Condor configuration, created by `make setup` when config.yml does not exist.
+# The wizard substitutes ADMIN_USER_ID_PLACEHOLDER and fills in the local server.
+# Credentials stay empty until then: `make doctor` reports empty ones, and the API
+# answers 401 rather than accepting a guessable default.
+servers:
+  local:
+    host: localhost
+    port: 8000
+    username: ""
+    password: ""
+
+default_server: local
+
+admin_id: ADMIN_USER_ID_PLACEHOLDER
+
+users: {}
+
+server_access:
+  local:
+    owner_id: ADMIN_USER_ID_PLACEHOLDER
+    created_at: null
+    shared_with: {}
+
+chat_defaults:
+  ADMIN_USER_ID_PLACEHOLDER: local
+
+version: 1

@@ -1,4 +1,4 @@
-import type { ExecutorInfo } from "./api";
+import type { ExecutorInfo } from "./api/executors";
 import { escapeHtml, formatPriceSig } from "./formatters";
 import { getThemeColors, pnlHexColor, sideColor } from "./theme-colors";
 

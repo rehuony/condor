@@ -20,25 +20,38 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
-import type { ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
 
 const getBots = vi.fn();
 const getExecutorsPage = vi.fn();
 
-vi.mock("@/lib/api", () => {
-  const named: Record<string, (...args: unknown[]) => unknown> = {
-    getBots: (...a) => getBots(...a),
-    getBotRuns: () => Promise.resolve({ runs: [], total: 0 }),
-    getTerminatedControllers: () => Promise.resolve({ controllers: [], runs_seen: 0 }),
-    getExecutorsPage: (...a) => getExecutorsPage(...a),
-    getFleetMap: () => Promise.resolve({ owners: [], deeds: { bots: {}, since: 0 } }),
-  };
-  return {
-    api: new Proxy(named, {
-      get: (target, key: string) => target[key] ?? (() => Promise.resolve({})),
-    }),
-  };
-});
+const named: Record<string, (...args: unknown[]) => unknown> = {
+  getBots: (...a) => getBots(...a),
+  getBotRuns: () => Promise.resolve({ runs: [], total: 0 }),
+  getTerminatedControllers: () => Promise.resolve({ controllers: [], runs_seen: 0 }),
+  getExecutorsPage: (...a) => getExecutorsPage(...a),
+  getFleetMap: () => Promise.resolve({ owners: [], deeds: { bots: {}, since: 0 } }),
+};
+
+/** Every domain module answers with the same stub: the named reads above
+ * and an empty resolved object for anything else. */
+function stubApi() {
+  return new Proxy(named, {
+    get: (target, key: string) => target[key] ?? (() => Promise.resolve({})),
+  });
+}
+
+vi.mock("@/lib/api/bots", () => ({ botsApi: stubApi() }));
+vi.mock("@/lib/api/performance", () => ({ performanceApi: stubApi() }));
+vi.mock("@/lib/api/executors", () => ({ executorsApi: stubApi() }));
+vi.mock("@/lib/api/market", () => ({ marketApi: stubApi() }));
+vi.mock("@/lib/api/agents", () => ({ agentsApi: stubApi() }));
+vi.mock("@/lib/api/archived", () => ({ archivedApi: stubApi() }));
+vi.mock("@/lib/api/reports", () => ({ reportsApi: stubApi() }));
+vi.mock("@/lib/api/routines", () => ({ routinesApi: stubApi() }));
+vi.mock("@/lib/api/chat", () => ({ chatApi: stubApi() }));
+vi.mock("@/lib/api/conversations", () => ({ conversationsApi: stubApi() }));
+vi.mock("@/lib/api/notifications", () => ({ notificationsApi: stubApi() }));
 
 vi.mock("@/components/bots/ControllerPnlChart", () => ({ ControllerPnlChart: () => null }));
 vi.mock("@/components/bots/PnlEvolutionChart", () => ({ PnlEvolutionChart: () => null }));

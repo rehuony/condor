@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { type ServerInfo, api } from "@/lib/api";
+import { serversApi, type ServerInfo } from "@/lib/api/servers";
 import { useServer } from "./useServer";
 
 /**
@@ -47,7 +47,7 @@ export function useServerPermission(serverName?: string | null): ServerPermissio
 
   const { data } = useQuery({
     queryKey: ["servers"],
-    queryFn: api.getServers,
+    queryFn: serversApi.getServers,
     staleTime: 30_000,
   });
 

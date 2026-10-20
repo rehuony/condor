@@ -21,16 +21,21 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConsolidatedPosition, ExecutorInfo } from "@/lib/api";
+import type { ConsolidatedPosition } from "@/lib/api/portfolio";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import type { LpPosition } from "@/components/dex/lp-position";
 import { useLpPositions } from "@/hooks/useLpPositions";
 import { PositionsTab } from "./PositionsTab";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
     getExecutors: vi.fn(async (_server: string, params?: Record<string, unknown>) =>
       params?.executor_type === "lp_executor" ? LP_EXECUTORS : UNFILTERED_PAGE,
     ),
+  },
+}));
+vi.mock("@/lib/api/dex", () => ({
+  dexApi: {
     getDexPoolsByAddress: vi.fn(async () => ({ pools: [] })),
   },
 }));
@@ -346,8 +351,8 @@ describe("an LP range older than the newest page of executors", () => {
     expect(rows("[data-lp-row]")).toHaveLength(1);
     expect(document.querySelector("[data-lp-row]")!.textContent).toContain("meteora");
 
-    const { api } = await import("@/lib/api");
-    expect(api.getExecutors).toHaveBeenCalledWith("srv", {
+    const { executorsApi } = await import("@/lib/api/executors");
+    expect(executorsApi.getExecutors).toHaveBeenCalledWith("srv", {
       executor_type: "lp_executor",
       limit: 200,
     });

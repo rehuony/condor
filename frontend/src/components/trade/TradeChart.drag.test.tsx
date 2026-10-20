@@ -55,8 +55,10 @@ vi.mock("@/hooks/useRates", () => ({
   }),
 }));
 
-vi.mock("@/lib/api", () => ({
-  api: { getCandles: vi.fn(async () => []) },
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getCandles: vi.fn(async () => []),
+  },
 }));
 
 vi.mock("@/lib/candle-store", () => ({

@@ -12,11 +12,11 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from condor.backtesting import fetch_and_save, run_and_save
+from condor.telegram.transport import as_input_file
 from config_manager import get_client
-from routines.base import RoutineResult
+from routines.base import RoutineContext, RoutineResult
 
 logger = logging.getLogger(__name__)
 
@@ -1231,7 +1231,7 @@ def format_summary(results: dict, config: Config) -> str:
     return "\n".join(lines)
 
 
-def _server_name(chat_id: int | None, context: ContextTypes.DEFAULT_TYPE) -> str:
+def _server_name(chat_id: int | None, context: RoutineContext) -> str:
     """The server this run belongs to — the key the store files the result under.
 
     Works from every seat: web and agent runs arrive on a ``WebRoutineContext``, which
@@ -1244,9 +1244,7 @@ def _server_name(chat_id: int | None, context: ContextTypes.DEFAULT_TYPE) -> str
     if launched_with:
         return launched_with
 
-    user_data = getattr(context, "user_data", None)
-    if user_data is None:
-        user_data = getattr(context, "_user_data", None)
+    user_data = context.user_data
 
     try:
         name = get_effective_server(chat_id, user_data)
@@ -1257,8 +1255,8 @@ def _server_name(chat_id: int | None, context: ContextTypes.DEFAULT_TYPE) -> str
     return name or get_config_manager().get_default_server() or ""
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> RoutineResult:
-    chat_id = context._chat_id if hasattr(context, "_chat_id") else None
+async def run(config: Config, context: RoutineContext) -> RoutineResult:
+    chat_id = context.chat_id
 
     # One answer to "which server is this run", used for both halves of it: the
     # box the backtest executes on and the key the store files it under. They
@@ -1276,7 +1274,9 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> RoutineResu
     if config.task_id.strip():
         task_id = config.task_id.strip()
         if not _is_saved(task_id):
-            client = await get_client(chat_id, context=context, server=server)
+            client = await get_client(
+                chat_id, user_data=context.user_data, server=server
+            )
             if client:
                 await fetch_and_save(client, server, task_id)
         loaded = await _load_saved_task(task_id)
@@ -1285,7 +1285,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> RoutineResu
         result, config = loaded
         return await _render(result, config, chat_id, context)
 
-    client = await get_client(chat_id, context=context, server=server)
+    client = await get_client(chat_id, user_data=context.user_data, server=server)
     if not client:
         return RoutineResult(text="No server available")
 
@@ -1325,7 +1325,7 @@ async def _render(
     result: dict,
     config: Config,
     chat_id: int | None,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: RoutineContext,
 ) -> RoutineResult:
     """Turn a backtest result (fresh or stored) into a chart, report and summary."""
     # Parse results
@@ -1362,12 +1362,11 @@ async def _render(
             if chat_id:
                 buf.seek(0)
                 caption = f"Backtest: {config.config_name} ({config.start_date} to {config.end_date})"
-                if context.bot:
-                    await context.bot.send_photo(
-                        chat_id=chat_id, photo=buf, caption=caption
-                    )
-                else:
-                    await _send_photo_http(chat_id, buf, caption)
+                # ``context.bot`` is never None in a routine: the live bot, the
+                # standalone client or the dashboard bell.
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=as_input_file(buf), caption=caption
+                )
     except Exception as e:
         logger.warning(f"Chart generation failed: {e}", exc_info=True)
 
@@ -1390,23 +1389,3 @@ async def _render(
         chart_image=chart_bytes,
         sections=_sections(bt_results),
     )
-
-
-async def _send_photo_http(chat_id: int, buf: io.BytesIO, caption: str) -> None:
-    """Send a photo via Telegram HTTP API when bot instance is unavailable."""
-    import os
-
-    import httpx
-
-    token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_TOKEN", "")
-    if not token:
-        return
-
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
-    buf.seek(0)
-    async with httpx.AsyncClient(timeout=30) as http:
-        await http.post(
-            url,
-            data={"chat_id": chat_id, "caption": caption},
-            files={"photo": ("chart.png", buf, "image/png")},
-        )

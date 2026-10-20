@@ -1,12 +1,4 @@
-/**
- * The one copy of the unknown-input number/USD/percent formatters and the pool
- * pair-label rule the DEX components share. PoolBrowser, PoolStats and
- * lp-position each grew a private copy of these that silently diverged
- * (zero-vs-missing semantics, percent capping, a half-guarded "???"); this
- * module is the single definition they all import.
- */
-
-import type { PoolSummary } from "@/lib/api";
+import type { PoolSummary } from "@/lib/api/dex";
 
 /**
  * Both upstreams answer numbers as strings (and GeckoTerminal answers pandas NaN

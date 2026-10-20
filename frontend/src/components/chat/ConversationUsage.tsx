@@ -1,4 +1,4 @@
-import type { TokenUsage } from "@/lib/api";
+import type { TokenUsage } from "@/lib/api/conversations";
 import { formatCurrency } from "@/lib/formatters";
 import { CONTEXT_WARN_RATIO, costDisplay, formatTokens } from "@/lib/usage";
 

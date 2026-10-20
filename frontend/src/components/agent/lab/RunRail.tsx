@@ -4,7 +4,7 @@ import { useState } from "react";
 import { MODE_STYLES } from "@/components/agent/modeStyles";
 import { isLiveRun, isLoopRun, runFacts, runLabel } from "@/components/agent/lab/runs";
 import { useSeconds } from "@/hooks/useSeconds";
-import type { AgentRunRow } from "@/lib/api";
+import type { AgentRunRow } from "@/lib/api/agents";
 import { formatAge } from "@/lib/formatters";
 
 /**

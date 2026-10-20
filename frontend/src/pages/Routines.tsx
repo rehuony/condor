@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { NoServerCard } from "@/components/NoServerCard";
 import { ReportBrowser } from "@/components/routines/ReportBrowser";
 import { useServer } from "@/hooks/useServer";
-import { api } from "@/lib/api";
+import { routinesApi } from "@/lib/api/routines";
 
 /**
  * The routine library, full screen.
@@ -38,7 +38,7 @@ export function Routines() {
   // its sidebar has to see runs the browser never opened.
   const { data: instances = [] } = useQuery({
     queryKey: ["routine-instances"],
-    queryFn: api.getRoutineInstances,
+    queryFn: routinesApi.getRoutineInstances,
     refetchInterval: 5000,
   });
 

@@ -154,6 +154,29 @@ def test_endpoint_serves_the_same_payload_through_sds(env):
     assert client.history_calls[0]["limit"] == 500
 
 
+def test_empty_snapshots_are_omitted_rather_than_plotted_as_zero(env):
+    """A snapshot with no holdings is a gap, not a 0 that bends the chart."""
+    sds, client = env()
+    client.history = [
+        _HISTORY[0],
+        {"timestamp": 1500, "state": {}},
+        {"timestamp": 1600, "state": {"master": {}}},
+        {"timestamp": 1700, "state": {"master": {"binance": []}}},
+        {"timestamp": 1800},
+        _HISTORY[1],
+    ]
+
+    resp = asyncio.run(
+        get_portfolio_history(name="srv", range="1D", breakdown=True, user=_USER)
+    )
+
+    assert [(p.timestamp, p.total_usd) for p in resp.points] == [
+        (1000.0, 150.0),
+        (2000.0, 160.0),
+    ]
+    assert resp.top_tokens == ["BTC", "ETH"]
+
+
 def test_endpoint_still_builds_the_token_breakdown(env):
     """``breakdown=true`` keeps returning per-token values and top tokens."""
     sds, client = env()

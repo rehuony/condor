@@ -2,11 +2,15 @@
 Gateway liquidity pool management functions
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_active_server
+from condor.telegram.errors import BadRequest, is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
+from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import (
     escape_markdown_v2,
@@ -16,16 +20,14 @@ from ._shared import (
 )
 
 
-async def show_pools_menu(
-    query, context: ContextTypes.DEFAULT_TYPE, show_all: bool = False
-) -> None:
+async def show_pools_menu(query, context: Context, show_all: bool = False) -> None:
     """Show pools menu - select network to view pools (like tokens)"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading networks...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -42,7 +44,7 @@ async def show_pools_menu(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back to Gateway", callback_data="config_gateway"
+                        text="« Back to Gateway", callback_data="config_gateway"
                     )
                 ]
             ]
@@ -75,7 +77,7 @@ async def show_pools_menu(
                 network_buttons.append(
                     [
                         InlineKeyboardButton(
-                            network_id, callback_data=f"gateway_pool_network_{idx}"
+                            text=network_id, callback_data=f"gateway_pool_network_{idx}"
                         )
                     ]
                 )
@@ -90,13 +92,13 @@ async def show_pools_menu(
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            f"🌐 All Networks ({len(all_networks)})",
+                            text=f"🌐 All Networks ({len(all_networks)})",
                             callback_data="gateway_pool_all_networks",
                         )
                     ],
                     [
                         InlineKeyboardButton(
-                            "« Back to Gateway", callback_data="config_gateway"
+                            text="« Back to Gateway", callback_data="config_gateway"
                         )
                     ],
                 ]
@@ -109,12 +111,12 @@ async def show_pools_menu(
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            "« Back to Gateway", callback_data="config_gateway"
+                            text="« Back to Gateway", callback_data="config_gateway"
                         )
                     ]
                 ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -122,21 +124,25 @@ async def show_pools_menu(
 
     except Exception as e:
         # Ignore "message not modified" errors - they're harmless
-        if "not modified" in str(e).lower():
+        if is_not_modified(e):
             logger.debug(f"Message not modified (ignored): {e}")
             return
         logger.error(f"Error showing pools menu: {e}", exc_info=True)
         error_text = f"❌ Error loading networks: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back to Gateway", callback_data="config_gateway")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to Gateway", callback_data="config_gateway"
+                )
+            ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_pool_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_pool_action(query, context: Context) -> None:
     """Handle pool-specific actions"""
     action_data = query.data.replace("gateway_pool_", "")
 
@@ -222,7 +228,7 @@ async def handle_pool_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def show_network_pools(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str, page: int = 0
+    query, context: Context, network_id: str, page: int = 0
 ) -> None:
     """Show pools for a specific network with button grid and pagination"""
     POOLS_PER_PAGE = 16
@@ -233,7 +239,7 @@ async def show_network_pools(
 
         await query.answer("Loading pools...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -257,10 +263,11 @@ async def show_network_pools(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "➕ Add Pool", callback_data=f"gateway_pool_add_{network_id}"
+                        text="➕ Add Pool",
+                        callback_data=f"gateway_pool_add_{network_id}",
                     )
                 ],
-                [InlineKeyboardButton("« Back", callback_data="gateway_pools")],
+                [InlineKeyboardButton(text="« Back", callback_data="gateway_pools")],
             ]
         else:
             # Store all pools for selection
@@ -301,7 +308,7 @@ async def show_network_pools(
                 label = trading_pair[:10]  # Truncate long pairs
                 row.append(
                     InlineKeyboardButton(
-                        label, callback_data=f"gateway_pool_select_{global_idx}"
+                        text=label, callback_data=f"gateway_pool_select_{global_idx}"
                     )
                 )
 
@@ -319,13 +326,13 @@ async def show_network_pools(
                 if page > 0:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            "« Prev", callback_data=f"gateway_pool_page_{page - 1}"
+                            text="« Prev", callback_data=f"gateway_pool_page_{page - 1}"
                         )
                     )
                 if page < total_pages - 1:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            "Next »", callback_data=f"gateway_pool_page_{page + 1}"
+                            text="Next »", callback_data=f"gateway_pool_page_{page + 1}"
                         )
                     )
                 if nav_buttons:
@@ -335,45 +342,47 @@ async def show_network_pools(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "➕ Add Pool", callback_data=f"gateway_pool_add_{network_id}"
+                        text="➕ Add Pool",
+                        callback_data=f"gateway_pool_add_{network_id}",
                     ),
                     InlineKeyboardButton(
-                        "🔄 Refresh", callback_data=f"gateway_pool_view_{network_id}"
+                        text="🔄 Refresh",
+                        callback_data=f"gateway_pool_view_{network_id}",
                     ),
                 ]
             )
             keyboard.append(
-                [InlineKeyboardButton("« Back", callback_data="gateway_pools")]
+                [InlineKeyboardButton(text="« Back", callback_data="gateway_pools")]
             )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
     except BadRequest as e:
-        if "Message is not modified" in str(e):
+        if is_not_modified(e):
             pass  # Ignore - message content is the same
         else:
             raise
     except Exception as e:
         # Ignore "message not modified" errors - they're harmless
-        if "not modified" in str(e).lower():
+        if is_not_modified(e):
             logger.debug(f"Message not modified (ignored): {e}")
             return
         logger.error(f"Error showing network pools: {e}", exc_info=True)
         error_text = f"❌ Error loading pools: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="gateway_pools")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_pools")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def show_pool_options(
-    query, context: ContextTypes.DEFAULT_TYPE, pool_idx: int
-) -> None:
+async def show_pool_options(query, context: Context, pool_idx: int) -> None:
     """Show details and options for a selected pool"""
     try:
         pools = context.user_data.get("pool_manage_list", [])
@@ -415,16 +424,16 @@ async def show_pool_options(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🗑 Remove", callback_data=f"gateway_pool_del_{pool_idx}"
+                    text="🗑 Remove", callback_data=f"gateway_pool_del_{pool_idx}"
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "« Back", callback_data=f"gateway_pool_page_{current_page}"
+                    text="« Back", callback_data=f"gateway_pool_page_{current_page}"
                 )
             ],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -436,9 +445,7 @@ async def show_pool_options(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def prompt_add_pool(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def prompt_add_pool(query, context: Context, network_id: str) -> None:
     """Prompt user to enter pool details"""
     try:
         network_escaped = escape_markdown_v2(network_id)
@@ -450,7 +457,7 @@ async def prompt_add_pool(
         context.user_data["awaiting_pool_input"] = "pool_details"
         context.user_data["pool_network"] = network_id
         context.user_data["pool_message_id"] = query.message.message_id
-        context.user_data["pool_chat_id"] = query.message.chat_id
+        context.user_data["pool_chat_id"] = query.message.chat.id
 
         message_text = (
             f"➕ *Add Pool to {network_escaped}*\n\n"
@@ -464,11 +471,11 @@ async def prompt_add_pool(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Cancel", callback_data=f"gateway_pool_view_{network_id}"
+                    text="« Cancel", callback_data=f"gateway_pool_view_{network_id}"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -480,16 +487,14 @@ async def prompt_add_pool(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def prompt_remove_pool(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def prompt_remove_pool(query, context: Context, network_id: str) -> None:
     """Show list of pools to select for removal"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading pools...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -512,7 +517,7 @@ async def prompt_remove_pool(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back", callback_data=f"gateway_pool_view_{network_id}"
+                        text="« Back", callback_data=f"gateway_pool_view_{network_id}"
                     )
                 ]
             ]
@@ -530,7 +535,7 @@ async def prompt_remove_pool(
                 pool_buttons.append(
                     [
                         InlineKeyboardButton(
-                            label, callback_data=f"gateway_pool_select_{idx}"
+                            text=label, callback_data=f"gateway_pool_select_{idx}"
                         )
                     ]
                 )
@@ -544,12 +549,12 @@ async def prompt_remove_pool(
             keyboard = pool_buttons + [
                 [
                     InlineKeyboardButton(
-                        "« Back", callback_data=f"gateway_pool_view_{network_id}"
+                        text="« Back", callback_data=f"gateway_pool_view_{network_id}"
                     )
                 ]
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -562,7 +567,7 @@ async def prompt_remove_pool(
 
 async def show_delete_pool_confirmation(
     query,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     network_id: str,
     pool_address: str,
     pool_type: str,
@@ -572,7 +577,7 @@ async def show_delete_pool_confirmation(
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
 
         # Get pool details from stored list
         pools = context.user_data.get("pool_manage_list", [])
@@ -614,16 +619,16 @@ async def show_delete_pool_confirmation(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✅ Yes, Delete", callback_data="gateway_pool_confirm_remove"
+                    text="✅ Yes, Delete", callback_data="gateway_pool_confirm_remove"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "❌ Cancel", callback_data=f"gateway_pool_view_{network_id}"
+                    text="❌ Cancel", callback_data=f"gateway_pool_view_{network_id}"
                 )
             ],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -637,7 +642,7 @@ async def show_delete_pool_confirmation(
 
 async def remove_pool(
     query,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     network_id: str,
     pool_address: str,
     pool_type: str,
@@ -648,7 +653,7 @@ async def remove_pool(
 
         await query.answer("Removing pool...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -673,11 +678,12 @@ async def remove_pool(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Back to Pools", callback_data=f"gateway_pool_view_{network_id}"
+                    text="« Back to Pools",
+                    callback_data=f"gateway_pool_view_{network_id}",
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             success_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -694,17 +700,17 @@ async def remove_pool(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Back", callback_data=f"gateway_pool_view_{network_id}"
+                    text="« Back", callback_data=f"gateway_pool_view_{network_id}"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_pool_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_pool_input(update: Update, context: Context) -> None:
     """Handle text input during pool addition flow"""
     awaiting_field = context.user_data.get("awaiting_pool_input")
     logger.info(
@@ -722,8 +728,6 @@ async def handle_pool_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         pass
 
     try:
-        from types import SimpleNamespace
-
         from config_manager import get_config_manager
 
         network_id = context.user_data.get("pool_network")
@@ -739,7 +743,7 @@ async def handle_pool_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             parts = [p.strip() for p in pool_input.split(",")]
 
             if len(parts) != 3:
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=chat_id,
                     text="❌ Invalid format. Use: connector,pool_type,address\n\nExample: raydium,clmm,8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
                 )
@@ -760,7 +764,7 @@ async def handle_pool_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             type_escaped = escape_markdown_v2(pool_type)
 
             if message_id and chat_id:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"⏳ *Adding Pool*\n\nConnector: {connector_escaped}\nType: {type_escaped}\nNetwork: {network_escaped}\n\n_Fetching pool info\\.\\.\\._",
@@ -791,7 +795,7 @@ async def handle_pool_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 )
 
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=success_text,
@@ -803,29 +807,16 @@ async def handle_pool_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
                 await asyncio.sleep(2)
 
-                async def mock_answer(text=""):
-                    """Mock async answer method"""
-                    pass
-
-                mock_message = SimpleNamespace(
-                    edit_text=lambda text, parse_mode=None, reply_markup=None: update.get_bot().edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=text,
-                        parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    ),
-                    chat_id=chat_id,
-                    message_id=message_id,
+                mock_query = MockQuery(
+                    message_handle(context.bot, chat_id, message_id), None
                 )
-                mock_query = SimpleNamespace(message=mock_message, answer=mock_answer)
                 await show_network_pools(mock_query, context, network_id)
 
             except Exception as e:
                 logger.error(f"Error adding pool: {e}", exc_info=True)
                 error_text = f"❌ Error adding pool: {escape_markdown_v2(str(e))}"
                 if message_id and chat_id:
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=error_text,

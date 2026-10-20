@@ -16,18 +16,15 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { NoServerCard } from "@/components/NoServerCard";
 import { PositionsTab } from "@/components/portfolio/PositionsTab";
+import { Card } from "@/components/ui/Card";
 import { useLpPositions } from "@/hooks/useLpPositions";
 import { useRates } from "@/hooks/useRates";
 import { useServer } from "@/hooks/useServer";
 import { useCondorWebSocket } from "@/hooks/useWebSocket";
-import {
-  api,
-  type AgentSummary,
-  type BalanceItem,
-  type ConnectorBalance,
-  type ExecutorPeriodSummary,
-  type PortfolioHistoryResponse,
-} from "@/lib/api";
+import { portfolioApi, type BalanceItem, type ConnectorBalance, type PortfolioHistoryResponse } from "@/lib/api/portfolio";
+import { botsApi } from "@/lib/api/bots";
+import { executorsApi, type ExecutorPeriodSummary } from "@/lib/api/executors";
+import type { AgentSummary } from "@/lib/api/agents";
 import { formatConnectorName, formatCurrency, formatCurrencyPnl, formatCurrencyVolume, isExecutorActive } from "@/lib/formatters";
 import { agentsQuery, EXECUTORS_REFETCH_MS, executorsQuery } from "@/lib/queryClient";
 import { getThemeColors } from "@/lib/theme-colors";
@@ -236,7 +233,7 @@ function TokenBarChart({
   const chartColors = getChartColors();
 
   return (
-    <div className="h-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <Card className="h-full">
       <h3 className="mb-3 text-sm font-medium text-[var(--color-text-muted)]">{title}</h3>
       {/* One grid for every row, so dots, bar starts and percentages line up. */}
       <div className="grid grid-cols-[fit-content(10rem)_minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-2.5">
@@ -267,7 +264,7 @@ function TokenBarChart({
           );
         })}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -477,7 +474,7 @@ function PortfolioEvolution({ server, range, onRangeChange, convertFromUsd, curr
     TIME_PERIODS.forEach((r) => {
       queryClient.prefetchQuery({
         queryKey: ["portfolio-history", server, r],
-        queryFn: () => api.getPortfolioHistory(server, r),
+        queryFn: () => portfolioApi.getPortfolioHistory(server, r),
         staleTime: 60000,
       });
     });
@@ -485,7 +482,7 @@ function PortfolioEvolution({ server, range, onRangeChange, convertFromUsd, curr
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["portfolio-history", server, range],
-    queryFn: () => api.getPortfolioHistory(server, range),
+    queryFn: () => portfolioApi.getPortfolioHistory(server, range),
     enabled: !!server,
     refetchInterval: 60000,
   });
@@ -497,7 +494,7 @@ function PortfolioEvolution({ server, range, onRangeChange, convertFromUsd, curr
     refetch: refetchBreakdown,
   } = useQuery({
     queryKey: ["portfolio-history-breakdown", server, range],
-    queryFn: () => api.getPortfolioHistory(server, range, true),
+    queryFn: () => portfolioApi.getPortfolioHistory(server, range, true),
     enabled: !!server && showBreakdown,
     refetchInterval: 60000,
   });
@@ -506,7 +503,9 @@ function PortfolioEvolution({ server, range, onRangeChange, convertFromUsd, curr
   // or failed breakdown request must not erase a successfully loaded history.
   const hasBreakdown = !!breakdownData?.points.length && !!breakdownData.top_tokens?.length;
   const activeData: PortfolioHistoryResponse | undefined = showBreakdown && hasBreakdown && !isBreakdownError ? breakdownData : data;
-  const rawPoints = activeData?.points ?? [];
+  // A point without a finite value would pin the y-axis and the period
+  // change to a number that was never held; it is a gap, not a reading.
+  const rawPoints = useMemo(() => (activeData?.points ?? []).filter((p) => Number.isFinite(p.total_usd)), [activeData]);
   const topTokens = activeData?.top_tokens ?? [];
   const historyFailed = isError && activeData === data;
   // A positive-only area stack cannot represent liabilities. Keep them in
@@ -653,7 +652,7 @@ function PortfolioEvolution({ server, range, onRangeChange, convertFromUsd, curr
   const tooltipW = stacked && hoverTokenEntries.length > 0 ? 150 : 108;
 
   return (
-    <div ref={setChartHost} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 h-full">
+    <Card ref={setChartHost} className="h-full">
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="text-sm font-medium text-[var(--color-text-muted)]">Portfolio Evolution</h3>
@@ -907,7 +906,7 @@ function PortfolioEvolution({ server, range, onRangeChange, convertFromUsd, curr
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -934,7 +933,7 @@ export function Portfolio() {
 
   const { data, dataUpdatedAt, isLoading, error, isPlaceholderData } = useQuery({
     queryKey: ["portfolio", server],
-    queryFn: () => api.getPortfolio(server!),
+    queryFn: () => portfolioApi.getPortfolio(server!),
     enabled: !!server,
     refetchInterval: 15000,
     placeholderData: keepPreviousData,
@@ -945,8 +944,7 @@ export function Portfolio() {
     if (!server) return;
     let cancelled = false;
     const timer = setTimeout(() => {
-      api
-        .getPortfolio(server, true)
+      portfolioApi.getPortfolio(server, true)
         .then((fresh) => {
           if (cancelled) return;
           queryClient.setQueryData(["portfolio", server], fresh);
@@ -961,7 +959,7 @@ export function Portfolio() {
 
   const { data: bots } = useQuery({
     queryKey: ["bots", server],
-    queryFn: () => api.getBots(server!),
+    queryFn: () => botsApi.getBots(server!),
     enabled: !!server,
     refetchInterval: 30000,
     placeholderData: keepPreviousData,
@@ -979,7 +977,7 @@ export function Portfolio() {
 
   const { data: allExecutors } = useQuery({
     queryKey: executorsQuery(server).queryKey,
-    queryFn: () => api.getExecutors(server!),
+    queryFn: () => executorsApi.getExecutors(server!),
     enabled: !!server,
     refetchInterval: EXECUTORS_REFETCH_MS,
     placeholderData: keepPreviousData,
@@ -990,7 +988,7 @@ export function Portfolio() {
   // fraction of the window on any busy server (CORR-129).
   const { data: execStats } = useQuery({
     queryKey: ["executors-summary", server, period],
-    queryFn: () => api.getExecutorsSummary(server!, period),
+    queryFn: () => executorsApi.getExecutorsSummary(server!, period),
     enabled: !!server,
     refetchInterval: 60000,
     // No keepPreviousData: the tile labels its own window ("12 in 1M"), so
@@ -1002,7 +1000,7 @@ export function Portfolio() {
 
   const { data: periodHistory } = useQuery({
     queryKey: ["portfolio-history", server, period],
-    queryFn: () => api.getPortfolioHistory(server!, period),
+    queryFn: () => portfolioApi.getPortfolioHistory(server!, period),
     enabled: !!server,
     refetchInterval: 60000,
   });
@@ -1013,7 +1011,7 @@ export function Portfolio() {
   // Assets is showing, since only the tab badge depends on it there.
   const { data: positionsData, isLoading: isLoadingHolds } = useQuery({
     queryKey: ["consolidated-positions", server],
-    queryFn: () => api.getConsolidatedPositions(server!),
+    queryFn: () => portfolioApi.getConsolidatedPositions(server!),
     enabled: !!server,
     refetchInterval: tab === "positions" ? 15_000 : 60_000,
     placeholderData: keepPreviousData,
@@ -1080,15 +1078,15 @@ export function Portfolio() {
           ))}
         </div>
         {/* Skeleton chart */}
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <Card>
           <div className="h-[250px] rounded bg-[var(--color-border)]/30 animate-pulse" />
-        </div>
+        </Card>
         {/* Skeleton table */}
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+        <Card className="space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="h-4 rounded bg-[var(--color-border)] animate-pulse" style={{ width: `${85 - i * 10}%` }} />
           ))}
-        </div>
+        </Card>
       </div>
     );
   }
@@ -1112,7 +1110,7 @@ export function Portfolio() {
 
   // A change in account value includes deposits and withdrawals. Without a
   // complete cash-flow ledger it must never be presented as trading PnL.
-  const historyPoints = periodHistory?.points ?? [];
+  const historyPoints = (periodHistory?.points ?? []).filter((p) => Number.isFinite(p.total_usd));
   const portfolioChange =
     historyPoints.length >= 2
       ? historyPoints[historyPoints.length - 1].total_usd - historyPoints[0].total_usd

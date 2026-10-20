@@ -1,30 +1,5 @@
-// ── N owners, one timeline (FEAT-112) ──
-//
-// `aggregatePnlSeries` folds `ControllerPerformanceSnapshot[]` into one series.
-// `PerfBrowser` already produces a *per-agent* series with it — one agent at a
-// time, by narrowing `?scope=agent:{runKey}` down to `scopedKeys` and calling it
-// once. What has never existed is N owners as N simultaneous series, because
-// that function sums into fixed field names and has no per-key output.
-//
-// This module is that, and it is deliberately **not** a second fold. It calls
-// `aggregatePnlSeries` once per owner — the identical call the browser makes
-// for one — and once more over the union of their keys for the Total. Because
-// that function forward-fills *per controller* and summation is linear, and
-// because the `agent:` spines partition the root's spine, the Total line equals
-// the sum of the owner lines at every instant, exactly. That is a property of
-// the existing function rather than a promise made here; a test pins it, but
-// nothing has to be kept in step by hand.
-//
-// The cost accepted is N+1 passes over the snapshot array. A bespoke fold that
-// emitted `{ time, [key]: value }` in one pass would be faster and would be a
-// second implementation of the rules in `aggregatePnlSeries` — the per-bucket
-// volume clamp, the first-reading rule, the live "now" point — free to drift
-// the moment one of them changes. Twelve agents over a memoised array is not a
-// performance problem; a chart that disagrees with `/bots` is a correctness one.
-//
-// Nothing here fetches and nothing here renders (the ARCH-300 split).
-
-import type { ControllerInfo, ControllerPerformanceSnapshot } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ControllerPerformanceSnapshot } from "@/lib/api/performance";
 import { aggregatePnlSeries, type PnlChartPoint } from "@/lib/pnl-chart";
 import type { ConvertFn } from "@/lib/rates";
 

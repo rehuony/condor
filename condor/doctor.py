@@ -31,7 +31,7 @@ _BADGES = {OK: "✓", WARN: "!", FAIL: "✗"}
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Matches setup-environment.sh's own banner width, so the wizard's closing
+# Matches the setup wizard's (scripts/shell/setup.sh) banner width, so the wizard's closing
 # "Setup complete!" frame and this report's frame read as one design
 # language when `make install` runs them back to back. It is a *minimum*:
 # a check whose detail does not fit (a connection error, a remediation hint)
@@ -44,7 +44,7 @@ _MAX_WIDTH = 100
 # badge and its trailing space, the name column, and the two spaces after it.
 _GUTTER = 4 + 2 + 2
 
-# Colored to match setup-environment.sh's msg_ok/msg_warn/msg_error palette.
+# Colored to match the setup wizard's msg_ok/msg_warn/msg_error palette.
 # Off for a non-tty (piped/redirected output, CI logs) or NO_COLOR -- see
 # https://no-color.org -- so scripts parsing this report never see escapes.
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
@@ -167,7 +167,7 @@ def check_dependencies() -> list[Check]:
 # ── Config ───────────────────────────────────────────────────────────────────
 
 
-# The credentials setup-environment.sh used to seed config.yml with before it
+# The credentials the setup wizard used to seed config.yml with before it
 # started requiring real ones. An install that still carries them either
 # predates that change or took the "keep the API that is already running" path,
 # which does not ask for credentials -- either way the API will answer 401 and

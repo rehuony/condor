@@ -2,13 +2,7 @@
 
 The dashboard has had a real Stop since FEAT-029 — a WS ``abort_prompt`` that
 lands on the agent as ``session/cancel`` and leaves the session standing.
-Telegram had none: the only kill switch was the menu button, which destroys the
-subprocess and the conversation with it. ``/stop`` is the missing half.
-
-The queue half is the same gap seen from the other side: a message sent
-mid-answer was already queued (FEAT-030), but ``EventType.QUEUED`` fell through
-``TelegramStreamer`` unhandled, so waiting its turn looked exactly like being
-answered — and each waiting placeholder re-edited its message twice a second.
+``/stop`` is the command half; the client's composer stop is the native half.
 """
 
 import asyncio
@@ -39,12 +33,12 @@ def approved_user(monkeypatch):
 
 
 def _message_update(replies: list):
-    async def reply_text(text, **kwargs):
+    async def answer(text, **kwargs):
         replies.append(text)
         return SimpleNamespace(message_id=1)
 
     return SimpleNamespace(
-        message=SimpleNamespace(text="/stop", reply_text=reply_text),
+        message=SimpleNamespace(text="/stop", answer=answer),
         effective_chat=SimpleNamespace(id=CHAT_ID, type="private"),
         effective_user=SimpleNamespace(id=7, username="tester"),
         callback_query=None,
@@ -79,14 +73,10 @@ def _session(*, alive=True, is_busy=True):
     return SimpleNamespace(alive=alive, is_busy=is_busy)
 
 
-# --- /stop ---
-
-
 def test_stop_aborts_the_turn_and_keeps_the_session(approved_user, monkeypatch):
     calls, replies = _run_stop(monkeypatch, _session())
 
     assert calls["abort"] == [str(SessionKey.telegram(CHAT_ID))]
-    # The whole point: the conversation survives being interrupted.
     assert calls["destroy"] == []
     assert replies and "Stopped" in replies[0]
 
@@ -120,17 +110,18 @@ def test_stop_is_private_chat_only(approved_user, monkeypatch):
     assert replies and "private chats" in replies[0]
 
 
-# --- Streaming a queued / stopped turn ---
-
-
 class _RecordingBot:
     def __init__(self):
-        self.edits: list[str] = []
+        self.drafts: list[str] = []
         self.sent = []
 
-    async def edit_message_text(self, **kw):
-        self.edits.append(kw["text"])
+    async def send_rich_message_draft(self, **kw):
+        self.drafts.append(getattr(kw.get("rich_message"), "markdown", ""))
         return True
+
+    async def send_rich_message(self, **kw):
+        self.sent.append(getattr(kw.get("rich_message"), "markdown", ""))
+        return SimpleNamespace(message_id=99)
 
     async def send_message(self, **kw):
         self.sent.append(kw["text"])
@@ -154,9 +145,8 @@ def test_a_queued_turn_says_it_is_waiting(monkeypatch):
 
     asyncio.run(drive())
 
-    # Not the Thinking pulse: nothing has reached the agent yet.
-    assert bot.edits == [QUEUED_LABEL]
-    assert "Thinking" not in bot.edits[-1]
+    assert bot.drafts == [QUEUED_LABEL]
+    assert "Thinking" not in bot.drafts[-1]
 
 
 def test_the_queued_notice_gives_way_to_the_answer():
@@ -174,10 +164,10 @@ def test_the_queued_notice_gives_way_to_the_answer():
     asyncio.run(drive())
 
     assert streamer._queued is False
-    assert bot.edits[-1] == "Processing…"
+    assert bot.drafts[-1] == "hello"
 
 
-def test_waiting_its_turn_costs_one_edit_not_two_per_second():
+def test_waiting_its_turn_costs_one_draft_not_two_per_second():
     """Several queued placeholders used to hammer Telegram while idle."""
     bot, streamer = _streamer()
 
@@ -187,10 +177,11 @@ def test_waiting_its_turn_costs_one_edit_not_two_per_second():
         await asyncio.sleep(0.15)
         streamer._done = True
         await task
+        await streamer.stop_edit_loop()
 
     asyncio.run(drive())
 
-    assert bot.edits == [QUEUED_LABEL]
+    assert bot.drafts == [QUEUED_LABEL]
 
 
 def test_a_stopped_turn_keeps_its_partial_answer_and_says_it_was_stopped():
@@ -206,7 +197,6 @@ def test_a_stopped_turn_keeps_its_partial_answer_and_says_it_was_stopped():
     asyncio.run(drive())
 
     final = bot.sent[-1]
-    # What the agent managed to say is kept — abort is not a rollback.
     assert "half an answ" in final
     assert STOPPED_LABEL in final
 

@@ -21,7 +21,7 @@ import { isLoopRun, parseRunId, type RunRef } from "@/components/agent/lab/runs"
 import { OPEN_PARAM } from "@/components/agent/workspace/sections";
 import { workspaceHref } from "@/components/agent/workspace/workspaceUrl";
 import { countdown } from "@/lib/agent-attribution";
-import type { AgentRunRow, StrategySummary } from "@/lib/api";
+import type { AgentRunRow, StrategySummary } from "@/lib/api/agents";
 
 /** Everything the URL says, once. */
 export interface WorkspaceUrl {

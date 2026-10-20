@@ -11,11 +11,7 @@ import {
 import { SelectField } from "@/components/ui/select-field";
 import { useSeconds } from "@/hooks/useSeconds";
 import { countdown } from "@/lib/agent-attribution";
-import type {
-  AgentRunRow,
-  RunningInstance,
-  StrategySummary,
-} from "@/lib/api";
+import type { AgentRunRow, RunningInstance, StrategySummary } from "@/lib/api/agents";
 
 /**
  * What the loop is doing, above whatever you are reading (FEAT-103).

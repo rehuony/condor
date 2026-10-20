@@ -64,7 +64,7 @@ def _a_run():
         started=0.0,
         actor={},
         components=[components.CONDOR],
-        steps=update_run._plan([components.CONDOR], {}),
+        steps=update_run._plan([components.CONDOR]),
     )
 
 

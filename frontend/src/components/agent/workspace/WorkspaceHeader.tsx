@@ -17,7 +17,8 @@ import { effectiveTradingContext } from "@/components/agent/lab/runs";
 import { BrainPicker } from "@/components/chat/BrainPicker";
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { useSessionOptions } from "@/hooks/useChat";
-import { CHAT_SLUG, api, type AgentDetail, type StrategyDetail } from "@/lib/api";
+import { serversApi } from "@/lib/api/servers";
+import { agentsApi, CHAT_SLUG, type AgentDetail, type StrategyDetail } from "@/lib/api/agents";
 import { agentQuery } from "@/lib/queryClient";
 
 // ── Server pin ──
@@ -39,12 +40,12 @@ function ServerPinPicker({ slug, serverName }: { slug: string; serverName: strin
 
   const { data: servers } = useQuery({
     queryKey: ["servers"],
-    queryFn: api.getServers,
+    queryFn: serversApi.getServers,
     enabled: open,
   });
 
   const pin = useMutation({
-    mutationFn: (name: string) => api.updateAgentConfig(slug, { server_name: name }),
+    mutationFn: (name: string) => agentsApi.updateAgentConfig(slug, { server_name: name }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: agentQuery(slug).queryKey }),
   });
 
@@ -149,7 +150,7 @@ function ModelPicker({ slug, agentKey }: { slug: string; agentKey: string }) {
   const { agents, customProviders } = useSessionOptions();
 
   const pick = useMutation({
-    mutationFn: (key: string) => api.updateAgentConfig(slug, { agent_key: key }),
+    mutationFn: (key: string) => agentsApi.updateAgentConfig(slug, { agent_key: key }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: agentQuery(slug).queryKey }),
   });
 

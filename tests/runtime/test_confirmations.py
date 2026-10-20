@@ -403,7 +403,7 @@ def test_denying_twice_is_a_no_op(registry, monkeypatch):
 def test_confirmation_names_the_agent_and_server(registry, monkeypatch):
     """An approval says which identity raised it, and where it would act."""
     from condor.runtime.keys import SessionKey
-    from handlers.agents.confirmation import TelegramChannel
+    from condor.telegram.approvals import TelegramChannel
 
     key = SessionKey.telegram(42)
     _install_session(

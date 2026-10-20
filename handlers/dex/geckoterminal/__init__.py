@@ -1,0 +1,162 @@
+"""GeckoTerminal pool explorer: trending/top/new pools, search, pool detail, charts,
+trades, token info and the Gateway hand-offs.
+
+Each feature lives in its own module; this package re-exports the handlers the
+DEX router wires up.
+"""
+
+from ._format import (
+    NETWORK_NAMES,
+    OHLCV_CACHE_TTL,
+    POOL_CACHE_TTL,
+    POPULAR_NETWORKS,
+    TRENDING_CACHE_TTL,
+    _extract_pool_data,
+    _extract_pools_from_response,
+    _format_change,
+    _format_gecko_pool_table,
+    _format_pool_line,
+    _format_price,
+    _format_volume,
+    _get_dex_short_name,
+    _get_nested_value,
+    _get_pool_symbols,
+    _parse_symbols_from_name,
+    _parse_token_address_from_id,
+)
+from .actions import (
+    handle_copy_address,
+    handle_gecko_add_liquidity,
+    handle_gecko_swap,
+    show_gecko_info,
+)
+from .charts import (
+    show_gecko_charts_menu,
+    show_gecko_combined,
+    show_gecko_liquidity,
+    show_ohlcv_chart,
+)
+from .explore import (
+    _build_pool_list_keyboard,
+    handle_back_to_list,
+    handle_gecko_new,
+    handle_gecko_refresh,
+    handle_gecko_select_network,
+    handle_gecko_set_network,
+    handle_gecko_show_pools,
+    handle_gecko_toggle_view,
+    handle_gecko_top,
+    handle_gecko_trending,
+    show_gecko_explore_menu,
+    show_new_pools,
+    show_top_pools,
+    show_trending_pools,
+)
+from .gateway_tokens import (
+    handle_gecko_add_tokens,
+    handle_gecko_restart_gateway,
+)
+from .networks import (
+    handle_gecko_networks,
+    show_network_menu,
+)
+from .pool_detail import (
+    _show_pool_chart,
+    _show_pool_text_detail,
+    handle_gecko_pool_tf,
+    show_pool_detail,
+)
+from .search import (
+    handle_gecko_search,
+    handle_gecko_search_network,
+    handle_gecko_search_set_network,
+    process_gecko_search,
+)
+from .state import (
+    DEFAULT_GECKO_NETWORK,
+    DEFAULT_GECKO_VIEW,
+    GECKO_TO_GATEWAY_NETWORK,
+    NETWORK_DEFAULT_CONNECTOR,
+    VIEW_CYCLE,
+    VIEW_LABELS,
+    cycle_gecko_view,
+    get_gecko_state,
+    set_gecko_network,
+    set_gecko_view,
+)
+from .token import (
+    handle_gecko_token_add,
+    handle_gecko_token_info,
+    handle_gecko_token_search,
+)
+from .trades import (
+    show_recent_trades,
+)
+
+__all__ = [
+    "DEFAULT_GECKO_NETWORK",
+    "DEFAULT_GECKO_VIEW",
+    "GECKO_TO_GATEWAY_NETWORK",
+    "NETWORK_DEFAULT_CONNECTOR",
+    "NETWORK_NAMES",
+    "OHLCV_CACHE_TTL",
+    "POOL_CACHE_TTL",
+    "POPULAR_NETWORKS",
+    "TRENDING_CACHE_TTL",
+    "VIEW_CYCLE",
+    "VIEW_LABELS",
+    "_build_pool_list_keyboard",
+    "_extract_pool_data",
+    "_extract_pools_from_response",
+    "_format_change",
+    "_format_gecko_pool_table",
+    "_format_pool_line",
+    "_format_price",
+    "_format_volume",
+    "_get_dex_short_name",
+    "_get_nested_value",
+    "_get_pool_symbols",
+    "_parse_symbols_from_name",
+    "_parse_token_address_from_id",
+    "_show_pool_chart",
+    "_show_pool_text_detail",
+    "cycle_gecko_view",
+    "get_gecko_state",
+    "handle_back_to_list",
+    "handle_copy_address",
+    "handle_gecko_add_liquidity",
+    "handle_gecko_add_tokens",
+    "handle_gecko_networks",
+    "handle_gecko_new",
+    "handle_gecko_pool_tf",
+    "handle_gecko_refresh",
+    "handle_gecko_restart_gateway",
+    "handle_gecko_search",
+    "handle_gecko_search_network",
+    "handle_gecko_search_set_network",
+    "handle_gecko_select_network",
+    "handle_gecko_set_network",
+    "handle_gecko_show_pools",
+    "handle_gecko_swap",
+    "handle_gecko_toggle_view",
+    "handle_gecko_token_add",
+    "handle_gecko_token_info",
+    "handle_gecko_token_search",
+    "handle_gecko_top",
+    "handle_gecko_trending",
+    "process_gecko_search",
+    "set_gecko_network",
+    "set_gecko_view",
+    "show_gecko_charts_menu",
+    "show_gecko_combined",
+    "show_gecko_explore_menu",
+    "show_gecko_info",
+    "show_gecko_liquidity",
+    "show_network_menu",
+    "show_new_pools",
+    "show_ohlcv_chart",
+    "show_pool_detail",
+    "show_recent_trades",
+    "show_top_pools",
+    "show_trending_pools",
+]

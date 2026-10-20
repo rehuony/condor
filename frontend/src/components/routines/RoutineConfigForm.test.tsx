@@ -7,12 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RoutineConfigForm } from "@/components/routines/RoutineConfigForm";
 import { ServerContext } from "@/hooks/useServer";
-import type { RoutineFieldInfo } from "@/lib/api";
+import type { RoutineFieldInfo } from "@/lib/api/routines";
 
 const getRoutineFieldOptions = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/routines", () => ({
+  routinesApi: {
     getRoutineFieldOptions: (...args: unknown[]) => getRoutineFieldOptions(...args),
   },
 }));

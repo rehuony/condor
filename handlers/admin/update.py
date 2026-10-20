@@ -12,10 +12,14 @@ that edits one message as the run walks its plan.
 import asyncio
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor import updates
+from condor.scheduler import ScheduledJob, get_scheduler
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.auth import admin_required
 from utils.telegram_formatters import escape_markdown_v2, escape_markdown_v2_code
 
@@ -39,7 +43,7 @@ _STEP_GLYPH = {
 
 
 @admin_required
-async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def update_command(update: Update, context: Context) -> None:
     """Handle /update command - check for updates."""
     from handlers import clear_all_input_states
 
@@ -65,24 +69,17 @@ def _facet_line(label: str, facet) -> str:
         line += f" → `{escape_markdown_v2_code(facet.available)}`"
     if facet.behind > 1:
         line += f" \\({facet.behind} commits behind\\)"
-    elif facet.kind == "image":
-        line += " \\(newer available\\)"
     return line
 
 
 def _status_text(statuses) -> str:
     sections = []
     for status in statuses:
-        header = f"*{escape_markdown_v2(status.name)}*"
-        if status.mode and status.mode != "unknown":
-            header += f" _\\({escape_markdown_v2(status.mode)} mode\\)_"
-        lines = [header]
+        lines = [f"*{escape_markdown_v2(status.name)}*"]
 
-        for key in ("image", "repo"):
-            facet = status.facets.get(key)
-            if facet is None:
-                continue
-            lines.append(_facet_line("Image" if key == "image" else "Repo", facet))
+        facet = status.facets.get("repo")
+        if facet is not None:
+            lines.append(_facet_line("Repo", facet))
             if facet.detail and not facet.up_to_date:
                 body = "\n".join(escape_markdown_v2_code(line) for line in facet.detail)
                 lines.append(f"```\n{body}\n```")
@@ -111,34 +108,44 @@ def _status_keyboard(statuses) -> InlineKeyboardMarkup:
 
     if len(stale) > 1:
         rows.append(
-            [InlineKeyboardButton("Update All", callback_data=f"admin:update_go:{ALL}")]
+            [
+                InlineKeyboardButton(
+                    text="Update All", callback_data=f"admin:update_go:{ALL}"
+                )
+            ]
         )
     for status in stale:
         rows.append(
             [
                 InlineKeyboardButton(
-                    f"Update {status.name}",
+                    text=f"Update {status.name}",
                     callback_data=f"admin:update_go:{status.key}",
                 )
             ]
         )
 
-    rows.append([InlineKeyboardButton("Refresh", callback_data="admin:update_refresh")])
     rows.append(
-        [InlineKeyboardButton("Force Restart", callback_data="admin:update_restart")]
+        [InlineKeyboardButton(text="Refresh", callback_data="admin:update_refresh")]
     )
-    rows.append([InlineKeyboardButton("Back", callback_data="admin:back")])
-    return InlineKeyboardMarkup(rows)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="Force Restart", callback_data="admin:update_restart"
+            )
+        ]
+    )
+    rows.append([InlineKeyboardButton(text="Back", callback_data="admin:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _show_status(target, context, *, force: bool = False) -> None:
     """Render the per-component card. ``target`` is a message or a callback query."""
-    is_callback = hasattr(target, "edit_message_text")
+    is_callback = hasattr(target, "data")
     if is_callback:
-        await target.edit_message_text("Checking for updates...")
-        editor = target.edit_message_text
+        await target.message.edit_text("Checking for updates...")
+        editor = target.message.edit_text
     else:
-        message = await target.reply_text("Checking for updates...")
+        message = await target.answer("Checking for updates...")
         editor = message.edit_text
 
     statuses = await updates.check(force=force)
@@ -210,24 +217,31 @@ def _preflight_keyboard(key: str, preflight) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    label, callback_data=f"admin:{prefix}:{component}:{action}:{scope}"
+                    text=label,
+                    callback_data=f"admin:{prefix}:{component}:{action}:{scope}",
                 )
             ]
         )
 
     if preflight.ok and preflight.steps:
         rows.append(
-            [InlineKeyboardButton("Confirm", callback_data=f"admin:update_run:{key}")]
+            [
+                InlineKeyboardButton(
+                    text="Confirm", callback_data=f"admin:update_run:{key}"
+                )
+            ]
         )
 
-    rows.append([InlineKeyboardButton("Cancel", callback_data="admin:update_refresh")])
-    return InlineKeyboardMarkup(rows)
+    rows.append(
+        [InlineKeyboardButton(text="Cancel", callback_data="admin:update_refresh")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _show_preflight(query, key: str) -> None:
-    await query.edit_message_text("Checking what this would do...")
+    await query.message.edit_text("Checking what this would do...")
     preflight = await updates.preflight(_selection(key))
-    await query.edit_message_text(
+    await query.message.edit_text(
         _preflight_text(preflight) or escape_markdown_v2("Nothing to do."),
         parse_mode="MarkdownV2",
         reply_markup=_preflight_keyboard(key, preflight),
@@ -257,33 +271,45 @@ async def _confirm_fix(query, component: str, action: str, key: str) -> None:
     keyboard = [
         [
             InlineKeyboardButton(
-                "Yes, discard",
+                text="Yes, discard",
                 callback_data=(
                     f"admin:update_fix:{component}:{action}:"
                     f"{'a' if key == ALL else 's'}"
                 ),
             )
         ],
-        [InlineKeyboardButton("Keep them", callback_data=f"admin:update_go:{key}")],
+        [
+            InlineKeyboardButton(
+                text="Keep them", callback_data=f"admin:update_go:{key}"
+            )
+        ],
     ]
-    await query.edit_message_text(
-        text, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        text,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
 async def _apply_fix(query, component: str, action: str, key: str) -> None:
-    await query.edit_message_text(f"Resolving conflicts in {component}...")
+    await query.message.edit_text(f"Resolving conflicts in {component}...")
     ok, message = await updates.resolve(component, action)
     if not ok:
-        await query.edit_message_text(
+        await query.message.edit_text(
             f"Could not {action}:\n\n{message}",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Back", callback_data="admin:update_refresh")]]
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Back", callback_data="admin:update_refresh"
+                        )
+                    ]
+                ]
             ),
         )
         return
     # A stash ref is the one thing the admin has to be told, so it leads.
-    await query.edit_message_text(message)
+    await query.message.edit_text(message)
     await asyncio.sleep(1.5)
     await _show_preflight(query, key)
 
@@ -341,13 +367,19 @@ def _run_keyboard(run) -> InlineKeyboardMarkup | None:
     # new code against the old venv.
     if updates.relaunch_pending() is not None:
         rows.append(
-            [InlineKeyboardButton("Restart Now", callback_data="admin:update_restart")]
+            [
+                InlineKeyboardButton(
+                    text="Restart Now", callback_data="admin:update_restart"
+                )
+            ]
         )
-    rows.append([InlineKeyboardButton("Back", callback_data="admin:update_refresh")])
-    return InlineKeyboardMarkup(rows)
+    rows.append(
+        [InlineKeyboardButton(text="Back", callback_data="admin:update_refresh")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _start_run(query, context: ContextTypes.DEFAULT_TYPE, key: str) -> None:
+async def _start_run(query, context: Context, key: str) -> None:
     """Hand the run to the engine and watch it through an observer.
 
     The observer is how a surface that is already in-process gets zero-latency
@@ -357,7 +389,7 @@ async def _start_run(query, context: ContextTypes.DEFAULT_TYPE, key: str) -> Non
 
     async def render(run) -> None:
         try:
-            await query.edit_message_text(
+            await query.message.edit_text(
                 _run_text(run), reply_markup=_run_keyboard(run)
             )
         except Exception as e:  # noqa: BLE001
@@ -371,7 +403,7 @@ async def _start_run(query, context: ContextTypes.DEFAULT_TYPE, key: str) -> Non
     run = await updates.start(
         _selection(key),
         actor_user_id=query.from_user.id if query.from_user else None,
-        actor_chat_id=query.message.chat_id if query.message else None,
+        actor_chat_id=query.message.chat.id if query.message else None,
     )
     await render(run)
 
@@ -381,9 +413,7 @@ async def _start_run(query, context: ContextTypes.DEFAULT_TYPE, key: str) -> Non
 # ---------------------------------------------------------------------------
 
 
-async def handle_update_callback(
-    query, context: ContextTypes.DEFAULT_TYPE, action: str
-) -> None:
+async def handle_update_callback(query, context: Context, action: str) -> None:
     """Handle update-related callbacks."""
     head, _, rest = action.partition(":")
 
@@ -409,7 +439,7 @@ async def _do_restart(query) -> None:
     """Force a restart without updating anything. Reachable from every screen."""
     from utils.updater import request_restart
 
-    await query.edit_message_text("Restarting Condor...")
+    await query.message.edit_text("Restarting Condor...")
     # Let Telegram flush the edit before the shutdown starts.
     await asyncio.sleep(1)
     request_restart()
@@ -430,7 +460,7 @@ async def _do_restart(query) -> None:
 _last_notice: tuple[str, ...] | None = None
 
 
-async def _periodic_update_check(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _periodic_update_check(job: ScheduledJob) -> None:
     """Periodic job that checks for updates and notifies admin."""
     global _last_notice
 
@@ -479,7 +509,7 @@ async def _periodic_update_check(context: ContextTypes.DEFAULT_TYPE) -> None:
         int(ADMIN_USER_ID),
         body + "\n\nUse /update to install.",
         kind="system",
-        bot=context.bot,
+        bot=job.data["bot"],
         title="Updates available",
         link="/settings?tab=updates",
         # The bell already carries "Updates available" as the title and the
@@ -489,23 +519,21 @@ async def _periodic_update_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-def schedule_update_checks(application) -> None:
-    """Schedule periodic update checks. Call from post_init."""
+def schedule_update_checks(bot) -> None:
+    """Schedule periodic update checks; ``bot`` is what the notice goes out through."""
     from utils.updater import UPDATE_CHECK_INTERVAL
 
     if UPDATE_CHECK_INTERVAL <= 0:
         logger.info("Update checks disabled (UPDATE_CHECK_INTERVAL=0)")
         return
 
-    # Remove existing job if any
-    existing = application.job_queue.get_jobs_by_name(UPDATE_CHECK_JOB)
-    for job in existing:
-        job.schedule_removal()
-
-    application.job_queue.run_repeating(
+    scheduler = get_scheduler()
+    scheduler.remove(UPDATE_CHECK_JOB)
+    scheduler.repeating(
         _periodic_update_check,
-        interval=UPDATE_CHECK_INTERVAL,
+        UPDATE_CHECK_INTERVAL,
         first=30,  # first check 30s after startup
         name=UPDATE_CHECK_JOB,
+        data={"bot": bot},
     )
     logger.info("Scheduled update checks every %ds", UPDATE_CHECK_INTERVAL)

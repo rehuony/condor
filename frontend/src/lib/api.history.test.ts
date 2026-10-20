@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type ControllerPerformanceSnapshot } from "./api";
+import { performanceApi, type ControllerPerformanceSnapshot } from "./api/performance";
 import { HISTORY_PAGE_SIZE } from "./history-pagination";
 
 const SERVER = "prod";
@@ -88,7 +88,7 @@ describe("getControllerPerformanceHistoryAll", () => {
       { snapshots: page("c", 2), next_cursor: null, interval: "1h" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryAll(
+    const res = await performanceApi.getControllerPerformanceHistoryAll(
       SERVER,
       { interval: "1h", start_time: "2026-07-01T00:00:00Z" },
       { pageSize: 3, maxRows: 100 },
@@ -117,7 +117,7 @@ describe("getControllerPerformanceHistoryAll", () => {
       { snapshots: page("c", 2), next_cursor: null, interval: "4h" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryAll(
+    const res = await performanceApi.getControllerPerformanceHistoryAll(
       SERVER,
       { interval: "4h", start_time: "2026-01-01T00:00:00Z", bot_name: "bot-a" },
       { pageSize: 2, maxRows: 100 },
@@ -141,14 +141,14 @@ describe("getControllerPerformanceHistoryAll", () => {
     // `limit` is Query(1000, ge=1, le=1000) upstream (CORR-260) — a larger value
     // is a 422 the route reports as an offline server, not a bigger page.
     const { urls } = serve([{ snapshots: [], next_cursor: null, interval: "5m" }]);
-    await api.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" });
+    await performanceApi.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" });
     expect(Number(query(urls, 0).get("limit"))).toBeLessThanOrEqual(1000);
     expect(Number(query(urls, 0).get("limit"))).toBe(HISTORY_PAGE_SIZE);
   });
 
   it("stops when the server stops sending a cursor", async () => {
     const { fetchMock } = serve([{ snapshots: page("a", 5), next_cursor: null, interval: "5m" }]);
-    const res = await api.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 5 });
+    const res = await performanceApi.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 5 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(res.truncated).toBe(false);
   });
@@ -159,7 +159,7 @@ describe("getControllerPerformanceHistoryAll", () => {
       { snapshots: page("b", 2), next_cursor: "cur-2", interval: "5m" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryAll(
+    const res = await performanceApi.getControllerPerformanceHistoryAll(
       SERVER,
       { interval: "5m" },
       { pageSize: 2, maxRows: 4 },
@@ -188,7 +188,7 @@ describe("getControllerPerformanceHistoryAll", () => {
       }),
     );
 
-    const res = await api.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 2 });
+    const res = await performanceApi.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 2 });
 
     expect(res.snapshots).toHaveLength(2);
     expect(res.outcome).toBe("error");
@@ -200,7 +200,7 @@ describe("getControllerPerformanceHistoryAll", () => {
       "fetch",
       vi.fn(async () => ({ ok: false, json: async () => ({ detail: "offline" }) }) as unknown as Response),
     );
-    await expect(api.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" })).rejects.toThrow("offline");
+    await expect(performanceApi.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" })).rejects.toThrow("offline");
   });
 
   it("does not double-count a snapshot that appears on two pages", async () => {
@@ -212,7 +212,7 @@ describe("getControllerPerformanceHistoryAll", () => {
       { snapshots: [shared, snap({ timestamp: "2026-08-27T00:10:00Z" })], next_cursor: null, interval: "5m" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 2 });
+    const res = await performanceApi.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 2 });
 
     expect(res.snapshots).toHaveLength(3);
     expect(res.snapshots.map((s) => s.timestamp)).toEqual([
@@ -236,7 +236,7 @@ describe("getControllerPerformanceHistoryAll", () => {
       },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 5 });
+    const res = await performanceApi.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" }, { pageSize: 5 });
     expect(res.snapshots).toHaveLength(2);
     expect(res.snapshots.map((s) => s.bot_name)).toEqual(["bot-a", "bot-b"]);
   });
@@ -245,7 +245,7 @@ describe("getControllerPerformanceHistoryAll", () => {
     const { fetchMock } = serve([
       { snapshots: [], next_cursor: null, interval: "5m", server_online: false, error_hint: "Connection error" },
     ]);
-    const res = await api.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" });
+    const res = await performanceApi.getControllerPerformanceHistoryAll(SERVER, { interval: "5m" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(res.server_online).toBe(false);
     expect(res.error_hint).toBe("Connection error");
@@ -281,7 +281,7 @@ describe("getControllerPerformanceHistoryByController", () => {
       { snapshots: page("ctrl-1", 2, "bot-b"), next_cursor: null, interval: "1h" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryByController(
+    const res = await performanceApi.getControllerPerformanceHistoryByController(
       SERVER,
       FLEET,
       { interval: "1h", start_time: "2026-07-01T00:00:00Z" },
@@ -305,7 +305,7 @@ describe("getControllerPerformanceHistoryByController", () => {
       { snapshots: page("ctrl-1", 1, "bot-b"), next_cursor: null, interval: "4h" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryByController(
+    const res = await performanceApi.getControllerPerformanceHistoryByController(
       SERVER, FLEET, { interval: "4h" }, { pageSize: 1, maxRows: 100 },
     );
 
@@ -321,7 +321,7 @@ describe("getControllerPerformanceHistoryByController", () => {
       { snapshots: page("ctrl-1", 1, "bot-b"), next_cursor: null, interval: "1h" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryByController(
+    const res = await performanceApi.getControllerPerformanceHistoryByController(
       SERVER, FLEET, { interval: "1h" }, { pageSize: 2, maxRows: 100, concurrency: 1 },
     );
 
@@ -339,7 +339,7 @@ describe("getControllerPerformanceHistoryByController", () => {
       { snapshots: page("ctrl-1", 1, "bot-b"), next_cursor: null, interval: "1h" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryByController(
+    const res = await performanceApi.getControllerPerformanceHistoryByController(
       SERVER, FLEET, { interval: "1h" }, { pageSize: 2, maxRows: 2, concurrency: 1 },
     );
 
@@ -355,7 +355,7 @@ describe("getControllerPerformanceHistoryByController", () => {
       { snapshots: page("ctrl-1", 1, "bot-b"), next_cursor: "c", interval: "1h" },
     ]);
 
-    const res = await api.getControllerPerformanceHistoryByController(
+    const res = await performanceApi.getControllerPerformanceHistoryByController(
       SERVER, FLEET, { interval: "1h" }, { pageSize: 1, maxRows: 1 },
     );
     expect(res.next_cursor).toBeNull();
@@ -363,7 +363,7 @@ describe("getControllerPerformanceHistoryByController", () => {
 
   it("issues nothing at all for a fleet with no controllers", async () => {
     const { urls } = serve([]);
-    const res = await api.getControllerPerformanceHistoryByController(SERVER, [], {
+    const res = await performanceApi.getControllerPerformanceHistoryByController(SERVER, [], {
       interval: "1h",
     });
     expect(urls).toHaveLength(0);
@@ -373,7 +373,7 @@ describe("getControllerPerformanceHistoryByController", () => {
 
   it("skips a controller with no id rather than asking for the whole fleet", async () => {
     const { urls } = serve([{ snapshots: page("ctrl-1", 1), next_cursor: null, interval: "1h" }]);
-    await api.getControllerPerformanceHistoryByController(
+    await performanceApi.getControllerPerformanceHistoryByController(
       SERVER,
       [{ bot_name: "bot-a", controller_id: "" }, { bot_name: "bot-a", controller_id: "ctrl-1" }],
       { interval: "1h" },

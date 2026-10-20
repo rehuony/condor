@@ -196,30 +196,26 @@ async def test_one_bad_conversation_is_not_the_tick(ran, monkeypatch):
 # ── Registration ──
 
 
-def test_register_jobs_schedules_one_repeating_job():
-    class Queue:
-        def __init__(self):
-            self.scheduled = []
+def test_register_jobs_schedules_one_repeating_job(monkeypatch):
+    from condor import scheduler as scheduler_mod
 
-        def get_jobs_by_name(self, name):
-            return []
+    sched = scheduler_mod.Scheduler()
+    monkeypatch.setattr(scheduler_mod, "_scheduler", sched)
 
-        def run_repeating(self, callback, interval, first, name):
-            self.scheduled.append((interval, first, name))
+    reflection.register_jobs()
+    reflection.register_jobs()  # re-registering replaces, never doubles
 
-    class App:
-        job_queue = Queue()
-
-    app = App()
-    reflection.register_jobs(app)
-
-    assert app.job_queue.scheduled == [
-        (reflection.SWEEP_INTERVAL_S, 300, reflection.REFLECTION_JOB)
-    ]
+    jobs = sched.jobs(reflection.REFLECTION_JOB)
+    assert len(jobs) == 1
+    sched.shutdown()
 
 
-def test_register_jobs_survives_an_application_without_a_queue():
-    class App:
-        job_queue = None
+def test_register_jobs_survives_a_broken_scheduler(monkeypatch):
+    from condor import scheduler as scheduler_mod
 
-    reflection.register_jobs(App())  # must not raise
+    def boom():
+        raise RuntimeError("no scheduler")
+
+    monkeypatch.setattr(scheduler_mod, "get_scheduler", boom)
+    monkeypatch.setattr(reflection, "get_scheduler", boom)
+    reflection.register_jobs()  # must not raise

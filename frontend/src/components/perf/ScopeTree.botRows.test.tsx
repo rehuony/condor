@@ -19,7 +19,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ScopeTree } from "./ScopeTree";
-import type { ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
 import { buildTree, leafFromController, type PerfNode } from "@/lib/perf-tree";
 
 declare global {

@@ -188,17 +188,17 @@ def fire(callback_data: str) -> list[str]:
     """Run the router over one callback and return the replies it sent."""
     replies: list[str] = []
 
-    async def answer(*_a, **_kw):
+    async def ack(*_a, **_kw):
         return None
 
-    async def reply_text(text, **_kw):
+    async def answer(text, **_kw):
         replies.append(text)
 
     update = SimpleNamespace(
         callback_query=SimpleNamespace(
             data=callback_data,
-            answer=answer,
-            message=SimpleNamespace(reply_text=reply_text),
+            answer=ack,
+            message=SimpleNamespace(answer=answer),
         ),
         effective_chat=SimpleNamespace(id=42, type="private"),
         effective_user=SimpleNamespace(id=7, username="tester"),

@@ -13,6 +13,7 @@ and assert on the ``agent_slug`` the respawn is created with.
 
 import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ import config_manager as cm_mod
 from condor.preferences import get_chat_binding
 from handlers import agents as agents_mod
 from handlers.agents import menu as menu_mod
+from tests.conftest import patch_agents
 
 # --- doubles -----------------------------------------------------------------
 
@@ -54,7 +56,7 @@ class _FakeSession:
 
 
 class _Message:
-    chat_id = 4242
+    chat = SimpleNamespace(id=4242)
     photo = sticker = voice = audio = document = None
     reply_to_message = external_reply = None
 
@@ -67,7 +69,7 @@ class _Message:
         self._rendered.append(text)
         return self
 
-    async def reply_text(self, text, **kw):
+    async def answer(self, text, **kw):
         self._rendered.append(text)
         return self
 
@@ -141,14 +143,12 @@ def _install(monkeypatch, agents, *, session=None):
         return
         yield  # pragma: no cover
 
-    monkeypatch.setattr(agents_mod, "_create_tg_session", fake_create)
-    monkeypatch.setattr(agents_mod, "get_session", fake_get_session)
-    monkeypatch.setattr(agents_mod, "destroy_session", fake_destroy)
-    monkeypatch.setattr(agents_mod, "_is_agent_available", lambda key: True)
-    monkeypatch.setattr(
-        agents_mod, "_tg_permission_callback", lambda bot, c, u: object()
-    )
-    monkeypatch.setattr(agents_mod, "TelegramStreamer", _Streamer)
+    patch_agents(monkeypatch, "_create_tg_session", fake_create)
+    patch_agents(monkeypatch, "get_session", fake_get_session)
+    patch_agents(monkeypatch, "destroy_session", fake_destroy)
+    patch_agents(monkeypatch, "_is_agent_available", lambda key: True)
+    patch_agents(monkeypatch, "_tg_permission_callback", lambda bot, c, u: object())
+    patch_agents(monkeypatch, "TelegramStreamer", _Streamer)
     monkeypatch.setattr(agents_mod.runtime, "prompt", fake_prompt)
     monkeypatch.setattr(agents_mod.runtime, "get_info", fake_get_info)
     monkeypatch.setattr(menu_mod.runtime, "get_info", fake_get_info)
@@ -252,7 +252,7 @@ def test_a_failed_switch_does_not_bind_the_chat(monkeypatch):
     async def boom(**kw):
         raise RuntimeError("no CLI")
 
-    monkeypatch.setattr(agents_mod, "_create_tg_session", boom)
+    patch_agents(monkeypatch, "_create_tg_session", boom)
     asyncio.run(agents_mod._handle_talk_pick(_Update(rendered, callback=True), ctx, 0))
 
     # The verb follows what was actually attempted -- these doubles have no live

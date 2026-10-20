@@ -26,7 +26,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatMessage, ChatSlot, SlotInfo } from "@/hooks/useChatSocket";
-import type { ConversationMeta } from "@/lib/api";
+import type { ConversationMeta } from "@/lib/api/conversations";
 
 const chat = {
   slots: [] as ChatSlot[],
@@ -66,15 +66,21 @@ vi.mock("@/hooks/useChat", () => ({
 }));
 vi.mock("@/hooks/useServer", () => ({ useServer: () => ({ server: "srv" }) }));
 vi.mock("@/hooks/useStarters", () => ({ useStarters: () => [] }));
-// Only the two reads the bubble makes are faked; the rest of the module is
+// Only the two reads the bubble makes are faked; the rest of each module is
 // real, so `CHAT_SLUG` and the types keep their actual values.
-vi.mock("@/lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api")>();
+vi.mock("@/lib/api/agents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/agents")>();
   return {
     ...actual,
-    api: {
-      ...actual.api,
-      getAgents: () => Promise.resolve([]),
+    agentsApi: { ...actual.agentsApi, getAgents: () => Promise.resolve([]) },
+  };
+});
+vi.mock("@/lib/api/conversations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/conversations")>();
+  return {
+    ...actual,
+    conversationsApi: {
+      ...actual.conversationsApi,
       listConversations: (...args: unknown[]) => listConversations(...args),
     },
   };

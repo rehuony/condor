@@ -1,9 +1,9 @@
 import logging
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from config_manager import get_client
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,8 @@ def _price_slope_pct(closes: list, lookback: int = 48) -> float:
     return ((end - start) / start * 100) if start else 0.0
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    client = await get_client(context._chat_id, context=context)
+async def run(config: Config, context: RoutineContext) -> str:
+    client = await get_client(context.chat_id, user_data=context.user_data)
     if not client:
         return "No server available"
 

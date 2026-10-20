@@ -13,10 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type {
-  ControllerPerformanceHistoryAllResponse,
-  ControllerPerformanceSnapshot,
-} from "./api";
+import type { ControllerPerformanceHistoryAllResponse, ControllerPerformanceSnapshot } from "./api/performance";
 import {
   mergeHistoryTail,
   newestSnapshotMs,

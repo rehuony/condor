@@ -131,15 +131,9 @@ def test_a_verified_group_member_passes_object_shape(bot):
     assert bot.membership_checks == [(GROUP_CHAT, CALLER.id)]
 
 
-def test_a_verified_group_member_passes_envelope_shape(bot):
-    """``_HttpBot`` answers Telegram's raw envelope."""
-    bot.member = {"ok": True, "result": {"status": "administrator"}}
-    asyncio.run(_check_chat_access(CALLER.id, GROUP_CHAT))
-
-
 def test_a_left_or_kicked_member_is_refused(bot):
     for status in ("left", "kicked"):
-        bot.member = {"ok": True, "result": {"status": status}}
+        bot.member = SimpleNamespace(status=status)
         with pytest.raises(HTTPException) as exc:
             asyncio.run(_check_chat_access(CALLER.id, GROUP_CHAT))
         assert exc.value.status_code == 403
@@ -189,7 +183,7 @@ def test_notify_delivers_to_a_group_the_caller_belongs_to(monkeypatch, bot):
     """The MCP crossback for a group session sends the group's id under the
     member's own JWT — that legitimate path must keep working."""
     _resolves_to(monkeypatch, "")
-    bot.member = {"ok": True, "result": {"status": "member"}}
+    bot.member = SimpleNamespace(status="member")
 
     result = asyncio.run(
         notify_user(NotifyRequest(text="done", chat_id=GROUP_CHAT), user=CALLER)

@@ -11,14 +11,12 @@ This module provides a modular structure for gateway configuration:
 - tokens.py: Token management
 """
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
+from condor.telegram.types import Context, Update
 from utils.auth import restricted
 
 
 @restricted
-async def gateway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def gateway_command(update: Update, context: Context) -> None:
     """Handle /gateway command - show Gateway configuration directly."""
     from handlers import clear_all_input_states
     from utils.telegram_helpers import create_mock_query_from_message
@@ -61,9 +59,7 @@ from .tokens import handle_token_action, handle_token_input, show_tokens_menu
 from .wallets import handle_wallet_action, handle_wallet_input, show_wallets_menu
 
 
-async def handle_gateway_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_gateway_callback(update: Update, context: Context) -> None:
     """Main router for gateway-related callbacks"""
     query = update.callback_query
 
@@ -115,9 +111,7 @@ async def handle_gateway_callback(
         await handle_rpc_action(query, context)
 
 
-async def handle_gateway_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_gateway_input(update: Update, context: Context) -> None:
     """Route text input to the appropriate gateway module"""
     # Check which type of input we're awaiting
     if context.user_data.get("awaiting_gateway_input"):

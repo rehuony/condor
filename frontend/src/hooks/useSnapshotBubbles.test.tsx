@@ -19,7 +19,7 @@ import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SnapshotSummary } from "@/lib/api";
+import type { SnapshotSummary } from "@/lib/api/agents";
 
 /** Resolvers for the in-flight `getSnapshot` calls, keyed by tick. */
 const pending = new Map<number, (content: string) => void>();
@@ -29,7 +29,11 @@ const getSnapshot = vi.fn((_slug: string, _sslug: string, _n: number, tick: numb
   }),
 );
 
-vi.mock("@/lib/api", () => ({ api: { getSnapshot: (...a: [string, string, number, number]) => getSnapshot(...a) } }));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
+    getSnapshot: (...a: [string, string, number, number]) => getSnapshot(...a),
+  },
+}));
 
 const { snapshotQueryOptions, useSnapshotBubbles } = await import("./useSnapshotBubbles");
 

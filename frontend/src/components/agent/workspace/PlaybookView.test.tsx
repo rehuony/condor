@@ -27,7 +27,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { StrategyDetail } from "@/lib/api";
+import type { StrategyDetail } from "@/lib/api/agents";
 
 /** jsdom has none, and the editor dialogs' module graph reads the theme. */
 window.matchMedia = ((media: string) => ({
@@ -41,13 +41,17 @@ window.matchMedia = ((media: string) => ({
   dispatchEvent: () => false,
 })) as unknown as typeof window.matchMedia;
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     deleteStrategy: vi.fn(),
-    getRoutineInstances: vi.fn(() => Promise.resolve([])),
     setRestartOnBoot: vi.fn(),
     updateStrategyMd: vi.fn(),
     updateStrategyLearnings: vi.fn(),
+  },
+}));
+vi.mock("@/lib/api/routines", () => ({
+  routinesApi: {
+    getRoutineInstances: vi.fn(() => Promise.resolve([])),
   },
 }));
 
@@ -56,7 +60,7 @@ vi.mock("@/components/routines/ReportBrowser", () => ({
 }));
 
 const { PlaybookView } = await import("./PlaybookView");
-const { api } = await import("@/lib/api");
+const { agentsApi } = await import("@/lib/api/agents");
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -227,7 +231,7 @@ describe("PlaybookView", () => {
   });
 
   it("says why a refused restart write snapped back", async () => {
-    vi.mocked(api.setRestartOnBoot).mockRejectedValueOnce(
+    vi.mocked(agentsApi.setRestartOnBoot).mockRejectedValueOnce(
       new Error("Another user's loop is running this strategy — stop it first"),
     );
     render();
@@ -238,7 +242,7 @@ describe("PlaybookView", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
     }
-    expect(api.setRestartOnBoot).toHaveBeenCalledWith("brigado", "pmm_king", false);
+    expect(agentsApi.setRestartOnBoot).toHaveBeenCalledWith("brigado", "pmm_king", false);
     const after = container.querySelector('[role="switch"]');
     expect(after?.getAttribute("aria-checked")).toBe("true");
     // Beside the switch, in the Configuration card's own header.

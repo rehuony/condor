@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
+import { Card } from "@/components/ui/Card";
 import { SelectField } from "@/components/ui/select-field";
 
 import { AdminSettings } from "@/components/settings/AdminSettings";
@@ -207,7 +208,7 @@ export function Settings() {
 function AdminOnlyNotice({ tab }: { tab: "updates" | "admin" }) {
   const what = tab === "updates" ? "Updates" : "Admin";
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <Card>
       <h2 className="mb-1 text-sm font-semibold text-[var(--color-text)]">
         {what} is admin-only
       </h2>
@@ -219,6 +220,6 @@ function AdminOnlyNotice({ tab }: { tab: "updates" | "admin" }) {
         reload. <code className="text-[var(--color-text)]">make doctor</code>{" "}
         names the id it signs in as.
       </p>
-    </div>
+    </Card>
   );
 }

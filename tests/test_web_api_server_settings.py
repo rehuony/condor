@@ -1,4 +1,4 @@
-"""The Settings → Hummingbot API panel's three routes (FEAT-121).
+"""The Settings → Hummingbot API panel's routes (FEAT-121).
 
 The panel reads what a server runs and writes the client defaults every bot deployed
 from it next will inherit. Three things have to hold, and none of them is the happy path:
@@ -7,9 +7,12 @@ from it next will inherit. Three things have to hold, and none of them is the ha
   owner's next bot is configured — infrastructure, the same line SEC-153/SEC-166 drew for
   credentials and the gateway. Reading a rate oracle source is not a secret, and a trader
   who can deploy needs to see what the deploy will use.
-* **A 404 is not an outage.** These routes are new. A server that has not been upgraded
-  answers 404 to a perfectly well-formed request, and the panel must say "upgrade this
-  server's API", not "the server is down" — two different actions for the operator.
+* **A 404 is not an outage.** These routes are new. An older API build answers 404 to a
+  perfectly well-formed request, and the panel must say "deploy a newer hummingbot-api",
+  not "the server is down" — two different actions for the operator.
+* **The update check is the API's verdict.** Condor proxies ``/system/update-check``
+  with its own authentication; it neither contacts GitHub nor rewrites the status, and
+  the API's removed self-upgrade routes have no proxy left.
 * **An invalid value keeps its own status.** Upstream owns validation (its bundled
   hummingbot is the authority on which oracle sources exist), so its 422 has to reach the
   caller as a 4xx naming the value, not as a 502.
@@ -19,8 +22,10 @@ doubles here are a fake aiohttp session hung off ``client.bot_orchestration`` �
 shape ``tests/test_performance_history.py`` uses, and the shape the real client has.
 """
 
+import asyncio
 import json
 
+import aiohttp
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -37,20 +42,45 @@ ADMIN = WebUser(id=3, username="admin", first_name="A", role="admin")
 
 P = {"server": SERVER}
 
+REVISION = "768e7c1f96fb1f21d91ff2313c0de0f8afa1cd3e"
+LATEST = "e899139394d27c6bfed099073e5933b721a80664"
+
 SYSTEM_INFO = {
     "api_version": "1.0.1",
     "hummingbot_version": "20260616",
     "market_data": {"ticker_update_interval": 30, "ticker_max_age": 60},
     "docker_available": True,
     "container": {
-        "image": "hummingbot/hummingbot-api:latest",
-        "digest": "hummingbot/hummingbot-api@sha256:abc123",
+        "id": "c" * 64,
+        "name": "hummingbot-api",
+        "image": "rehuony/hummingbot-api:main",
+        "image_id": "sha256:" + "a" * 64,
+        "digest": None,
+        "image_created": "2026-10-20T07:01:02.123456789Z",
+        "build": {
+            "source": "https://github.com/rehuony/hummingbot-api",
+            "revision": REVISION,
+            "branch": "main",
+            "created": "2026-10-20T07:00:00Z",
+            "dirty": False,
+        },
         "compose_project": "hummingbot-api",
+        "compose_working_dir": "/srv/hummingbot-api",
+        "compose_config_files": "/srv/hummingbot-api/docker-compose.yml",
     },
-    "pinned": False,
-    "pinned_reason": None,
-    "override_file": None,
 }
+
+
+def update_check(status, reason="", latest=LATEST):
+    return {
+        "status": status,
+        "current_revision": REVISION,
+        "latest_revision": latest,
+        "checked_at": "2026-10-20T09:00:00Z",
+        "reason": reason or None,
+        "compare_url": f"https://github.com/rehuony/hummingbot-api/compare/{REVISION}...{latest}",
+    }
+
 
 CLIENT_CONFIG = {
     "account_name": "master_account",
@@ -88,6 +118,19 @@ class FakeResponse:
         return False
 
 
+class Raises:
+    """A request that never gets an HTTP answer: refused, timed out, host down."""
+
+    def __init__(self, exc):
+        self.exc = exc
+
+    async def __aenter__(self):
+        raise self.exc
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 class FakeSession:
     """Answers each path from a canned table and records what it was asked."""
 
@@ -110,6 +153,9 @@ class FakeSession:
 
     def put(self, url, **kwargs):
         return self._answer("put", url, kwargs)
+
+    def post(self, url, **kwargs):
+        return self._answer("post", url, kwargs)
 
 
 class FakeClient:
@@ -181,9 +227,38 @@ def test_info_reports_what_the_server_runs(env):
 
     assert body["api_version"] == "1.0.1"
     assert body["hummingbot_version"] == "20260616"
-    assert body["container"]["image"] == "hummingbot/hummingbot-api:latest"
-    assert body["pinned"] is False
     assert body["market_data"]["ticker_update_interval"] == 30
+    # Passed through untouched: a local build has no digest, and the proxy must not
+    # fill one in from the image ID or drop the build provenance.
+    container = body["container"]
+    assert container["digest"] is None
+    assert container["image_id"] == SYSTEM_INFO["container"]["image_id"]
+    assert container["build"] == SYSTEM_INFO["container"]["build"]
+    assert container["image_created"] != container["build"]["created"]
+
+
+@pytest.mark.parametrize(
+    "info",
+    [
+        {**SYSTEM_INFO, "docker_available": False, "container": None},
+        # An API from before the build labels: no build, no image_created.
+        {
+            **SYSTEM_INFO,
+            "container": {
+                k: v
+                for k, v in SYSTEM_INFO["container"].items()
+                if k not in ("build", "image_created")
+            },
+        },
+    ],
+    ids=["no-container", "no-build-metadata"],
+)
+def test_info_degrades_without_container_metadata(monkeypatch, info):
+    app, _ = build(monkeypatch, {"/system/info": FakeResponse(200, info)})
+    resp = as_user(app, TRADER).get("/settings/api/info", params=P)
+
+    assert resp.status_code == 200
+    assert resp.json() == info
 
 
 def test_client_config_reports_the_defaults_and_the_choices(env):
@@ -324,15 +399,16 @@ def test_a_padded_value_is_trimmed_before_it_is_sent(env):
     ],
     ids=["info", "read-config", "write-config"],
 )
-def test_a_server_whose_api_predates_the_routes_says_upgrade(monkeypatch, call):
+def test_a_server_whose_api_predates_the_routes_says_deploy(monkeypatch, call):
     # 404 everywhere: the default table in FakeSession answers 404 for unknown paths.
     app, _ = build(monkeypatch, responses={})
     resp = call(as_user(app, OWNER))
 
     # 501, not 502: the server is fine, the panel is newer than it. The operator's
-    # action is "upgrade this server", not "find out why it is down".
+    # action is "deploy a newer build", not "find out why it is down".
     assert resp.status_code == 501
     assert "older than this panel" in resp.json()["detail"]
+    assert "upgrade" not in resp.json()["detail"].lower()
 
 
 def test_an_invalid_value_keeps_the_servers_own_status_and_message(monkeypatch):
@@ -367,3 +443,89 @@ def test_an_upstream_failure_never_echoes_the_raw_body(monkeypatch):
     assert resp.status_code == 502
     assert "nginx" not in json.dumps(resp.json())
     assert "api-internal" not in json.dumps(resp.json())
+
+
+# ── Source update check ──
+
+CHECK = "/settings/api/update-check"
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["up_to_date", "update_available", "ahead", "diverged", "unknown", "error"],
+)
+def test_the_update_check_forwards_the_apis_verdict(monkeypatch, status):
+    verdict = update_check(status, reason=f"reason for {status}")
+    app, session = build(
+        monkeypatch, {"/system/update-check": FakeResponse(200, verdict)}
+    )
+
+    resp = as_user(app, TRADER).get(CHECK, params=P)
+
+    assert resp.status_code == 200
+    assert resp.json() == verdict
+    # One request, to the API only, with room for its two bounded GitHub calls.
+    [(method, url, kwargs)] = session.calls
+    assert (method, url) == ("get", "http://api:8000/system/update-check")
+    assert kwargs["timeout"].total > 20
+
+
+def test_the_update_check_needs_server_access(monkeypatch):
+    app, session = build(
+        monkeypatch, {"/system/update-check": FakeResponse(200, update_check("ahead"))}
+    )
+    stranger = WebUser(id=99, username="nobody", first_name="N", role="user")
+
+    assert as_user(app, stranger).get(CHECK, params=P).status_code == 403
+    assert session.calls == []
+
+
+def test_an_api_without_the_update_check_is_unsupported_not_down(monkeypatch):
+    app, _ = build(monkeypatch, responses={})
+    resp = as_user(app, OWNER).get(CHECK, params=P)
+
+    assert resp.status_code == 501
+    assert "cannot check its source for updates" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_rejected_server_credentials_are_named_not_forwarded(monkeypatch, status):
+    app, _ = build(
+        monkeypatch,
+        {
+            "/system/update-check": FakeResponse(
+                status, {"detail": "Incorrect username"}
+            )
+        },
+    )
+    resp = as_user(app, OWNER).get(CHECK, params=P)
+
+    # Never a 401/403 to the browser: that would read as the dashboard login failing.
+    assert resp.status_code == 502
+    assert "stored credentials" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        aiohttp.ClientConnectionError("connect to api-internal:8000 refused"),
+        asyncio.TimeoutError(),
+    ],
+    ids=["unreachable", "timeout"],
+)
+def test_an_unreachable_api_is_a_502_that_leaks_nothing(monkeypatch, failure):
+    app, _ = build(monkeypatch, {"/system/update-check": Raises(failure)})
+    resp = as_user(app, OWNER).get(CHECK, params=P)
+
+    assert resp.status_code == 502
+    assert "api-internal" not in json.dumps(resp.json())
+
+
+def test_the_removed_self_upgrade_routes_are_gone(monkeypatch):
+    app, session = build(monkeypatch, FakeResponse(200, {"can_upgrade": True}))
+    http = as_user(app, OWNER)
+
+    assert http.get("/settings/api/upgrade/preflight", params=P).status_code == 404
+    assert http.post("/settings/api/upgrade", params=P, json={}).status_code == 404
+    assert http.get("/settings/api/upgrade/status", params=P).status_code == 404
+    assert session.calls == []

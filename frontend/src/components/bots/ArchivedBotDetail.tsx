@@ -4,7 +4,6 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   RefreshCw,
   TrendingDown,
   TrendingUp,
@@ -12,15 +11,14 @@ import {
 import { useMemo, useState } from "react";
 
 import { ReportFrame } from "@/components/routines/ReportFrame";
+import { IconButton } from "@/components/ui/IconButton";
+import { Spinner } from "@/components/ui/Spinner";
+import { TABLE_HEAD_ROW, TH, TH_NUM } from "@/components/ui/table";
 import { useArchivedReport } from "@/hooks/useArchivedReport";
 import { CURRENCY_SYMBOLS, type DisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { useServer } from "@/hooks/useServer";
-import { api } from "@/lib/api";
-import type {
-  ArchivedBotPerformance,
-  ArchivedControllerRollup,
-  ArchivedExecutor,
-} from "@/lib/api";
+import type { ArchivedExecutor } from "@/lib/api/executors";
+import { archivedApi, type ArchivedBotPerformance, type ArchivedControllerRollup } from "@/lib/api/archived";
 import { formatCurrencyPnl, formatCurrencyVolume, pnlTextClass } from "@/lib/formatters";
 
 /**
@@ -135,7 +133,7 @@ function ExecutorTable({
 
   const { data, isLoading } = useQuery({
     queryKey: ["archived-executors", server, dbPath, offset, EXECUTORS_PAGE_SIZE],
-    queryFn: () => api.getArchivedExecutors(server, dbPath, offset, EXECUTORS_PAGE_SIZE),
+    queryFn: () => archivedApi.getArchivedExecutors(server, dbPath, offset, EXECUTORS_PAGE_SIZE),
     enabled: !!server && executorCount > 0,
     staleTime: Infinity,
   });
@@ -182,26 +180,26 @@ function ExecutorTable({
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-24">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]" />
+            <Spinner size="lg" tone="muted" />
           </div>
         ) : (
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
-                <th className="px-3 py-2 text-left font-medium">ID</th>
-                <th className="px-3 py-2 text-left font-medium">Type</th>
-                <th className="px-3 py-2 text-left font-medium">Pair</th>
-                <th className="px-3 py-2 text-left font-medium">Side</th>
-                <th className="px-3 py-2 text-left font-medium">Close Type</th>
-                <th className="px-3 py-2 text-right font-medium">Entry</th>
-                <th className="px-3 py-2 text-right font-medium">Exit</th>
+              <tr className={TABLE_HEAD_ROW}>
+                <th className={TH}>ID</th>
+                <th className={TH}>Type</th>
+                <th className={TH}>Pair</th>
+                <th className={TH}>Side</th>
+                <th className={TH}>Close Type</th>
+                <th className={TH_NUM}>Entry</th>
+                <th className={TH_NUM}>Exit</th>
                 <th
                   className="px-3 py-2 text-right font-medium cursor-pointer hover:text-[var(--color-text)]"
                   onClick={() => toggleSort("pnl")}
                 >
                   PnL{sortIndicator("pnl")}
                 </th>
-                <th className="px-3 py-2 text-right font-medium">Fees</th>
+                <th className={TH_NUM}>Fees</th>
                 <th
                   className="px-3 py-2 text-right font-medium cursor-pointer hover:text-[var(--color-text)]"
                   onClick={() => toggleSort("volume")}
@@ -307,7 +305,7 @@ function ControllerTable({
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ["archived-controllers", server, dbPath],
-    queryFn: () => api.getArchivedControllers(server, dbPath),
+    queryFn: () => archivedApi.getArchivedControllers(server, dbPath),
     enabled: !!server && !!dbPath,
     staleTime: Infinity,
   });
@@ -330,7 +328,7 @@ function ControllerTable({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-16">
-        <Loader2 className="h-4 w-4 animate-spin text-[var(--color-text-muted)]" />
+        <Spinner tone="muted" />
       </div>
     );
   }
@@ -344,14 +342,14 @@ function ControllerTable({
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
-              <th className="px-3 py-2 text-left font-medium">Controller</th>
-              <th className="px-3 py-2 text-left font-medium">Pairs</th>
-              <th className="px-3 py-2 text-right font-medium">PnL</th>
-              <th className="px-3 py-2 text-right font-medium">Volume</th>
-              <th className="px-3 py-2 text-right font-medium">Fees</th>
-              <th className="px-3 py-2 text-right font-medium">Executors</th>
-              <th className="px-3 py-2 text-right font-medium">Chart</th>
+            <tr className={TABLE_HEAD_ROW}>
+              <th className={TH}>Controller</th>
+              <th className={TH}>Pairs</th>
+              <th className={TH_NUM}>PnL</th>
+              <th className={TH_NUM}>Volume</th>
+              <th className={TH_NUM}>Fees</th>
+              <th className={TH_NUM}>Executors</th>
+              <th className={TH_NUM}>Chart</th>
             </tr>
           </thead>
           <tbody>
@@ -387,17 +385,17 @@ function ControllerTable({
                     {c.executor_count.toLocaleString()}
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    <button
-                      onClick={() => onChart(unattributed ? null : c.controller_id)}
-                      title={
+                    <IconButton
+                      label={
                         unattributed
                           ? "These executors ran under no controller — the run chart is their chart"
                           : `Chart ${c.controller_id}`
                       }
-                      className="p-1 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      size="sm"
+                      onClick={() => onChart(unattributed ? null : c.controller_id)}
                     >
                       <BarChart3 className="h-3.5 w-3.5" />
-                    </button>
+                    </IconButton>
                   </td>
                 </tr>
               );
@@ -460,7 +458,7 @@ function ArchivedReportPanel({
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
         {isRunning ? (
           <div className="flex flex-col items-center justify-center h-48 gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]" />
+            <Spinner size="lg" tone="muted" />
             <p className="text-xs text-[var(--color-text-muted)]">
               Charting {label}…
             </p>
@@ -474,7 +472,7 @@ function ArchivedReportPanel({
           </div>
         ) : isLoading ? (
           <div className="flex items-center justify-center h-48">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]" />
+            <Spinner size="lg" tone="muted" />
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-48 gap-3">
@@ -519,7 +517,7 @@ export function ArchivedBotDetail({ dbPath, botName, onBack }: Props) {
   // Query 1: Performance summary (no executors) — fast path
   const { data: perf, isLoading, error } = useQuery({
     queryKey: ["archived-performance", server, dbPath],
-    queryFn: () => api.getArchivedBotPerformance(server!, dbPath, false),
+    queryFn: () => archivedApi.getArchivedBotPerformance(server!, dbPath, false),
     enabled: !!server,
     staleTime: Infinity,
   });
@@ -549,7 +547,7 @@ export function ArchivedBotDetail({ dbPath, botName, onBack }: Props) {
           <h2 className="text-lg font-semibold">{botName}</h2>
         </div>
         <div className="flex flex-col items-center justify-center h-48 gap-3">
-          <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]" />
+          <Spinner size="xl" tone="muted" />
           <p className="text-xs text-[var(--color-text-muted)]">Reading archived database…</p>
         </div>
       </div>

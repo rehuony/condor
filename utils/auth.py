@@ -1,17 +1,18 @@
 import logging
 from functools import wraps
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
-from config_manager import ServerPermission, UserRole, get_config_manager
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
+from config_manager import UserRole, get_config_manager
 
 logger = logging.getLogger(__name__)
 
 
-async def _notify_admin_new_user(
-    context: ContextTypes.DEFAULT_TYPE, user_id: int, username: str
-) -> None:
+async def _notify_admin_new_user(context: Context, user_id: int, username: str) -> None:
     """Send notification to admin about new user request."""
     cm = get_config_manager()
     admin_id = cm.admin_id
@@ -36,7 +37,7 @@ async def _notify_admin_new_user(
         logger.warning(f"Failed to notify admin about new user: {e}")
 
 
-def _refresh_active_server(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def _refresh_active_server(update: Update, context: Context) -> None:
     """Re-sync the cached ``active_server`` from config.yml before the handler runs.
 
     ``chat_defaults`` in config.yml is where every surface records the chosen
@@ -95,9 +96,7 @@ def restricted(func):
     """
 
     @wraps(func)
-    async def wrapped(
-        update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
-    ):
+    async def wrapped(update: Update, context: Context, *args, **kwargs):
         user_id = update.effective_user.id
         username = update.effective_user.username
 
@@ -108,7 +107,7 @@ def restricted(func):
         if role == UserRole.BLOCKED:
             logger.info(f"Blocked user {user_id} attempted access")
             if update.message:
-                await update.message.reply_text("🚫 Access denied.")
+                await update.message.answer("🚫 Access denied.")
             elif update.callback_query:
                 await update.callback_query.answer("Access denied", show_alert=True)
             return
@@ -116,7 +115,7 @@ def restricted(func):
         # Handle pending users
         if role == UserRole.PENDING:
             if update.message:
-                await update.message.reply_text(
+                await update.message.answer(
                     "⏳ Your access request is pending admin approval.\n"
                     "You will be notified when approved."
                 )
@@ -139,7 +138,7 @@ def restricted(func):
                 await _notify_admin_new_user(context, user_id, username)
 
             if update.message:
-                await update.message.reply_text(
+                await update.message.answer(
                     "🔒 *Access Request Submitted*\n\n"
                     f"Your User ID: `{user_id}`\n\n"
                     "An admin will review your request\\. "
@@ -166,15 +165,13 @@ def admin_required(func):
     """Decorator that requires admin role."""
 
     @wraps(func)
-    async def wrapped(
-        update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
-    ):
+    async def wrapped(update: Update, context: Context, *args, **kwargs):
         user_id = update.effective_user.id
         cm = get_config_manager()
 
         if not cm.is_admin(user_id):
             if update.message:
-                await update.message.reply_text("🔐 Admin access required.")
+                await update.message.answer("🔐 Admin access required.")
             elif update.callback_query:
                 await update.callback_query.answer(
                     "Admin access required", show_alert=True
@@ -184,58 +181,6 @@ def admin_required(func):
         return await func(update, context, *args, **kwargs)
 
     return wrapped
-
-
-def server_access_required(min_permission: ServerPermission = ServerPermission.TRADER):
-    """
-    Decorator factory that checks server permission.
-    Server name is determined from context.user_data or per-chat default.
-    """
-
-    def decorator(func):
-        @wraps(func)
-        async def wrapped(
-            update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
-        ):
-            from condor.preferences import get_active_server
-            from config_manager import get_config_manager
-
-            user_id = update.effective_user.id
-            cm = get_config_manager()
-
-            # Get user's preferred server, fallback to first accessible
-            server_name = get_active_server(context.user_data)
-            if not server_name:
-                accessible = cm.get_accessible_servers(user_id)
-                server_name = accessible[0] if accessible else None
-
-            if not server_name:
-                if update.message:
-                    await update.message.reply_text("⚠️ No server configured.")
-                elif update.callback_query:
-                    await update.callback_query.answer(
-                        "No server configured", show_alert=True
-                    )
-                return
-
-            # Check permission
-            if not cm.has_server_access(user_id, server_name, min_permission):
-                perm_name = min_permission.value.title()
-                if update.message:
-                    await update.message.reply_text(
-                        f"🚫 You don't have {perm_name} access to this server."
-                    )
-                elif update.callback_query:
-                    await update.callback_query.answer(
-                        f"No {perm_name} access to this server", show_alert=True
-                    )
-                return
-
-            return await func(update, context, *args, **kwargs)
-
-        return wrapped
-
-    return decorator
 
 
 async def _send_service_unavailable_message(
@@ -250,11 +195,11 @@ async def _send_service_unavailable_message(
     message += f"{status_line}\n\n"
     message += instruction
 
-    keyboard = [[InlineKeyboardButton("✕ Close", callback_data=close_callback)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [[InlineKeyboardButton(text="✕ Close", callback_data=close_callback)]]
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     if update.message:
-        await update.message.reply_text(
+        await update.message.answer(
             message, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
     elif update.callback_query:
@@ -270,14 +215,12 @@ def gateway_required(func):
 
     Usage:
         @gateway_required
-        async def handle_liquidity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        async def handle_liquidity(update: Update, context: Context):
             ...
     """
 
     @wraps(func)
-    async def wrapped(
-        update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
-    ):
+    async def wrapped(update: Update, context: Context, *args, **kwargs):
         try:
             from handlers.config.server_context import (
                 get_gateway_status_info,
@@ -337,14 +280,12 @@ def hummingbot_api_required(func):
 
     Usage:
         @hummingbot_api_required
-        async def handle_some_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        async def handle_some_command(update: Update, context: Context):
             ...
     """
 
     @wraps(func)
-    async def wrapped(
-        update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
-    ):
+    async def wrapped(update: Update, context: Context, *args, **kwargs):
         try:
             from handlers.config.server_context import get_server_context_header
 

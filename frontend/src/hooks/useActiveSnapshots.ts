@@ -28,7 +28,8 @@
  */
 import { useMemo } from "react";
 
-import type { ControllerInfo, ControllerPerformanceSnapshot } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ControllerPerformanceSnapshot } from "@/lib/api/performance";
 import { controllerKey } from "@/lib/controller-identity";
 
 /** Held still, so "no controllers yet" is not a new array every render. */

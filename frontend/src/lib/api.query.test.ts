@@ -14,7 +14,10 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./api";
+import { botsApi } from "./api/bots";
+import { performanceApi } from "./api/performance";
+import { executorsApi } from "./api/executors";
+import { reportsApi } from "./api/reports";
 
 const SERVER = "prod";
 
@@ -39,7 +42,7 @@ afterEach(() => {
 describe("getBotRuns", () => {
   it("keeps set parameters and drops undefined and empty ones", async () => {
     const urls = serve({ bot_runs: [], total: 0 });
-    await api.getBotRuns(SERVER, {
+    await botsApi.getBotRuns(SERVER, {
       bot_name: "bot-a",
       run_status: "",
       deployment_status: undefined,
@@ -52,7 +55,7 @@ describe("getBotRuns", () => {
 
   it("omits the ? entirely when nothing is set", async () => {
     const urls = serve({ bot_runs: [], total: 0 });
-    await api.getBotRuns(SERVER);
+    await botsApi.getBotRuns(SERVER);
     expect(urls[0]).toBe("/api/v1/servers/prod/bot-runs");
   });
 });
@@ -60,7 +63,7 @@ describe("getBotRuns", () => {
 describe("getExecutors", () => {
   it("keeps set parameters and drops undefined and empty ones", async () => {
     const urls = serve([]);
-    await api.getExecutors(SERVER, {
+    await executorsApi.getExecutors(SERVER, {
       executor_type: "position_executor",
       trading_pair: "",
       status: undefined,
@@ -74,7 +77,7 @@ describe("getExecutors", () => {
 
   it("omits the ? entirely when called with no parameters", async () => {
     const urls = serve([]);
-    await api.getExecutors(SERVER);
+    await executorsApi.getExecutors(SERVER);
     expect(urls[0]).toBe("/api/v1/servers/prod/executors");
   });
 });
@@ -82,7 +85,7 @@ describe("getExecutors", () => {
 describe("getExecutorsPage", () => {
   it("always carries a limit, defaulting to 50", async () => {
     const urls = serve({ executors: [], next_cursor: null });
-    await api.getExecutorsPage(SERVER, { status: "", trading_pair: "SOL-USDC" });
+    await executorsApi.getExecutorsPage(SERVER, { status: "", trading_pair: "SOL-USDC" });
     expect(urls[0]).toBe(
       "/api/v1/servers/prod/executors/page?trading_pair=SOL-USDC&limit=50",
     );
@@ -90,7 +93,7 @@ describe("getExecutorsPage", () => {
 
   it("carries the cursor and an explicit limit when given them", async () => {
     const urls = serve({ executors: [], next_cursor: null });
-    await api.getExecutorsPage(SERVER, {
+    await executorsApi.getExecutorsPage(SERVER, {
       cursor: "cur-1",
       limit: 200,
       controller_id: undefined,
@@ -104,7 +107,7 @@ describe("getExecutorsPage", () => {
 describe("getReports", () => {
   it("keeps set parameters and drops undefined and empty ones", async () => {
     const urls = serve({ reports: [], total: 0 });
-    await api.getReports({
+    await reportsApi.getReports({
       source_type: "routine",
       tag: "",
       search: undefined,
@@ -115,7 +118,7 @@ describe("getReports", () => {
 
   it("omits the ? entirely when called with no parameters", async () => {
     const urls = serve({ reports: [], total: 0 });
-    await api.getReports();
+    await reportsApi.getReports();
     expect(urls[0]).toBe("/api/v1/reports");
   });
 });
@@ -123,7 +126,7 @@ describe("getReports", () => {
 describe("controller performance history page", () => {
   it("builds its query from the walk's parameters, page size included", async () => {
     const urls = serve({ snapshots: [], next_cursor: null, interval: "1h" });
-    await api.getControllerPerformanceHistoryAll(
+    await performanceApi.getControllerPerformanceHistoryAll(
       SERVER,
       {
         bot_name: "bot-a",
@@ -143,7 +146,7 @@ describe("controller performance history page", () => {
 describe("performance history page", () => {
   it("builds its query from the walk's parameters, page size included", async () => {
     const urls = serve({ snapshots: [], next_cursor: null, interval: "1h" });
-    await api.getPerformanceHistory(
+    await performanceApi.getPerformanceHistory(
       SERVER,
       { subject: "controller", bot_name: "bot-a", executor_id: "", interval: "1h" },
       { pageSize: 3, maxRows: 100 },

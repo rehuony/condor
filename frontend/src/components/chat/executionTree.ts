@@ -24,7 +24,7 @@ import {
   type DeedIndex,
   type FleetOwner,
 } from "@/lib/agent-attribution";
-import type { AgentSummary } from "@/lib/api";
+import type { AgentSummary } from "@/lib/api/agents";
 import { distinguishes } from "@/lib/perf-grouping";
 import {
   AXIS_PREFIX,

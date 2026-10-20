@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
+import { Spinner } from "@/components/ui/Spinner";
 import { ADMIN_PEOPLE_KEY, adminApi } from "@/lib/admin-api";
 
 import { AuditTrail } from "./admin/AuditTrail";
@@ -49,7 +50,7 @@ export function AdminSettings() {
           className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:opacity-50"
         >
           {refreshMut.isPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner size="sm" />
           ) : (
             <RefreshCw className="h-3.5 w-3.5" />
           )}

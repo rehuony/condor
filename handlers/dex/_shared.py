@@ -8,17 +8,14 @@ Contains:
 - Conversation-level caching (delegates to condor.cache)
 """
 
+import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional
+import time
+from functools import partial
+from typing import Any, Dict, List, Optional
 
+from condor import cache as _cache
 from condor.cache import DEFAULT_CACHE_TTL
-from condor.cache import cached_call as _cached_call
-from condor.cache import clear_cache as _clear_cache
-from condor.cache import evict_expired as _evict_expired
-from condor.cache import get_cached as _get_cached
-from condor.cache import invalidate_groups as _invalidate_groups
-from condor.cache import invalidates as _invalidates
-from condor.cache import set_cached as _set_cached
 
 logger = logging.getLogger(__name__)
 
@@ -29,36 +26,11 @@ logger = logging.getLogger(__name__)
 
 _NS = "_cache"  # namespace for DEX cache
 
-
-def get_cached(
-    user_data: dict, key: str, ttl: int = DEFAULT_CACHE_TTL
-) -> Optional[Any]:
-    return _get_cached(user_data, key, ttl, namespace=_NS)
-
-
-def set_cached(user_data: dict, key: str, value: Any) -> None:
-    _set_cached(user_data, key, value, namespace=_NS)
-
-
-def evict_expired(user_data: dict) -> int:
-    return _evict_expired(user_data, namespace=_NS)
-
-
-def clear_cache(user_data: dict, key: Optional[str] = None) -> None:
-    _clear_cache(user_data, key, namespace=_NS)
-
-
-async def cached_call(
-    user_data: dict,
-    key: str,
-    fetch_func: Callable,
-    ttl: int = DEFAULT_CACHE_TTL,
-    *args,
-    **kwargs,
-) -> Any:
-    return await _cached_call(
-        user_data, key, fetch_func, ttl, *args, namespace=_NS, **kwargs
-    )
+get_cached = partial(_cache.get_cached, namespace=_NS)
+set_cached = partial(_cache.set_cached, namespace=_NS)
+evict_expired = partial(_cache.evict_expired, namespace=_NS)
+clear_cache = partial(_cache.clear_cache, namespace=_NS)
+cached_call = partial(_cache.cached_call, namespace=_NS)
 
 
 # ============================================
@@ -98,12 +70,12 @@ def invalidate_cache(user_data: dict, *groups: str) -> None:
                 for key in keys:
                     if key in user_data:
                         user_data.pop(key, None)
-    _invalidate_groups(user_data, CACHE_GROUPS, *groups, namespace=_NS)
+    _cache.invalidate_groups(user_data, CACHE_GROUPS, *groups, namespace=_NS)
 
 
 def invalidates(*groups: str):
     """Decorator that invalidates cache groups after handler execution."""
-    return _invalidates(*groups, groups_map=CACHE_GROUPS, namespace=_NS)
+    return _cache.invalidates(*groups, groups_map=CACHE_GROUPS, namespace=_NS)
 
 
 # ============================================
@@ -111,6 +83,77 @@ def invalidates(*groups: str):
 # ============================================
 
 from config_manager import get_client
+
+# ============================================
+# GATEWAY TOKEN SYMBOLS
+# ============================================
+
+# Address → symbol per (client, network), memoized briefly. The DEX menu, the
+# LP screen and the pool views all resolve symbols from the same curated
+# Gateway list and used to each fetch it, network by network, in series.
+TOKEN_SYMBOLS_TTL = 60
+_token_symbols: Dict[tuple, tuple] = {}
+_token_clock = time.monotonic
+
+
+async def fetch_network_token_symbols(client, network: str) -> Dict[str, str]:
+    """Gateway's address → symbol map for one network, memoized per client.
+
+    Raises what the Gateway call raises; callers that combine several networks
+    decide what a failed one means. The cache is keyed on the client object
+    so two servers' Gateways never answer for each other.
+    """
+    key = (id(client), network)
+    hit = _token_symbols.get(key)
+    now = _token_clock()
+    if hit is not None and now - hit[0] < TOKEN_SYMBOLS_TTL:
+        return hit[1]
+    gateway = getattr(client, "gateway", None)
+    if gateway is None:
+        return {}
+    tokens: list = []
+    if callable(getattr(gateway, "get_network_tokens", None)):
+        response = await gateway.get_network_tokens(network)
+        tokens = response.get("tokens", []) if response else []
+    elif callable(getattr(gateway, "get_network_config", None)):
+        response = await gateway.get_network_config(network)
+        tokens = response.get("tokens", []) if response else []
+    symbols: Dict[str, str] = {}
+    for token in tokens or []:
+        if not isinstance(token, dict):
+            continue
+        address, symbol = token.get("address", ""), token.get("symbol", "")
+        if address and symbol:
+            symbols[address] = symbol
+    _token_symbols[key] = (now, symbols)
+    return symbols
+
+
+async def build_token_cache(
+    client, networks, *, base: Optional[Dict[str, str]] = None
+) -> Dict[str, str]:
+    """``KNOWN_TOKENS`` (or ``base``) overlaid with Gateway's symbols for ``networks``.
+
+    Networks are fetched concurrently; one that fails is logged and skipped so
+    a single unreachable chain never blanks the symbols of the others.
+    """
+    from utils.telegram_formatters import KNOWN_TOKENS
+
+    cache = dict(KNOWN_TOKENS if base is None else base)
+    wanted = list(dict.fromkeys(network for network in networks if network))
+    if not wanted:
+        return cache
+    results = await asyncio.gather(
+        *(fetch_network_token_symbols(client, network) for network in wanted),
+        return_exceptions=True,
+    )
+    for network, result in zip(wanted, results):
+        if isinstance(result, BaseException):
+            logger.debug("Failed to fetch tokens for %s: %s", network, result)
+            continue
+        cache.update(result)
+    return cache
+
 
 # ============================================
 # EXPLORER URL GENERATION
@@ -404,6 +447,48 @@ def _format_price(price: float) -> str:
         return f"{price:.10f}"
 
 
+def format_usd_value(value: float) -> str:
+    """Format USD values: $1.23M / $4.56K / $7.89"""
+    if value >= 1000000:
+        return f"${value/1000000:.2f}M"
+    elif value >= 1000:
+        return f"${value/1000:.2f}K"
+    else:
+        return f"${value:.2f}"
+
+
+def format_compact_number(value) -> str:
+    """Format number compactly for mobile display"""
+    if value is None:
+        return "—"
+    try:
+        num = float(value)
+        if num == 0:
+            return "0"
+        if abs(num) >= 1_000_000:
+            return f"{num/1_000_000:.1f}M"
+        if abs(num) >= 1_000:
+            return f"{num/1_000:.0f}K"
+        if abs(num) >= 1:
+            return f"{num:.0f}"
+        return f"{num:.2f}"
+    except (ValueError, TypeError):
+        return "—"
+
+
+def format_timeframe_label(timeframe: str) -> str:
+    """Convert API timeframe to display label"""
+    labels = {
+        "1m": "1m candles",
+        "5m": "5m candles",
+        "15m": "15m candles",
+        "1h": "1h candles",
+        "4h": "4h candles",
+        "1d": "1d candles",
+    }
+    return labels.get(timeframe, timeframe)
+
+
 # ============================================
 # RELATIVE TIME FORMATTER
 # ============================================
@@ -611,7 +696,7 @@ def build_filter_buttons(
     Returns:
         List of button rows
     """
-    from telegram import InlineKeyboardButton
+    from condor.telegram.types import InlineKeyboardButton
 
     rows = []
 
@@ -620,7 +705,7 @@ def build_filter_buttons(
     rows.append(
         [
             InlineKeyboardButton(
-                f"💱 {pair_label}", callback_data=f"{callback_prefix}_filter_pair"
+                text=f"💱 {pair_label}", callback_data=f"{callback_prefix}_filter_pair"
             ),
         ]
     )
@@ -631,11 +716,12 @@ def build_filter_buttons(
     rows.append(
         [
             InlineKeyboardButton(
-                f"🔌 {connector_label}",
+                text=f"🔌 {connector_label}",
                 callback_data=f"{callback_prefix}_filter_connector",
             ),
             InlineKeyboardButton(
-                f"📊 {status_label}", callback_data=f"{callback_prefix}_filter_status"
+                text=f"📊 {status_label}",
+                callback_data=f"{callback_prefix}_filter_status",
             ),
         ]
     )
@@ -655,32 +741,36 @@ def build_pagination_buttons(
     Returns:
         List of buttons for a single row
     """
-    from telegram import InlineKeyboardButton
+    from condor.telegram.types import InlineKeyboardButton
 
     buttons = []
 
     # Previous button
     if filters.has_prev:
         buttons.append(
-            InlineKeyboardButton("« Prev", callback_data=f"{callback_prefix}_page_prev")
+            InlineKeyboardButton(
+                text="« Prev", callback_data=f"{callback_prefix}_page_prev"
+            )
         )
     else:
-        buttons.append(InlineKeyboardButton(" ", callback_data="dex:noop"))
+        buttons.append(InlineKeyboardButton(text=" ", callback_data="dex:noop"))
 
     # Page indicator — the total is unknown until the last page
     if filters.total_count is None:
         page_text = f"Page {filters.current_page}"
     else:
         page_text = f"{filters.current_page}/{filters.total_pages}"
-    buttons.append(InlineKeyboardButton(page_text, callback_data="dex:noop"))
+    buttons.append(InlineKeyboardButton(text=page_text, callback_data="dex:noop"))
 
     # Next button
     if filters.has_next:
         buttons.append(
-            InlineKeyboardButton("Next »", callback_data=f"{callback_prefix}_page_next")
+            InlineKeyboardButton(
+                text="Next »", callback_data=f"{callback_prefix}_page_next"
+            )
         )
     else:
-        buttons.append(InlineKeyboardButton(" ", callback_data="dex:noop"))
+        buttons.append(InlineKeyboardButton(text=" ", callback_data="dex:noop"))
 
     return buttons
 
@@ -702,7 +792,7 @@ def build_filter_selection_keyboard(
     Returns:
         InlineKeyboardMarkup with option buttons
     """
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from condor.telegram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     buttons = []
     row = []
@@ -715,7 +805,7 @@ def build_filter_selection_keyboard(
         # Use None for "All" option
         value = "" if opt == "All" else opt
         row.append(
-            InlineKeyboardButton(label, callback_data=f"{callback_prefix}_{value}")
+            InlineKeyboardButton(text=label, callback_data=f"{callback_prefix}_{value}")
         )
 
         if len(row) == 2:
@@ -725,6 +815,6 @@ def build_filter_selection_keyboard(
     if row:
         buttons.append(row)
 
-    buttons.append([InlineKeyboardButton("« Back", callback_data=back_callback)])
+    buttons.append([InlineKeyboardButton(text="« Back", callback_data=back_callback)])
 
-    return InlineKeyboardMarkup(buttons)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

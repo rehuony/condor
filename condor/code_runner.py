@@ -1,7 +1,7 @@
 """Run an ad-hoc Python snippet with a routine's primitives (FEAT-047).
 
 This is the thinner sibling of ``RoutineStore._execute_and_record``: same main
-process, same :class:`WebRoutineContext`, same report attribution — with the
+process, same :class:`RoutineContext`, same report attribution — with the
 routine file and its config schema removed. What a snippet can reach, a routine
 can reach, and vice versa; that is the point, because "it worked in run_code" is
 otherwise a bug class.
@@ -182,8 +182,9 @@ async def execute_code(
     session_key: str = "",
 ) -> dict:
     """Compile, run and persist one snippet. Returns the stored record as a dict."""
-    from condor.routine_store import WebRoutineContext, get_routine_store
+    from condor.routine_store import get_routine_store
     from config_manager import get_client
+    from routines.base import RoutineContext
 
     run_id = new_run_id()
     agent = agent or CHAT_SLUG
@@ -219,13 +220,13 @@ async def execute_code(
 
     # The exact context a routine gets, so the two paths cannot diverge — the
     # active server travels as a preference, which is how get_client resolves it.
-    context = WebRoutineContext(
-        server_name, bot=get_routine_store().get_bot(), chat_id=chat_id
+    context = RoutineContext.pinned(
+        server_name, bot=get_routine_store().outbound_bot(), chat_id=chat_id
     )
     # Best effort: a pure-pandas snippet must still run when no server resolves,
     # and the reason belongs in the run's own output, not in a raised error.
     try:
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
     except Exception as e:
         client = None
         buffer.write(f"[run_code] no API client available ({e}); `client` is None\n")

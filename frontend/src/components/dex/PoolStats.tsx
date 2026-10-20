@@ -1,7 +1,7 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
-import type { PoolSummary } from "@/lib/api";
+import type { PoolSummary } from "@/lib/api/dex";
 import { copyText } from "@/lib/clipboard";
 
 import { num, pct, usdCompact } from "./format";

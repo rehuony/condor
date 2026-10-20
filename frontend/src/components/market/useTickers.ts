@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api, type Ticker } from "@/lib/api";
+import { marketApi, type Ticker } from "@/lib/api/market";
 
 /**
  * 24h tickers for a connector, already sorted by USD volume (highest first) by the
@@ -13,7 +13,7 @@ import { api, type Ticker } from "@/lib/api";
 export function useTickers(server: string, connector: string, enabled = true) {
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ["tickers", server, connector],
-    queryFn: () => api.getTickers(server, connector),
+    queryFn: () => marketApi.getTickers(server, connector),
     enabled: !!server && !!connector && enabled,
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,

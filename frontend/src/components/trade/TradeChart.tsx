@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useCandleStore } from "@/hooks/useCandleStore";
 import { useCandleHistory } from "@/hooks/useCandleHistory";
 import { useRates } from "@/hooks/useRates";
-import type { ConsolidatedPosition } from "@/lib/api";
+import type { ConsolidatedPosition } from "@/lib/api/portfolio";
 import { candleChannelKey, candleStore } from "@/lib/candle-store";
 import type { ChartLineSlot, ExtraLine, PickSlot } from "@/components/executor/types";
 import { createOverlayTooltipView, getExecutorColor, type ExecutorOverlay } from "@/lib/executor-overlays";

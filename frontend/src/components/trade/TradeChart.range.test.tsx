@@ -14,7 +14,7 @@ import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import type { CandleData } from "@/lib/api";
+import type { CandleData } from "@/lib/api/market";
 import type { ExecutorOverlay } from "@/lib/executor-overlays";
 import { chartDouble } from "@/test/lightweight-charts-double";
 import { TradeChart } from "./TradeChart";
@@ -78,8 +78,10 @@ vi.mock("@/hooks/useRates", () => ({
   }),
 }));
 
-vi.mock("@/lib/api", () => ({
-  api: { getCandles: vi.fn(async () => []) },
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getCandles: vi.fn(async () => []),
+  },
 }));
 
 vi.mock("@/lib/candle-store", () => ({

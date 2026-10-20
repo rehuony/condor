@@ -10,13 +10,15 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CodeRun, DelegationSummary } from "@/lib/api";
+import type { CodeRun, DelegationSummary } from "@/lib/api/delegations";
 import { CodeRunSheet } from "./CodeRunSheet";
 
 let RUN: Partial<CodeRun> = {};
 
-vi.mock("@/lib/api", () => ({
-  api: { getCodeRun: vi.fn(async () => RUN) },
+vi.mock("@/lib/api/delegations", () => ({
+  delegationsApi: {
+    getCodeRun: vi.fn(async () => RUN),
+  },
 }));
 
 // The sheet's chrome (portal, pane sizing) is not what this pins.

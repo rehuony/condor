@@ -19,7 +19,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ArchivedExecutor, ExecutorInfo, PaginatedExecutors } from "./api";
+import type { ArchivedExecutor, ExecutorInfo } from "./api/executors";
+import type { PaginatedExecutors } from "./api/archived";
 
 describe("the executor wire types mirror the backend's split", () => {
   it("does not offer usd_rate on a live executor row", () => {

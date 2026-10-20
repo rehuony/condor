@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { useCondorWebSocket } from "@/hooks/useWebSocket";
-import { type ExecutorInfo, api } from "@/lib/api";
+import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
 import { EXECUTORS_REFETCH_MS, executorsQuery } from "@/lib/queryClient";
 
 /**
@@ -26,7 +26,7 @@ export function useAgentExecutors(
   // `executors:<server>` frame into this exact (unfiltered) entry.
   const { data: allExecutors, isLoading } = useQuery({
     queryKey: executorsQuery(serverName).queryKey,
-    queryFn: () => api.getExecutors(serverName!),
+    queryFn: () => executorsApi.getExecutors(serverName!),
     enabled: !!serverName,
     // The socket is the update path, not a fallback: every `executors:<server>`
     // frame lands on this key. REST is only the net under it, at the cadence

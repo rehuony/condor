@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { api } from "@/lib/api";
+import { marketApi } from "@/lib/api/market";
 import { formatCurrency, formatCurrencyPnl, formatCurrencyVolume } from "@/lib/formatters";
 import { formatWithRate, rateFor, resolveSymbol, STABLECOINS, type ConvertFn } from "@/lib/rates";
 import { useDisplayCurrency } from "./useDisplayCurrency";
@@ -43,7 +43,7 @@ export function useRates(quoteCurrencies: string[]) {
         // "successful" unconvertible result for the whole staleTime, so a single blip
         // (a server still warming up, say) freezes every value in the old currency
         // until the page is reloaded. Throwing lets React Query retry instead.
-        const resp = await api.getRates(server!, pairs);
+        const resp = await marketApi.getRates(server!, pairs);
         const rateMap = resp.rates ?? {};
         for (const quote of needed) {
           const pair = `${currency}-${quote}`;

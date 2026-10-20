@@ -17,7 +17,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 // The library itself is substituted at the resolver, for every test file at
 // once (CORR-368) — `chartDouble` is only how this file reads back what the
 // component drew. `lineSeriesAdded` counts the overlay churn under test: the
@@ -32,8 +32,10 @@ vi.mock("@/hooks/useRates", () => ({
   }),
 }));
 
-vi.mock("@/lib/api", () => ({
-  api: { getCandles: vi.fn(async () => []) },
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getCandles: vi.fn(async () => []),
+  },
 }));
 
 declare global {

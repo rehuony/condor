@@ -15,6 +15,7 @@
 - Follow [the maintenance workflow](docs/maintenance.md) for development, publication, deployment, and recovery.
 - `origin` is `rehuony/condor`; `main` is the personal development and release branch. Each new change gets its own focused commit; publish with a normal push. Preserve published history unless the user explicitly requests a history rewrite for a specific operation. Such a request does not change the default for later work.
 - One agent owns Git writes. Validate changes before publishing and honor the request's scope for commits, pushes, deployment, and service restarts.
+- Operational scripts live in `scripts/shell/` behind one-line Makefile targets ([scripts/README.md](scripts/README.md)); keep the repository root free of them. Scripts read `.env` as data and never source it. When changing installation or deployment, run `bash -n` and `shellcheck -S error` on the scripts and check every caller, test, and document that names them.
 
 ## Research artifacts
 

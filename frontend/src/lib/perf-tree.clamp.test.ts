@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ControllerInfo } from "./api";
+import type { ControllerInfo } from "./api/bots";
 import {
   buildTree,
   clampScope,

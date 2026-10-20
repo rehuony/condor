@@ -104,7 +104,7 @@ def test_the_snippet_reaches_the_routine_context(store):
         server_name="prod",
     )
 
-    assert out["result"] == "('WebRoutineContext', 'prod', '_FakeClient')"
+    assert out["result"] == "('RoutineContext', 'prod', '_FakeClient')"
 
 
 def test_a_missing_client_is_a_notice_in_stdout_not_a_failure(store, no_client):

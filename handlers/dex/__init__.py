@@ -12,9 +12,9 @@ Module Structure:
 - menu.py: Main DEX menu and help
 - swap.py: Unified swap (quote, execute, history with filters/pagination)
 - liquidity.py: Unified liquidity pools (balances, positions, history with filters/pagination)
-- pools.py: Pool info, position management (add, close, collect fees)
+- pools/: Pool info, position management (add, close, collect fees)
   (pool/OHLCV/liquidity-bin fetching itself lives in ``condor.pool_data``)
-- geckoterminal.py: GeckoTerminal pool explorer with charts
+- geckoterminal/: GeckoTerminal pool explorer with charts
 - visualizations.py: Chart generation (liquidity distribution, OHLCV candlesticks)
 - lp_monitor_handlers.py: LP monitor alert handling (navigation, rebalance, fees)
 - router.py: Callback and message routing
@@ -23,9 +23,7 @@ Module Structure:
 
 import logging
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
+from condor.telegram.types import Context, Update
 from handlers import clear_all_input_states
 from utils.auth import restricted
 
@@ -35,8 +33,6 @@ from .liquidity import handle_liquidity
 from .router import (
     dex_callback_handler,
     dex_message_handler,
-    get_dex_callback_handler,
-    get_dex_message_handler,
 )
 
 # Import command handlers
@@ -51,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 @restricted
-async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def swap_command(update: Update, context: Context) -> None:
     """
     Handle /swap command - Quick market swaps via DEX routers
 
@@ -69,12 +65,12 @@ async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error("No message object available for swap_command")
         return
 
-    await msg.reply_chat_action("typing")
+    await msg.bot.send_chat_action(chat_id=msg.chat.id, action="typing")
     await handle_swap(update, context)
 
 
 @restricted
-async def lp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def lp_command(update: Update, context: Context) -> None:
     """
     Handle /lp command - Liquidity pool management
 
@@ -92,7 +88,7 @@ async def lp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         logger.error("No message object available for lp_command")
         return
 
-    await msg.reply_chat_action("typing")
+    await msg.bot.send_chat_action(chat_id=msg.chat.id, action="typing")
     await handle_liquidity(update, context)
 
 
@@ -107,7 +103,4 @@ __all__ = [
     # Handlers
     "dex_callback_handler",
     "dex_message_handler",
-    # Handler factories
-    "get_dex_callback_handler",
-    "get_dex_message_handler",
 ]

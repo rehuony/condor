@@ -350,39 +350,40 @@ def _resolve_context(explicit):
     inherited = _CONTEXT.get()
     if inherited is not None:
         return inherited
-    from condor.routine_store import WebRoutineContext, get_routine_store
+    from condor.routine_store import get_routine_store
+    from routines.base import RoutineContext
 
-    return WebRoutineContext("", bot=get_routine_store().get_bot(), chat_id=0)
+    return RoutineContext.pinned("", bot=get_routine_store().outbound_bot(), chat_id=0)
 
 
 def _owner_of(ctx) -> int:
     """The user a nested run belongs to.
 
-    The Telegram runner separates the delivery chat (``_chat_id``, negative in a
-    group) from the owner whose ``user_data`` the run executes against, and
-    stamps the latter as ``_owner_id``. Attributing a nested run to the chat
-    would leave a report the starter cannot read. Web/MCP contexts carry only
-    ``_chat_id``, which is already the user id there.
+    The Telegram runner separates the delivery chat (``chat_id``, negative in a
+    group) from the owner whose ``user_data`` the run executes against. Web/MCP
+    contexts carry the user id as both.
     """
-    return getattr(ctx, "_owner_id", None) or getattr(ctx, "_chat_id", 0) or 0
+    return getattr(ctx, "owner_id", 0) or getattr(ctx, "chat_id", 0) or 0
 
 
 def _server_of(ctx) -> str:
     """The server a nested run should target.
 
-    ``WebRoutineContext`` names it outright and stays authoritative; a PTB
-    context carries it only as a preference inside its ``user_data``, so fall
-    back to the resolution ``get_client`` already performs for one.
+    A pinned context names it outright and stays authoritative; a Telegram run
+    carries it only as a preference inside its ``user_data``, so fall back to
+    the resolution ``get_client`` already performs for one.
     """
     named = getattr(ctx, "server_name", "") or ""
     if named:
         return named
     from config_manager import get_effective_server
 
-    user_data = getattr(ctx, "user_data", None)
-    if user_data is None:
-        user_data = getattr(ctx, "_user_data", None)
-    return get_effective_server(getattr(ctx, "_chat_id", 0) or 0, user_data) or ""
+    return (
+        get_effective_server(
+            getattr(ctx, "chat_id", 0) or 0, getattr(ctx, "user_data", None)
+        )
+        or ""
+    )
 
 
 def _resolve_routine(name: str):

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
+import { portfolioApi } from "@/lib/api/portfolio";
 
 /**
  * What the wallet holds of a pair's two tokens on one connector.
@@ -30,7 +30,7 @@ export function usePairBalances(
 ): PairBalances {
   const { data: portfolio } = useQuery({
     queryKey: ["portfolio", server],
-    queryFn: () => api.getPortfolio(server!),
+    queryFn: () => portfolioApi.getPortfolio(server!),
     enabled: !!server,
     refetchInterval: 30_000,
   });

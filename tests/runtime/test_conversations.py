@@ -957,6 +957,87 @@ def test_flush_all_writes_recorders_still_in_flight(conv_root):
     assert len(read_transcript(USER, meta.id)) == 2
 
 
+# ── Request index ──
+#
+# ``has_request`` is asked once per incoming Telegram message. It answers from
+# a per-owner index rather than by parsing every transcript the owner has.
+
+
+def _index_path(conv_root, user=USER):
+    return (
+        conv_root / str(user) / "conversations" / conversations.REQUEST_INDEX_FILENAME
+    )
+
+
+def test_accept_records_the_request_id_in_the_index(conv_root):
+    meta = new_conversation(USER, WEB)
+    rec = Recorder(USER, meta.id, "hi", request_id="telegram:1:7")
+
+    assert not conversations.has_request(USER, "telegram:1:7")
+    rec.accept()
+
+    assert conversations.has_request(USER, "telegram:1:7")
+    assert not conversations.has_request(USER, "telegram:1:8")
+    assert not conversations.has_request(OTHER_USER, "telegram:1:7")
+    assert _index_path(conv_root).read_text() == "telegram:1:7\n"
+
+
+def test_request_index_survives_a_restart(conv_root):
+    meta = new_conversation(USER, WEB)
+    Recorder(USER, meta.id, "hi", request_id="telegram:1:7").accept()
+
+    conversations._request_index.clear()  # a new process knows nothing
+
+    assert conversations.has_request(USER, "telegram:1:7")
+    assert not conversations.has_request(USER, "telegram:1:9")
+
+
+def test_request_index_spans_conversations_and_deleted_ones(conv_root):
+    first = new_conversation(USER, WEB)
+    second = new_conversation(USER, WEB)
+    Recorder(USER, first.id, "a", request_id="telegram:1:1").accept()
+    Recorder(USER, second.id, "b", request_id="telegram:1:2").accept()
+    assert delete_conversation(USER, first.id)
+
+    assert conversations.has_request(USER, "telegram:1:1")
+    assert conversations.has_request(USER, "telegram:1:2")
+
+
+def test_missing_request_index_is_rebuilt_from_transcripts(conv_root):
+    meta = new_conversation(USER, WEB)
+    rec = Recorder(USER, meta.id, "hi", request_id="telegram:1:7")
+    rec.accept()
+    rec.observe(RuntimeEvent(type="text", data={"text": "x" * 4096}))
+    rec.flush()
+    # A turn that pre-dates the index, and one in the archive sidecar.
+    append_turn(USER, meta.id, TurnEntry(role="user", text="old", request_id="web:3"))
+    conv_dir = _conv_dir(USER, meta.id)
+    conversations._append_archive(
+        conv_dir,
+        [
+            json.dumps(
+                TurnEntry(role="user", text="older", request_id="web:2").model_dump(
+                    mode="json"
+                )
+            ).encode()
+        ],
+    )
+    (conv_dir / conversations.TRANSCRIPT_FILENAME).open("ab").write(b"not json\n")
+
+    _index_path(conv_root).unlink()
+    conversations._request_index.clear()
+
+    for rid in ("telegram:1:7", "web:3", "web:2"):
+        assert conversations.has_request(USER, rid), rid
+    assert not conversations.has_request(USER, "web:4")
+    assert _index_path(conv_root).is_file()
+
+
+def test_has_request_for_an_unknown_owner_is_false_and_creates_nothing(conv_root):
+    assert not conversations.has_request(OTHER_USER, "telegram:9:9")
+    assert not (conv_root / str(OTHER_USER)).exists()
+
+
 # ── Through the runtime ──
 #
 # The point of the feature is not that the store works, it is that a session

@@ -42,27 +42,6 @@ ADMIN_USER_ID = resolve_admin_id()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
 
-def telegram_agent_reply_settings(env=None) -> tuple[str, float]:
-    """Process-wide presentation policy for agent replies and wake turns only."""
-    import math
-
-    env = os.environ if env is None else env
-    mode = env.get("TELEGRAM_AGENT_REPLY_MODE", "final").strip().lower()
-    if mode not in {"final", "edit"}:
-        raise ConfigError("TELEGRAM_AGENT_REPLY_MODE must be final or edit")
-    try:
-        interval = float(env.get("TELEGRAM_AGENT_EDIT_INTERVAL", "1.0"))
-    except (ValueError, TypeError) as exc:
-        raise ConfigError(
-            "TELEGRAM_AGENT_EDIT_INTERVAL must be a finite positive number"
-        ) from exc
-    if not math.isfinite(interval) or interval <= 0:
-        raise ConfigError(
-            "TELEGRAM_AGENT_EDIT_INTERVAL must be a finite positive number"
-        )
-    return mode, interval
-
-
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 
@@ -115,7 +94,7 @@ def resolve_mode(env=None) -> str:
 def resolve_use_tailscale(env=None) -> bool:
     """Whether the dashboard is meant to be reached over a Tailscale tailnet.
 
-    Set by ``setup-environment.sh`` when the user opts in. Another reason (next
+    Set by ``make setup`` when the user opts in. Another reason (next
     to local mode) :func:`resolve_web_host` binds loopback: ``tailscale serve``
     (``utils/tailscale.py``) is what actually exposes the dashboard when this is
     on, only on the tailnet.
@@ -194,7 +173,7 @@ def check_startup_config(env=None) -> None:
     Two cases, both of which used to surface far from their cause:
 
     * Telegram mode (including the default, i.e. an unset ``CONDOR_MODE``) with
-      no token. That surfaced deep inside PTB as an ``InvalidToken`` traceback;
+      no token. That used to surface deep inside the Telegram library as a traceback;
       more importantly it must *never* be treated as "well, local mode then".
     * An ``ADMIN_USER_ID`` that is not a positive integer. That used to be
       swallowed silently, leaving an install with **no admin at all**: no admin
@@ -203,7 +182,6 @@ def check_startup_config(env=None) -> None:
     """
     env = os.environ if env is None else env
 
-    telegram_agent_reply_settings(env)
     raw_admin = (env.get("ADMIN_USER_ID") or "").strip()
     if raw_admin and resolve_admin_id(env) is None:
         raise ConfigError(

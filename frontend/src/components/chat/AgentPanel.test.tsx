@@ -27,7 +27,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentBrain, ChatAgentOption } from "@/lib/api";
+import type { AgentBrain } from "@/lib/api/agents";
+import type { ChatAgentOption } from "@/lib/api/chat";
 import type { ChatSlot } from "@/hooks/useChatSocket";
 
 const getAgentBrain = vi.fn();
@@ -35,14 +36,24 @@ const getAgent = vi.fn();
 const getDelegationHistory = vi.fn();
 const getServers = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    getAgentBrain: (...a: unknown[]) => getAgentBrain(...a),
-    getAgent: (...a: unknown[]) => getAgent(...a),
-    getDelegationHistory: (...a: unknown[]) => getDelegationHistory(...a),
+vi.mock("@/lib/api/servers", () => ({
+  serversApi: {
     getServers: (...a: unknown[]) => getServers(...a),
   },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
+    getAgentBrain: (...a: unknown[]) => getAgentBrain(...a),
+    getAgent: (...a: unknown[]) => getAgent(...a),
+  },
   CHAT_SLUG: "condor",
+}));
+vi.mock("@/lib/api/delegations", () => ({
+  delegationsApi: {
+    getDelegationHistory: (...a: unknown[]) => getDelegationHistory(...a),
+  },
+}));
+vi.mock("@/lib/api/chat", () => ({
   parseCustomAgentKey: () => null,
   customAgentKey: (p: string, m: string) => `custom:${p}:${m}`,
 }));

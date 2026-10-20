@@ -25,7 +25,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation, useSearchParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDetail, AgentRunRow, StrategyDetail } from "@/lib/api";
+import type { AgentDetail, AgentRunRow, StrategyDetail } from "@/lib/api/agents";
 
 import type { WorkspaceUrlPatch } from "./workspaceUrl";
 
@@ -36,19 +36,23 @@ const getConversationDeployments = vi.fn();
 const getSessionJournal = vi.fn();
 const getSessionActions = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgent: (...a: unknown[]) => getAgent(...a),
     getAgentRuns: (...a: unknown[]) => getAgentRuns(...a),
     getStrategy: (...a: unknown[]) => getStrategy(...a),
-    getConversationDeployments: (...a: unknown[]) =>
-      getConversationDeployments(...a),
     getSessionJournal: (...a: unknown[]) => getSessionJournal(...a),
     getSessionActions: (...a: unknown[]) => getSessionActions(...a),
     getSessionReport: () => Promise.resolve({ report: null }),
     getStrategySessionExecutors: () => Promise.resolve({ executors: [] }),
   },
   CHAT_SLUG: "condor",
+}));
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    getConversationDeployments: (...a: unknown[]) =>
+      getConversationDeployments(...a),
+  },
 }));
 
 /**

@@ -13,7 +13,7 @@
 // be a state and not a footnote.
 
 import type { AgentActionRow } from "@/lib/agent-attribution";
-import type { AgentPerformance, AgentRunRow, StrategyDetail } from "@/lib/api";
+import type { AgentPerformance, AgentRunRow, StrategyDetail } from "@/lib/api/agents";
 import { formatDuration } from "@/lib/formatters";
 
 /**

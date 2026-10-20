@@ -108,7 +108,7 @@ def _clear_sections_in_cm(user_data: Dict) -> None:
 
 
 def _refresh_active_agent_key(user_data: Dict) -> None:
-    """Keep the model shared by Web and Telegram authoritative over PTB caches.
+    """Keep the model shared by Web and Telegram authoritative over bot-side caches.
 
     Agent-section writes also call this so changing a chat binding or endpoint
     cannot overwrite a model selected since this dict was hydrated.
@@ -139,8 +139,13 @@ def _mutate(user_data: Dict, section: str) -> Iterator[Any]:
     prefs = _ensure_preferences(user_data)
     if section == "agent":
         _refresh_active_agent_key(user_data)
+    # Only a section that actually changed is written through: most setters
+    # are called with the value already stored, and each write-through is a
+    # whole config.yml dump.
+    before = deepcopy(prefs[section])
     yield prefs[section]
-    _sync_section_to_cm(user_data, section)
+    if prefs[section] != before:
+        _sync_section_to_cm(user_data, section)
 
 
 # ============================================
@@ -1377,7 +1382,7 @@ def suggest_provider_name(base_url: str) -> str:
 
 
 def load_user_data_for(user_id: int) -> Dict:
-    """Build a preferences-bearing ``user_data`` dict outside a PTB context.
+    """Build a preferences-bearing ``user_data`` dict outside a Telegram handler context.
 
     The web dashboard has no ``context.user_data``, so it can't reach anything
     stored through this module. This hydrates an equivalent dict from

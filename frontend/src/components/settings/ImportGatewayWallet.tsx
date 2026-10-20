@@ -1,8 +1,10 @@
-import { AlertCircle, Check, Loader2 } from "lucide-react";
+import { AlertCircle, Check } from "lucide-react";
 import { useMemo, useState } from "react";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { api } from "@/lib/api";
+import { INPUT_CLASS, Label } from "@/components/ui/Field";
+import { Spinner } from "@/components/ui/Spinner";
+import { settingsApi } from "@/lib/api/settings";
 
 export type WalletChain = "solana" | "ethereum";
 
@@ -65,7 +67,7 @@ export function ImportGatewayWallet({
     try {
       const privateKey =
         chain === "ethereum" && !trimmed.startsWith("0x") ? `0x${trimmed}` : trimmed;
-      const res = await api.addGatewayWallet(server, {
+      const res = await settingsApi.addGatewayWallet(server, {
         chain,
         private_key: privateKey,
         set_default: setDefault,
@@ -111,7 +113,7 @@ export function ImportGatewayWallet({
       ) : (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Private key</label>
+            <Label>Private key</Label>
             <input
               type="password"
               // Browsers ignore autocomplete="off" on password fields; "new-password" is the value
@@ -127,7 +129,7 @@ export function ImportGatewayWallet({
               placeholder={
                 chain === "ethereum" ? "0x… (64 hex characters)" : "Base58 private key from Phantom"
               }
-              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none disabled:opacity-50"
+              className={`${INPUT_CLASS} font-mono`}
             />
             {derived && (
               <p className="mt-1 break-all font-mono text-xs text-[var(--color-text-muted)]">
@@ -170,9 +172,9 @@ export function ImportGatewayWallet({
             <button
               onClick={handleImport}
               disabled={saving || !keyLooksValid}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
             >
-              {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+              {saving && <Spinner size="xs" />}
               Import into Gateway
             </button>
             <button

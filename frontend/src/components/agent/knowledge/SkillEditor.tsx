@@ -6,7 +6,7 @@ import {
   EditorShell,
   Field,
 } from "@/components/agent/knowledge/KnowledgeChrome";
-import { api, type SkillBody } from "@/lib/api";
+import { agentsApi, type SkillBody } from "@/lib/api/agents";
 
 /**
  * A playbook, written.
@@ -47,7 +47,7 @@ export function SkillEditor({
     // panel refetches the catalog instead.
     mutationFn: (): Promise<unknown> =>
       existing
-        ? api.updateAgentSkill(slug, existing.slug, {
+        ? agentsApi.updateAgentSkill(slug, existing.slug, {
             description,
             when_to_use: whenToUse,
             body,
@@ -57,7 +57,7 @@ export function SkillEditor({
               ? { references_routine: routine }
               : {}),
           })
-        : api.createAgentSkill(slug, {
+        : agentsApi.createAgentSkill(slug, {
             name,
             description,
             when_to_use: whenToUse,

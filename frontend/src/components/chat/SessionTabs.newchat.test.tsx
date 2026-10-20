@@ -18,7 +18,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ChatSlot } from "@/hooks/useChatSocket";
-import type { AgentSummary } from "@/lib/api";
+import type { AgentSummary } from "@/lib/api/agents";
 
 import { SessionTabs } from "./SessionTabs";
 

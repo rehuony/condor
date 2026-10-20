@@ -6,9 +6,9 @@ from typing import Dict, List, Optional
 
 import httpx
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from condor.reports import ReportBuilder
+from routines.base import RoutineContext
 
 CATEGORY = "Analysis"
 
@@ -343,7 +343,7 @@ def _fetch_stock_row(ticker: str) -> dict:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     now = datetime.now(timezone.utc)
     loop = asyncio.get_event_loop()
 

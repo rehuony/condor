@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { api, type ExecutorInfo } from "@/lib/api";
+import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
 import { DeleteConfirmDialog, ExecutorRows } from "@/components/perf/ExecutorRows";
 import { ScopeTree } from "@/components/perf/ScopeTree";
 import { buildTree, leafFromExecutor, indexTree } from "@/lib/perf-tree";
@@ -77,7 +77,7 @@ beforeEach(() => {
   root = createRoot(container);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(queryKey, initial);
-  vi.spyOn(api, "deleteExecutor").mockResolvedValue({ deleted: true, executor_id: "done" });
+  vi.spyOn(executorsApi, "deleteExecutor").mockResolvedValue({ deleted: true, executor_id: "done" });
 });
 
 afterEach(() => {
@@ -92,20 +92,20 @@ it("only offers deletion for terminated rows and requires explicit confirmation"
   const controls = container.querySelectorAll<HTMLButtonElement>('button[title="Delete executor history"]');
   expect(controls).toHaveLength(2);
   await click(controls[0]);
-  expect(api.deleteExecutor).not.toHaveBeenCalled();
+  expect(executorsApi.deleteExecutor).not.toHaveBeenCalled();
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Orders and open positions are not affected");
   await click(button("Cancel"));
   expect(document.querySelector('[role="dialog"]')).toBeNull();
-  expect(api.deleteExecutor).not.toHaveBeenCalled();
+  expect(executorsApi.deleteExecutor).not.toHaveBeenCalled();
   await click(controls[0]);
   await click(dialogButton("Delete"));
-  expect(api.deleteExecutor).toHaveBeenCalledExactlyOnceWith("local", "done");
+  expect(executorsApi.deleteExecutor).toHaveBeenCalledExactlyOnceWith("local", "done");
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   expect(container.textContent).not.toContain("done");
 });
 
 it("deletes a parent, retains rejected rows and retries only failures", async () => {
-  vi.mocked(api.deleteExecutor).mockImplementation(async (_server, id) => {
+  vi.mocked(executorsApi.deleteExecutor).mockImplementation(async (_server, id) => {
     if (id === "blocked") throw new Error("Resolve the orphaned LP position first");
     return { deleted: true, executor_id: id };
   });
@@ -115,7 +115,7 @@ it("deletes a parent, retains rejected rows and retries only failures", async ()
   await click(container.querySelector('button[aria-label="Delete history under All"]')!);
   await click(dialogButton("Delete"));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-  expect(vi.mocked(api.deleteExecutor).mock.calls.map((args) => args[1])).toEqual(["done", "blocked"]);
+  expect(vi.mocked(executorsApi.deleteExecutor).mock.calls.map((args) => args[1])).toEqual(["done", "blocked"]);
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("1 deleted; failed to delete 1 of 2 records");
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("Resolve the orphaned");
   expect(client.getQueryData<typeof initial>(queryKey)?.pages[0].executors.map((ex) => ex.id))
@@ -124,9 +124,9 @@ it("deletes a parent, retains rejected rows and retries only failures", async ()
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["executors-summary", "local"] });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["perf-history", "local"] });
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("terminated record");
-  vi.mocked(api.deleteExecutor).mockResolvedValue({ deleted: true, executor_id: "blocked" });
+  vi.mocked(executorsApi.deleteExecutor).mockResolvedValue({ deleted: true, executor_id: "blocked" });
   await click(button("Retry failed"));
-  expect(vi.mocked(api.deleteExecutor).mock.calls.map((args) => args[1])).toEqual(["done", "blocked", "blocked"]);
+  expect(vi.mocked(executorsApi.deleteExecutor).mock.calls.map((args) => args[1])).toEqual(["done", "blocked", "blocked"]);
 
 });
 
@@ -149,7 +149,7 @@ it("discards a cold summary response that arrives after deletion and fetches cur
     await click(container.querySelector<HTMLButtonElement>('[title="Delete executor history"]')!);
     await click(dialogButton("Delete"));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(api.deleteExecutor).toHaveBeenCalledExactlyOnceWith("local", "done");
+    expect(executorsApi.deleteExecutor).toHaveBeenCalledExactlyOnceWith("local", "done");
 
     await act(async () => {
       resolveInitial(stale);
@@ -172,7 +172,7 @@ it("keeps read-only tables free of deletion actions", async () => {
 
 it("disables a record while deletion is in flight", async () => {
   let complete!: (value: { deleted: boolean; executor_id: string }) => void;
-  vi.mocked(api.deleteExecutor).mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+  vi.mocked(executorsApi.deleteExecutor).mockReturnValue(new Promise((resolve) => { complete = resolve; }));
   await render();
   const control = container.querySelector<HTMLButtonElement>('[title="Delete executor history"]')!;
   await click(control);
@@ -207,5 +207,5 @@ it("freezes and deduplicates the loaded targets before confirmation", async () =
   await render(<Frozen />);
   await click(button("Request"));
   await click(dialogButton("Delete"));
-  expect(api.deleteExecutor).toHaveBeenCalledExactlyOnceWith("local", "done");
+  expect(executorsApi.deleteExecutor).toHaveBeenCalledExactlyOnceWith("local", "done");
 });

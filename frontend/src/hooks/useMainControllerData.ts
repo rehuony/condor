@@ -6,7 +6,8 @@ import {
   LP_REFRESH_MS,
   RECENT_LP_EXECUTORS,
 } from "@/components/dex/lp-position";
-import { api, type ExecutorInfo } from "@/lib/api";
+import { portfolioApi } from "@/lib/api/portfolio";
+import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
 import { computeMultiOverlays } from "@/lib/executor-overlays";
 import { executorsQuery } from "@/lib/queryClient";
 
@@ -54,7 +55,7 @@ export function useMainControllerData(
   // Fetch executors filtered server-side by controller_id + trading_pair
   const { data: cachedExecutors } = useQuery<ExecutorInfo[]>({
     queryKey: executorsQuery(server, { controllerId: "main", pair }).queryKey,
-    queryFn: () => api.getExecutors(server!, { controller_id: "main", trading_pair: pair }),
+    queryFn: () => executorsApi.getExecutors(server!, { controller_id: "main", trading_pair: pair }),
     enabled: !!server && !!pair,
     staleTime: 30_000, // REST fetch valid for 30s, WS pushes override instantly
     refetchOnWindowFocus: false,
@@ -66,7 +67,7 @@ export function useMainControllerData(
   const wantsAlt = !!altPair && altPair !== pair;
   const { data: altExecutors } = useQuery<ExecutorInfo[]>({
     queryKey: executorsQuery(server, { controllerId: "main", pair: altPair }).queryKey,
-    queryFn: () => api.getExecutors(server!, { controller_id: "main", trading_pair: altPair }),
+    queryFn: () => executorsApi.getExecutors(server!, { controller_id: "main", trading_pair: altPair }),
     enabled: !!server && wantsAlt,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
@@ -89,7 +90,7 @@ export function useMainControllerData(
   const { data: poolLpExecutors } = useQuery<ExecutorInfo[]>({
     queryKey: ["dex-lp-executors", server],
     queryFn: () =>
-      api.getExecutors(server!, {
+      executorsApi.getExecutors(server!, {
         executor_type: LP_EXECUTOR_TYPE,
         limit: RECENT_LP_EXECUTORS,
       }),
@@ -143,7 +144,7 @@ export function useMainControllerData(
   // Fetch consolidated positions
   const { data: positionsData, isLoading: isLoadingPositions } = useQuery({
     queryKey: ["consolidated-positions", server],
-    queryFn: () => api.getConsolidatedPositions(server!),
+    queryFn: () => portfolioApi.getConsolidatedPositions(server!),
     enabled: !!server,
     refetchInterval: 5_000,
     staleTime: 0,

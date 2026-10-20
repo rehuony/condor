@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 import aiohttp
 import pandas as pd
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
+from condor.telegram.transport import as_input_file
 from config_manager import get_client
-from routines.base import RoutineResult
+from routines.base import RoutineContext, RoutineResult
 
 logger = logging.getLogger(__name__)
 
@@ -138,10 +138,10 @@ async def _fetch_defillama_fees(session: aiohttp.ClientSession, protocol: str) -
 
 
 async def _fetch_candles(
-    context: ContextTypes.DEFAULT_TYPE, trading_pair: str, interval: str, days: int
+    context: RoutineContext, trading_pair: str, interval: str, days: int
 ) -> pd.DataFrame:
     """Fetch candles from Binance via the Hummingbot backend API."""
-    client = await get_client(context._chat_id, context=context)
+    client = await get_client(context.chat_id, user_data=context.user_data)
     result = await client.market_data.get_candles_last_days(
         CONNECTOR, trading_pair, days=days, interval=interval
     )
@@ -169,9 +169,7 @@ async def _fetch_candles(
     return df
 
 
-async def run(
-    config: Config, context: ContextTypes.DEFAULT_TYPE
-) -> str | RoutineResult:
+async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     # Parse requested tokens
     requested = [t.strip().upper() for t in config.tokens.split(",") if t.strip()]
     active_tokens = {
@@ -494,7 +492,7 @@ async def run(
     if config.send_to_telegram and getattr(context, "bot", None):
         import io
 
-        chat_id = context._chat_id if hasattr(context, "_chat_id") else None
+        chat_id = context.chat_id
         if chat_id:
             buf = io.BytesIO()
             fig.write_image(buf, format="png", width=900, height=700, scale=2)
@@ -502,6 +500,8 @@ async def run(
             caption = f"Solana DEX Comparison — {config.days}d"
             if warnings:
                 caption += "\nSome data is unavailable. See the report and run summary for source warnings."
-            await context.bot.send_photo(chat_id=chat_id, photo=buf, caption=caption)
+            await context.bot.send_photo(
+                chat_id=chat_id, photo=as_input_file(buf), caption=caption
+            )
 
     return RoutineResult(text=summary)

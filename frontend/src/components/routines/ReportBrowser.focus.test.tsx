@@ -19,26 +19,31 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
-import type { ReportSummary, RoutineInfo, RoutineInstance } from "@/lib/api";
+import type { ReportSummary } from "@/lib/api/reports";
+import type { RoutineInfo, RoutineInstance } from "@/lib/api/routines";
 
 const getRoutineReports = vi.fn();
 const getRoutineInstance = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/reports", () => ({
+  reportsApi: {
+    getReportsGrouped: () => Promise.resolve([]),
+    deleteReport: () => Promise.resolve({ deleted: true }),
+    getReportHtml: () => Promise.resolve(""),
+  },
+}));
+vi.mock("@/lib/api/routines", () => ({
+  routinesApi: {
     getRoutines: () =>
       Promise.resolve([
         routine("alpha_check"),
         routine("scout/beta_check", "agent:scout"),
       ]),
     getRoutineReports: (...a: unknown[]) => getRoutineReports(...a),
-    getReportsGrouped: () => Promise.resolve([]),
     getRoutineInstance: (...a: unknown[]) => getRoutineInstance(...a),
     getRoutineSource: () => Promise.resolve({ filename: "x.py", source: "" }),
     runRoutine: () => Promise.resolve({ instance_id: "i9" }),
     scheduleRoutine: () => Promise.resolve({ instance_id: "i9" }),
-    deleteReport: () => Promise.resolve({ deleted: true }),
-    getReportHtml: () => Promise.resolve(""),
     getRoutineHooks: () => Promise.resolve({}),
   },
 }));

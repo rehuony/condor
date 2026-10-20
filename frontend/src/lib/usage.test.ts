@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { TokenUsage } from "@/lib/api";
+import type { TokenUsage } from "@/lib/api/conversations";
 import { addUsage, costDisplay, formatTokens } from "./usage";
 
 const usage = (over: Partial<TokenUsage> = {}): TokenUsage => ({

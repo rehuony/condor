@@ -3,13 +3,14 @@
 import asyncio
 import io
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from PIL import Image
-from telegram import (
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
+from aiogram.types import (
     Audio,
     Chat,
     Document,
@@ -21,26 +22,27 @@ from telegram import (
     Story,
     Voice,
 )
+from PIL import Image
 
-from condor import telegram_input as ingress
 from condor.runtime import attachments
+from condor.telegram import input as ingress
 
 
 def message(message_id=1, **kwargs):
     return Message(
         message_id=message_id,
         date=datetime.now(timezone.utc),
-        chat=Chat(10, "private"),
+        chat=Chat(id=10, type="private"),
         **kwargs,
     )
 
 
 def photo(file_id="photo", unique_id="unique-photo", **kwargs):
     return PhotoSize(
-        file_id,
-        unique_id,
-        kwargs.pop("width", 100),
-        kwargs.pop("height", 100),
+        file_id=file_id,
+        file_unique_id=unique_id,
+        width=kwargs.pop("width", 100),
+        height=kwargs.pop("height", 100),
         **kwargs,
     )
 
@@ -49,6 +51,333 @@ def image_bytes(format="PNG"):
     buffer = io.BytesIO()
     Image.new("RGB", (2, 2), "red").save(buffer, format=format)
     return buffer.getvalue()
+
+
+def rich_message(blocks, **fields):
+    return Message.model_validate(
+        {
+            "message_id": 1,
+            "date": 1,
+            "chat": {"id": 10, "type": "private"},
+            "rich_message": {"blocks": blocks},
+            **fields,
+        },
+    )
+
+
+_FILE = {"file_id": "f", "file_unique_id": "u"}
+_RICH_MEDIA = {
+    "photo": {"photo": [{**_FILE, "width": 10, "height": 10}]},
+    "video": {"video": {**_FILE, "width": 10, "height": 10, "duration": 1}},
+    "animation": {"animation": {**_FILE, "width": 10, "height": 10, "duration": 1}},
+    "audio": {"audio": {**_FILE, "duration": 1}},
+    "voice_note": {"voice_note": {**_FILE, "duration": 1}},
+    "document": {"document": _FILE},
+    "collage": {
+        "blocks": [{"type": "photo", "photo": [{**_FILE, "width": 10, "height": 10}]}]
+    },
+    "slideshow": {
+        "blocks": [{"type": "photo", "photo": [{**_FILE, "width": 10, "height": 10}]}]
+    },
+    "map": {
+        "location": {"latitude": 1.0, "longitude": 2.0},
+        "zoom": 10,
+        "width": 100,
+        "height": 100,
+    },
+}
+
+
+def rich_media_block(kind):
+    """A valid Bot API media block of ``kind``."""
+    return {"type": kind, **_RICH_MEDIA[kind]}
+
+
+def test_rich_message_keeps_paragraphs_lists_tables_quotes_and_code():
+    incoming = rich_message(
+        [
+            {
+                "type": "paragraph",
+                "text": [
+                    "Compare ",
+                    {
+                        "type": "bold",
+                        "text": [
+                            "BTC and ",
+                            {
+                                "type": "url",
+                                "text": {"type": "italic", "text": "ETH"},
+                                "url": "https://example.test",
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                "type": "list",
+                "items": [
+                    {
+                        "label": "•",
+                        "blocks": [
+                            {"type": "paragraph", "text": "First"},
+                            {
+                                "type": "list",
+                                "items": [
+                                    {
+                                        "label": "1.",
+                                        "blocks": [
+                                            {"type": "paragraph", "text": "Nested"}
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "label": "2.",
+                        "blocks": [{"type": "paragraph", "text": "Second"}],
+                    },
+                    {
+                        "label": "",
+                        "has_checkbox": True,
+                        "blocks": [{"type": "paragraph", "text": "Pending"}],
+                    },
+                    {
+                        "label": "",
+                        "has_checkbox": True,
+                        "is_checked": True,
+                        "blocks": [{"type": "paragraph", "text": "Done"}],
+                    },
+                ],
+            },
+            {
+                "type": "table",
+                "cells": [
+                    [
+                        {"text": "Asset", "align": "left", "valign": "top"},
+                        {"text": "Price", "align": "right", "valign": "top"},
+                    ],
+                    [
+                        {"text": "BTC", "align": "left", "valign": "top"},
+                        {"text": "100", "align": "right", "valign": "top"},
+                    ],
+                ],
+            },
+            {
+                "type": "blockquote",
+                "blocks": [{"type": "paragraph", "text": "Quoted\nsecond line"}],
+                "credit": "Analyst",
+            },
+            {"type": "pre", "language": "python", "text": "print('BTC')"},
+        ]
+    )
+    assert incoming.text is None
+    assert ingress.rich_message_payload(incoming) == incoming.rich_message.model_dump(
+        exclude_none=True
+    )
+    assert ingress.extract_input([incoming]).text == (
+        "Compare BTC and ETH\n\n"
+        "- First\n  \n  1. Nested\n2. Second\n- [ ] Pending\n- [x] Done\n\n"
+        "| Asset | Price |\n| --- | --- |\n| BTC | 100 |\n\n"
+        "> Quoted\n> second line\n> — Analyst\n\n"
+        "```python\nprint('BTC')\n```"
+    )
+    assert not ingress.input_has_attachments(incoming)
+
+
+@pytest.mark.parametrize(
+    "block,expected",
+    [
+        ({"type": "heading", "size": 6, "text": "Title"}, "###### Title"),
+        ({"type": "heading", "size": 10, "text": "Title"}, "###### Title"),
+        (
+            {"type": "expandable_blockquote", "text": "Quote", "credit": "A"},
+            "> Quote\n> — A",
+        ),
+        ({"type": "pullquote", "text": "Quote", "credit": "B"}, "> Quote\n> — B"),
+        ({"type": "footer", "text": "Footer"}, "Footer"),
+        ({"type": "thinking", "text": "Thinking"}, "Thinking"),
+        ({"type": "anchor", "name": "section"}, "section"),
+        ({"type": "divider"}, "---"),
+        ({"type": "mathematical_expression", "expression": "x^2"}, "$x^2$"),
+        (
+            {
+                "type": "details",
+                "summary": {"type": "bold", "text": "Summary"},
+                "blocks": [{"type": "paragraph", "text": "Body"}],
+            },
+            "Summary\n\nBody",
+        ),
+        ({"type": "pre", "text": "```md\ncode\n```"}, "````\n```md\ncode\n```\n````"),
+    ],
+)
+def test_other_rich_blocks_preserve_text(block, expected):
+    assert ingress.extract_input([rich_message([block])]).text == expected
+
+
+@pytest.mark.parametrize(
+    "block,expected",
+    [
+        (
+            {
+                "type": "future_block",
+                "content": [{"title": "Future ", "value": "text"}],
+            },
+            "Future text",
+        ),
+        (
+            {
+                "type": "future_block",
+                "text": {"type": "future_style", "text": "Visible"},
+            },
+            "Visible",
+        ),
+        ({"type": "future_empty"}, ""),
+    ],
+)
+def test_unknown_block_types_keep_their_visible_text(block, expected):
+    """The flattener reads plain payloads, so a block type newer than the
+    library's models still yields whatever text it carries."""
+    assert ingress.flatten_rich_message({"blocks": [block]}) == expected
+
+
+def test_rich_inline_fallbacks_math_emoji_and_ignored_buttons():
+    incoming = rich_message(
+        [
+            {
+                "type": "paragraph",
+                "text": [
+                    {"type": "url", "text": "", "url": "https://example.test"},
+                    " ",
+                    {
+                        "type": "email_address",
+                        "text": "",
+                        "email_address": "a@example.test",
+                    },
+                    " ",
+                    {
+                        "type": "custom_emoji",
+                        "custom_emoji_id": "123",
+                        "alternative_text": "👍",
+                    },
+                    " ",
+                    {"type": "mathematical_expression", "expression": "x+1"},
+                ],
+            },
+            {"type": "buttons", "buttons": [{"text": "Ignore this"}]},
+        ]
+    )
+    assert (
+        ingress.extract_input([incoming]).text
+        == "https://example.test a@example.test 👍 $x+1$"
+    )
+
+
+def test_rich_table_escapes_delimiters_and_pads_short_rows():
+    incoming = rich_message(
+        [
+            {
+                "type": "table",
+                "caption": "Prices",
+                "cells": [
+                    [
+                        {"text": "A|B", "align": "left", "valign": "top"},
+                        {"text": "C\nD", "align": "left", "valign": "top"},
+                    ],
+                    [{"align": "left", "valign": "top"}],
+                ],
+            }
+        ]
+    )
+    assert (
+        ingress.extract_input([incoming]).text
+        == "Prices\n\n| A\\|B | C<br>D |\n| --- | --- |\n|  |  |"
+    )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "photo",
+        "video",
+        "animation",
+        "audio",
+        "voice_note",
+        "document",
+        "collage",
+        "slideshow",
+        "map",
+    ],
+)
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("location", ["direct", "reply", "external"])
+def test_rich_media_rejects_entire_turn_and_counts_as_an_attachment(
+    kind, nested, location
+):
+    blocks = [rich_media_block(kind)]
+    if nested:
+        blocks = [
+            {"type": "paragraph", "text": "Do not partially accept"},
+            {"type": "details", "summary": "Media", "blocks": blocks},
+        ]
+    original = rich_message(blocks)
+    incoming = original
+    if location == "reply":
+        incoming = message(2, text="Explain", reply_to_message=original)
+    elif location == "external":
+        incoming = message(
+            text="Explain",
+            external_reply=ExternalReplyInfo.model_validate(
+                {
+                    "origin": {
+                        "type": "hidden_user",
+                        "date": 1,
+                        "sender_user_name": "Tester",
+                    },
+                    "rich_message": {"blocks": blocks},
+                },
+            ),
+        )
+    assert ingress.input_has_attachments(incoming)
+    with pytest.raises(ingress.InputError) as failure:
+        ingress.extract_input([incoming])
+    assert failure.value.code == "unsupported_type"
+
+
+def test_rich_text_limit_includes_quoted_text():
+    incoming = rich_message(
+        [{"type": "paragraph", "text": "a" * ingress.MAX_TEXT_CHARS}]
+    )
+    assert len(ingress.extract_input([incoming]).text) == ingress.MAX_TEXT_CHARS
+    for oversized in [
+        rich_message(
+            [{"type": "paragraph", "text": "a" * (ingress.MAX_TEXT_CHARS + 1)}]
+        ),
+        message(2, text="More", reply_to_message=incoming),
+    ]:
+        with pytest.raises(ingress.InputError) as failure:
+            ingress.extract_input([oversized])
+        assert failure.value.code == "text_too_long"
+
+
+def test_typed_rich_payload_and_text_caption_priority():
+    from pydantic import BaseModel
+
+    class RichPayload(BaseModel):
+        blocks: list[dict]
+        is_rtl: bool | None = None
+
+    payload = {"blocks": [{"type": "paragraph", "text": "Rich"}]}
+    source = SimpleNamespace(rich_message=RichPayload(**payload))
+    assert ingress.rich_message_payload(source) == payload
+    assert ingress.message_text(source) == "Rich"
+    source.text, source.caption = "Text", "Caption"
+    assert ingress.message_text(source) == "Text"
+    source.text = ""
+    assert ingress.message_text(source) == "Caption"
+    source.rich_message = None
+    source.caption = None
+    assert ingress.message_text(source) == ""
 
 
 @pytest.mark.parametrize("field", ["text", "caption"])
@@ -84,7 +413,11 @@ def test_attachment_predicate_includes_unsupported_and_referenced_media(
     kwargs = (
         {"photo": [photo()]}
         if supported
-        else {"document": Document("doc", "doc", file_name="report.pdf")}
+        else {
+            "document": Document(
+                file_id="doc", file_unique_id="doc", file_name="report.pdf"
+            )
+        }
     )
     if location == "direct":
         incoming = message(**kwargs)
@@ -94,7 +427,9 @@ def test_attachment_predicate_includes_unsupported_and_referenced_media(
         incoming = message(
             text="A form answer",
             external_reply=ExternalReplyInfo(
-                origin=MessageOriginHiddenUser(datetime.now(timezone.utc), "Someone"),
+                origin=MessageOriginHiddenUser(
+                    date=datetime.now(timezone.utc), sender_user_name="Someone"
+                ),
                 **kwargs,
             ),
         )
@@ -115,7 +450,10 @@ def test_attachment_predicate_does_not_follow_text_urls_or_recursive_replies():
 
 def test_story_reference_is_detected_and_explicitly_refused():
     incoming = message(
-        text="Explain", reply_to_message=message(0, story=Story(Chat(10, "private"), 1))
+        text="Explain",
+        reply_to_message=message(
+            0, story=Story(chat=Chat(id=10, type="private"), id=1)
+        ),
     )
     assert ingress.input_has_attachments(incoming)
     with pytest.raises(ingress.InputError) as failure:
@@ -201,7 +539,9 @@ def test_reply_is_not_followed_recursively():
 
 def test_external_reply_photo_is_available():
     reply = ExternalReplyInfo(
-        origin=MessageOriginHiddenUser(datetime.now(timezone.utc), "Someone"),
+        origin=MessageOriginHiddenUser(
+            date=datetime.now(timezone.utc), sender_user_name="Someone"
+        ),
         photo=[photo()],
     )
     turn = ingress.extract_input([message(text="Explain", external_reply=reply)])
@@ -219,14 +559,19 @@ def test_external_reply_photo_is_available():
     ],
 )
 def test_documents_are_classified_by_supported_type(filename, mime, kind):
-    doc = Document("doc", "unique-doc", file_name=filename, mime_type=mime)
+    doc = Document(
+        file_id="doc", file_unique_id="unique-doc", file_name=filename, mime_type=mime
+    )
     assert ingress.extract_input([message(document=doc)]).media[0].kind == kind
 
 
 @pytest.mark.parametrize("quoted", [False, True])
 def test_unsupported_document_never_silently_becomes_text_only(quoted):
     unsupported = message(
-        document=Document("doc", "unique", file_name="report.pdf"), caption="Summarize"
+        document=Document(
+            file_id="doc", file_unique_id="unique", file_name="report.pdf"
+        ),
+        caption="Summarize",
     )
     incoming = (
         message(2, text="Summarize", reply_to_message=unsupported)
@@ -239,8 +584,8 @@ def test_unsupported_document_never_silently_becomes_text_only(quoted):
 
 def test_static_stickers_are_images_but_animated_stickers_are_refused():
     sticker = Sticker(
-        "sticker",
-        "unique",
+        file_id="sticker",
+        file_unique_id="unique",
         width=100,
         height=100,
         type="regular",
@@ -249,8 +594,8 @@ def test_static_stickers_are_images_but_animated_stickers_are_refused():
     )
     assert ingress.extract_input([message(sticker=sticker)]).media[0].kind == "image"
     animated = Sticker(
-        "sticker",
-        "unique",
+        file_id="sticker",
+        file_unique_id="unique",
         width=100,
         height=100,
         type="regular",
@@ -262,7 +607,11 @@ def test_static_stickers_are_images_but_animated_stickers_are_refused():
 
 
 @pytest.mark.parametrize(
-    "audio", [Voice("voice", "u", 601), Audio("audio", "u", timedelta(seconds=601))]
+    "audio",
+    [
+        Voice(file_id="voice", file_unique_id="u", duration=601),
+        Audio(file_id="audio", file_unique_id="u", duration=601),
+    ],
 )
 def test_audio_duration_is_bounded_before_download(audio):
     kwargs = {"voice" if isinstance(audio, Voice) else "audio": audio}
@@ -280,12 +629,22 @@ def test_known_file_size_and_turn_totals_fail_before_download():
             [
                 message(
                     1,
-                    audio=Audio("one", "one", 3, file_size=11 * 1024 * 1024),
+                    audio=Audio(
+                        file_id="one",
+                        file_unique_id="one",
+                        duration=3,
+                        file_size=11 * 1024 * 1024,
+                    ),
                     media_group_id="album",
                 ),
                 message(
                     2,
-                    audio=Audio("two", "two", 3, file_size=11 * 1024 * 1024),
+                    audio=Audio(
+                        file_id="two",
+                        file_unique_id="two",
+                        duration=3,
+                        file_size=11 * 1024 * 1024,
+                    ),
                     media_group_id="album",
                 ),
             ]
@@ -334,35 +693,40 @@ class Response:
 
 
 class Session:
+    """Stands in for ``bot.session``: aiogram's file streaming entry point."""
+
     def __init__(self, responses):
         self.responses = iter(responses)
         self.requests = []
-        self.closed = False
+        self.api = SimpleNamespace(
+            file_url=lambda token, path: f"https://api.telegram.org/file/bot{token}/{path}"
+        )
 
-    def get(self, url, **kwargs):
+    async def stream_content(self, url, **kwargs):
         self.requests.append((url, kwargs))
-        return next(self.responses)
-
-    async def close(self):
-        self.closed = True
+        response = next(self.responses)
+        async with response:
+            if response.status >= 400 and kwargs.get("raise_for_status"):
+                raise RuntimeError(f"{response.status} for {url}")
+            async for chunk in response.iter_chunked(kwargs.get("chunk_size")):
+                yield chunk
 
 
 def resolver(responses, *, file_size=None):
     bot = SimpleNamespace(
+        token="SECRET",
+        session=Session(responses),
         get_file=AsyncMock(
             return_value=SimpleNamespace(
-                file_size=file_size,
-                file_path="https://api.telegram.org/file/botSECRET/image.png",
+                file_size=file_size, file_path="photos/image.png"
             )
-        )
+        ),
     )
-    service = ingress.TelegramInputResolver(bot)
-    service._session = Session(responses)
-    return service
+    return ingress.TelegramInputResolver(bot)
 
 
 @pytest.mark.asyncio
-async def test_photo_bytes_reach_prompt_images_with_caption_and_session_reuse():
+async def test_photo_bytes_reach_prompt_images_with_caption():
     data = image_bytes()
     service = resolver([Response([data]), Response([data])])
     turn = ingress.extract_input([message(photo=[photo()], caption="Analyse")])
@@ -372,31 +736,29 @@ async def test_photo_bytes_reach_prompt_images_with_caption_and_session_reuse():
         assert resolved.images[0].data == data
         assert resolved.images[0].mime == "image/png"
         assert resolved.images[0].id == ""
-    assert service._session.requests[0][1] == {"allow_redirects": False}
+    url, options = service._bot.session.requests[0]
+    assert url == "https://api.telegram.org/file/botSECRET/photos/image.png"
+    assert options["raise_for_status"] is True and options["timeout"] == 30
     await service.close()
-    assert service._session.closed
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("boundary", ["metadata", "header", "chunks"])
+@pytest.mark.parametrize("boundary", ["metadata", "chunks"])
 async def test_download_size_limits_are_enforced_at_each_boundary(
     monkeypatch, boundary
 ):
     monkeypatch.setattr(attachments, "MAX_BYTES", 8)
-    response = Response(
-        [b"12345", b"67890", b"never read"],
-        content_length=9 if boundary == "header" else None,
-    )
+    response = Response([b"12345", b"67890", b"never read"])
     service = resolver([response], file_size=9 if boundary == "metadata" else None)
     turn = ingress.extract_input([message(photo=[photo()])])
     with pytest.raises(ingress.InputError) as failure:
         await service.resolve(turn)
     assert failure.value.code == "file_too_large"
     if boundary == "metadata":
-        assert not service._session.requests
+        assert not service._bot.session.requests
     else:
         assert response.closed
-        assert response.read_chunks == (2 if boundary == "chunks" else 0)
+        assert response.read_chunks == 2
 
 
 @pytest.mark.asyncio
@@ -486,7 +848,9 @@ async def test_combined_document_text_is_bounded(monkeypatch):
     turn = ingress.extract_input(
         [
             message(
-                document=Document("doc", "doc", file_name="notes.txt"),
+                document=Document(
+                    file_id="doc", file_unique_id="doc", file_name="notes.txt"
+                ),
                 caption="Summarize",
             )
         ]
@@ -497,7 +861,7 @@ async def test_combined_document_text_is_bounded(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_download_errors_hide_token_and_do_not_follow_redirects():
+async def test_download_errors_hide_the_token():
     service = resolver([])
     service._bot.get_file.side_effect = RuntimeError(
         "request to https://api.telegram.org/botSECRET/getFile failed"
@@ -506,12 +870,13 @@ async def test_download_errors_hide_token_and_do_not_follow_redirects():
         await service.resolve(ingress.extract_input([message(photo=[photo()])]))
     assert "SECRET" not in str(failure.value)
     assert failure.value.__suppress_context__
-    response = Response([], status=302)
+    response = Response([], status=404)
     service = resolver([response])
-    with pytest.raises(ingress.InputError):
+    with pytest.raises(ingress.InputError) as failure:
         await service.resolve(ingress.extract_input([message(photo=[photo()])]))
+    assert "SECRET" not in str(failure.value)
+    assert failure.value.__suppress_context__
     assert response.closed
-    assert service._session.requests[0][1]["allow_redirects"] is False
 
 
 @pytest.mark.asyncio
@@ -573,12 +938,16 @@ async def test_real_chunked_http_download_stops_at_limit(monkeypatch):
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
+    server = TelegramAPIServer(
+        base=f"http://127.0.0.1:{port}/bot{{token}}/{{method}}",
+        file=f"http://127.0.0.1:{port}/{{path}}",
+    )
     bot = SimpleNamespace(
+        token="SECRET",
+        session=AiohttpSession(api=server),
         get_file=AsyncMock(
-            return_value=SimpleNamespace(
-                file_size=None, file_path=f"http://127.0.0.1:{port}/image"
-            )
-        )
+            return_value=SimpleNamespace(file_size=None, file_path="image")
+        ),
     )
     service = ingress.TelegramInputResolver(bot)
     try:
@@ -587,6 +956,7 @@ async def test_real_chunked_http_download_stops_at_limit(monkeypatch):
         assert failure.value.code == "file_too_large"
     finally:
         await service.close()
+        await bot.session.close()
         await runner.cleanup()
 
 
@@ -606,9 +976,7 @@ async def test_global_download_concurrency_is_bounded():
             full.set()
         await gate.wait()
         active -= 1
-        return SimpleNamespace(
-            file_size=None, file_path="https://api.telegram.org/file/image"
-        )
+        return SimpleNamespace(file_size=None, file_path="image")
 
     service._bot.get_file.side_effect = get_file
     turn = ingress.extract_input([message(photo=[photo()])])

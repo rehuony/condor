@@ -3,17 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useRates } from "@/hooks/useRates";
 import { useCondorWebSocket } from "@/hooks/useWebSocket";
-import {
-  api,
-  type BotSummary,
-  type ControllerInfo,
-  type ControllerPerformanceHistoryAllResponse,
-  type ControllerPerformanceSnapshot,
-  type BotRunInfo,
-  type ExecutorInfo,
-} from "@/lib/api";
+import { botsApi, type BotRunInfo, type BotSummary, type ControllerInfo } from "@/lib/api/bots";
+import { performanceApi, type ControllerPerformanceHistoryAllResponse, type ControllerPerformanceSnapshot } from "@/lib/api/performance";
+import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
+import { agentsApi } from "@/lib/api/agents";
 import type { DeedIndex, FleetOwner } from "@/lib/agent-attribution";
-import type { ExecutorPaging } from "@/components/perf/PerfBrowser";
+import type { ExecutorPaging } from "@/components/perf/browser/ScopeTreePane";
 import type { Population } from "@/lib/perf-tree";
 import { controllerKey } from "@/lib/controller-identity";
 import { useActiveSnapshots } from "@/hooks/useActiveSnapshots";
@@ -131,7 +126,7 @@ export function useFleetData(
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["bots", server],
-    queryFn: () => api.getBots(server!),
+    queryFn: () => botsApi.getBots(server!),
     enabled: on,
     refetchInterval: 30000, // Slower polling since WS handles real-time updates
   });
@@ -154,7 +149,7 @@ export function useFleetData(
    */
   const { data: fleet } = useQuery({
     queryKey: ["fleet-map"],
-    queryFn: () => api.getFleetMap(),
+    queryFn: () => agentsApi.getFleetMap(),
     refetchInterval: 5000,
     enabled,
   });
@@ -236,7 +231,7 @@ export function useFleetData(
       // the whole fan-out costs rather than what each walk asks for.
       const budget = historyRowBudget(1);
       const load = (startTime: string | undefined, maxPages?: number) =>
-        api.getControllerPerformanceHistoryByController(
+        performanceApi.getControllerPerformanceHistoryByController(
           server!,
           controllers,
           { interval: perfInterval, start_time: startTime },
@@ -285,7 +280,7 @@ export function useFleetData(
     enabled: on,
     initialPageParam: "" as string,
     queryFn: ({ pageParam }) =>
-      api.getExecutorsPage(server!, { cursor: pageParam || undefined, limit: EXECUTOR_PAGE_SIZE }),
+      executorsApi.getExecutorsPage(server!, { cursor: pageParam || undefined, limit: EXECUTOR_PAGE_SIZE }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     refetchInterval: 60_000, // Slow fallback only — WS handles real-time updates
     refetchOnWindowFocus: false,
@@ -309,7 +304,7 @@ export function useFleetData(
   // request is not made at all while the reader is looking at the live fleet.
   const { data: runsData } = useQuery({
     queryKey: ["bot-runs", server],
-    queryFn: () => api.getBotRuns(server!, { limit: 200 }),
+    queryFn: () => botsApi.getBotRuns(server!, { limit: 200 }),
     enabled: on && population === "terminated",
     refetchInterval: 30_000,
   });
@@ -324,7 +319,7 @@ export function useFleetData(
   // net rather than a cost.
   const { data: terminatedData } = useQuery({
     queryKey: ["terminated-controllers", server],
-    queryFn: () => api.getTerminatedControllers(server!),
+    queryFn: () => botsApi.getTerminatedControllers(server!),
     enabled: on && population === "terminated",
     refetchInterval: 60_000,
     staleTime: 30_000,

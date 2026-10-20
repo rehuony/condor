@@ -10,10 +10,10 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
+from condor.telegram.transport import as_input_file
 from config_manager import get_client
-from routines.base import RoutineResult
+from routines.base import RoutineContext, RoutineResult
 
 logger = logging.getLogger(__name__)
 
@@ -601,9 +601,9 @@ async def _send_photo_http(chat_id: int, buf: io.BytesIO, caption: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    chat_id = context._chat_id if hasattr(context, "_chat_id") else None
-    client = await get_client(chat_id, context=context)
+async def run(config: Config, context: RoutineContext) -> str:
+    chat_id = context.chat_id
+    client = await get_client(chat_id, user_data=context.user_data)
     if not client:
         return "No server available"
 
@@ -736,7 +736,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
                 buf.seek(0)
                 if context.bot:
                     await context.bot.send_photo(
-                        chat_id=chat_id, photo=buf, caption=caption
+                        chat_id=chat_id, photo=as_input_file(buf), caption=caption
                     )
                 else:
                     await _send_photo_http(chat_id, buf, caption)

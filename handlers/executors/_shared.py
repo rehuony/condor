@@ -9,16 +9,16 @@ Contains:
 """
 
 import logging
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
-from condor.cache import DEFAULT_CACHE_TTL
-from condor.cache import cached_call as _cached_call
-from condor.cache import clear_cache as _clear_cache
-from condor.cache import get_cached as _get_cached
-from condor.cache import set_cached as _set_cached
+from condor import cache as _cache
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.telegram_formatters import escape_markdown_v2
 
 logger = logging.getLogger(__name__)
@@ -338,7 +338,7 @@ def format_executor_summary(executor: Dict[str, Any]) -> str:
 
 async def _show_pair_suggestions(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     error_msg: str,
     suggestions: list,
     *,
@@ -366,16 +366,20 @@ async def _show_pair_suggestions(
     keyboard = []
     for pair in suggestions:
         keyboard.append(
-            [InlineKeyboardButton(f"📈 {pair}", callback_data=f"{select_prefix}{pair}")]
+            [
+                InlineKeyboardButton(
+                    text=f"📈 {pair}", callback_data=f"{select_prefix}{pair}"
+                )
+            ]
         )
 
     keyboard.append(
         [
-            InlineKeyboardButton("⬅️ Back", callback_data=back_callback),
-            InlineKeyboardButton("❌ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(text="⬅️ Back", callback_data=back_callback),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
         ]
     )
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     if update.callback_query:
         try:
@@ -403,32 +407,18 @@ async def _show_pair_suggestions(
 
 _NS = "_executors_cache"
 
-
-def get_cached(
-    user_data: dict, key: str, ttl: int = DEFAULT_CACHE_TTL
-) -> Optional[Any]:
-    return _get_cached(user_data, key, ttl, namespace=_NS)
-
-
-def set_cached(user_data: dict, key: str, value: Any) -> None:
-    _set_cached(user_data, key, value, namespace=_NS)
+get_cached = partial(_cache.get_cached, namespace=_NS)
+set_cached = partial(_cache.set_cached, namespace=_NS)
+cached_call = partial(_cache.cached_call, namespace=_NS)
 
 
 def invalidate_cache(user_data: dict, *keys: str) -> None:
     """Invalidate specific cache keys or all if 'all' is passed."""
     if "all" in keys:
-        _clear_cache(user_data, namespace=_NS)
+        _cache.clear_cache(user_data, namespace=_NS)
         return
     for key in keys:
-        _clear_cache(user_data, key, namespace=_NS)
-
-
-async def cached_call(
-    user_data: dict, key: str, fetch_func, ttl: int = DEFAULT_CACHE_TTL, *args, **kwargs
-) -> Any:
-    return await _cached_call(
-        user_data, key, fetch_func, ttl, *args, namespace=_NS, **kwargs
-    )
+        _cache.clear_cache(user_data, key, namespace=_NS)
 
 
 # ============================================

@@ -1,13 +1,4 @@
-/**
- * A conversation's token total, folded the way the backend folds it (FEAT-120).
- *
- * The dashboard seeds a slot from the conversation's stored total and then adds
- * each turn's `prompt_done.usage` to it, so these rules have to be the Python
- * `TokenUsage.__add__` rules exactly or a live tab would drift from a reloaded
- * one: counters sum, the context reading is the latest one that was reported.
- */
-
-import type { TokenUsage } from "@/lib/api";
+import type { TokenUsage } from "@/lib/api/conversations";
 
 const COUNTERS = [
   "input_tokens",

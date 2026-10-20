@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { api, type ControllerInfo, type ControllerPerformanceHistoryAllResponse } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import type { ControllerInfo } from "@/lib/api/bots";
+import { performanceApi, type ControllerPerformanceHistoryAllResponse } from "@/lib/api/performance";
 import { controllerKey } from "@/lib/controller-identity";
 import { historyRowBudget } from "@/lib/history-pagination";
 import {
@@ -73,7 +75,7 @@ export function ControllerPnlChart({ server, controllerId, botName, deployedAt, 
     queryFn: ({ signal, queryKey: key, client }) => {
       const budget = historyRowBudget(1);
       const load = (startTime: string | undefined, maxPages?: number) =>
-        api.getControllerPerformanceHistoryAll(
+        performanceApi.getControllerPerformanceHistoryAll(
           server,
           {
             controller_id: controllerId,
@@ -114,7 +116,7 @@ export function ControllerPnlChart({ server, controllerId, botName, deployedAt, 
     return (
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-center" style={{ height }}>
         <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          <Spinner size="sm" />
           Loading performance history...
         </div>
       </div>

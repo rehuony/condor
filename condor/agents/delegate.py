@@ -1066,9 +1066,9 @@ def resolve_bot(bot=None):
     """The best Telegram sender available in this process.
 
     Prefer the passed live ``bot``; otherwise fall back to the registered routine
-    bot, then the ``_HttpBot`` Telegram-HTTP path (``TELEGRAM_TOKEN``) that
-    routines/notification already use, so a process with no live bot still
-    delivers. With no token at all the last rung is ``NotifyBot`` (FEAT-048),
+    bot, then the standalone client built from ``TELEGRAM_TOKEN``, so a process
+    with no live bot still delivers. With no token at all the last rung is
+    ``NotifyBot`` (FEAT-048),
     which records the message as a dashboard notification -- an install with no
     Telegram now tells the user things instead of dropping them. Public because a
     Telegram wake sink (FEAT-034) must reach the user through exactly the same
@@ -1084,11 +1084,10 @@ def resolve_bot(bot=None):
         except Exception:
             target = None
     if target is None:
-        from condor.routine_store import _HttpBot
+        from condor.telegram.transport import standalone_bot
 
-        http = _HttpBot()
-        if http.has_token():
-            return http
+        target = standalone_bot()
+    if target is None:
         # No Telegram at all: record on the dashboard instead of handing the
         # message to a sender that drops it (FEAT-048). This rung sits *below*
         # both Telegram rungs, so an install with a bot is byte-for-byte

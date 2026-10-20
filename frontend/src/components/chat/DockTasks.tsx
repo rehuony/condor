@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Square } from "lucide-react";
+import { Square } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ActivityFeed } from "@/components/agent/ActivityFeed";
@@ -8,7 +8,8 @@ import {
   DELEGATION_STATUS,
   formatDelegationTime,
 } from "@/components/agent/delegationStatus";
-import { api, type Delegation } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { delegationsApi, type Delegation } from "@/lib/api/delegations";
 
 /** How much of the delegation record the list is showing. */
 type Scope = "mine" | "all" | "history";
@@ -74,7 +75,7 @@ export function DockTasks({
   }, [anyRunning]);
 
   const stopMutation = useMutation({
-    mutationFn: (taskId: string) => api.stopDelegation(taskId),
+    mutationFn: (taskId: string) => delegationsApi.stopDelegation(taskId),
     onSuccess: () => {
       setConfirmStopId(null);
       queryClient.invalidateQueries({ queryKey: ["delegations"] });
@@ -176,7 +177,7 @@ export function DockTasks({
                       title="Confirm stop"
                     >
                       {stopMutation.isPending ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <Spinner size="xs" />
                       ) : (
                         "Stop?"
                       )}

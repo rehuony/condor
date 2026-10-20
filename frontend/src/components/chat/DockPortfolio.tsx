@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useRates } from "@/hooks/useRates";
-import { api } from "@/lib/api";
+import { portfolioApi } from "@/lib/api/portfolio";
 import {
   formatConnectorName,
   formatCurrency,
@@ -120,14 +120,14 @@ export function DockPortfolio({ server }: { server: string }) {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["portfolio", server],
-    queryFn: () => api.getPortfolio(server),
+    queryFn: () => portfolioApi.getPortfolio(server),
     refetchInterval: 15_000,
     placeholderData: keepPreviousData,
   });
 
   const { data: history } = useQuery({
     queryKey: ["portfolio-history", server, DAY_RANGE],
-    queryFn: () => api.getPortfolioHistory(server, DAY_RANGE),
+    queryFn: () => portfolioApi.getPortfolioHistory(server, DAY_RANGE),
     refetchInterval: 60_000,
   });
 

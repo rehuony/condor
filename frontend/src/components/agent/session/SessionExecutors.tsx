@@ -6,10 +6,12 @@ import { SessionPositions } from "@/components/agent/session/SessionPositions";
 import { ExecutorChart } from "@/components/charts/ExecutorChart";
 import { PairLabel } from "@/components/executor/PairLabel";
 import { DetailPanel, ExecutorTable, type SortDir, type SortKey } from "@/components/perf/ExecutorTable";
+import { Spinner } from "@/components/ui/Spinner";
 import { useAgentExecutors } from "@/hooks/useAgentExecutors";
 import { useRates } from "@/hooks/useRates";
 import { useSnapshotBubbles } from "@/hooks/useSnapshotBubbles";
-import { type AgentExecutorRow, type ExecutorInfo, api } from "@/lib/api";
+import { executorsApi, type ExecutorInfo } from "@/lib/api/executors";
+import { agentsApi, type AgentExecutorRow } from "@/lib/api/agents";
 import { groupExecutorsByMarket } from "@/lib/executor-overlays";
 import { pnlTextClass } from "@/lib/formatters";
 import { formatWithRate } from "@/lib/rates";
@@ -78,7 +80,7 @@ export function SessionExecutors({
   // REST data (fallback + historical executors)
   const { data: sessionDetail } = useQuery({
     queryKey: ["strategy-session-executors", slug, sslug, sessionNum],
-    queryFn: () => api.getStrategySessionExecutors(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getStrategySessionExecutors(slug, sslug, sessionNum),
     // A finished session's record no longer moves, and the route is uncached:
     // only the live one is re-read (PERF-384). Every observer of this key gates
     // the same way — react-query polls at the shortest interval among them.
@@ -117,7 +119,7 @@ export function SessionExecutors({
   // Fetch snapshots for bubble markers
   const { data: snapshotsData } = useQuery({
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "snapshots"],
-    queryFn: () => api.getSessionSnapshots(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionSnapshots(slug, sslug, sessionNum),
   });
 
   // One query per snapshot body, shared with SnapshotDetail — see useSnapshotBubbles.
@@ -138,7 +140,7 @@ export function SessionExecutors({
   // Positions held (filtered by controller IDs)
   const { data: positionsData } = useQuery({
     queryKey: ["positions-held", serverName],
-    queryFn: () => api.getPositionsHeld(serverName),
+    queryFn: () => executorsApi.getPositionsHeld(serverName),
     enabled: !chartsOnly && !!serverName && (controllerIds?.length ?? 0) > 0,
     refetchInterval: 10000,
   });
@@ -171,7 +173,7 @@ export function SessionExecutors({
   if (!sessionDetail) {
     return (
       <div className="flex h-32 items-center justify-center">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+        <Spinner size="lg" />
       </div>
     );
   }

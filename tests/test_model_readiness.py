@@ -12,8 +12,8 @@ import subprocess
 
 import pytest
 
-from handlers.agents import readiness
-from handlers.agents.readiness import MISSING, READY, UNVERIFIED
+from condor.llm import readiness
+from condor.llm.readiness import MISSING, READY, UNVERIFIED
 
 # ── npx package resolution ──────────────────────────────────────────────────
 

@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ToolCallStatusIcon } from "@/components/chat/ToolCallStatus";
-import { type DelegationEvent, api } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { delegationsApi, type DelegationEvent } from "@/lib/api/delegations";
 import { formatToolName } from "@/lib/formatters";
 
 // Commands and paths wrap at the reading width instead of widening the pane.
@@ -116,14 +117,14 @@ function ToolRow({
 export function DelegationTranscript({ taskId }: { taskId: string }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["delegation-events", taskId],
-    queryFn: () => api.getDelegationEvents(taskId),
+    queryFn: () => delegationsApi.getDelegationEvents(taskId),
     refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
   });
 
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner size="xs" />
         Loading transcript…
       </div>
     );

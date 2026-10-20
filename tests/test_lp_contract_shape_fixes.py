@@ -186,7 +186,7 @@ class _FakeMessage:
     async def edit_text(self, text, **kwargs):
         self.texts.append(text)
 
-    async def reply_text(self, text, **kwargs):
+    async def answer(self, text, **kwargs):
         self.texts.append(text)
 
 

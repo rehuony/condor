@@ -13,8 +13,8 @@ const listConversations = vi.fn();
 const renameConversation = vi.fn();
 const deleteConversation = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
     listConversations: (...a: unknown[]) => listConversations(...a),
     renameConversation: (...a: unknown[]) => renameConversation(...a),
     deleteConversation: (...a: unknown[]) => deleteConversation(...a),

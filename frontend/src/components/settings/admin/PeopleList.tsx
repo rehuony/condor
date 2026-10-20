@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
 import { ADMIN_PEOPLE_KEY, type AdminPerson, adminApi } from "@/lib/admin-api";
 
 import { displayName } from "./identity";
@@ -81,7 +83,7 @@ export function PeopleList({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -119,9 +121,9 @@ export function PeopleList({
       </div>
 
       {shown.length === 0 ? (
-        <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+        <EmptyState>
           {people.length === 0 ? "No one is registered yet." : "Nobody matches."}
-        </p>
+        </EmptyState>
       ) : (
         <div className="space-y-2">
           {shown.map((person) => (

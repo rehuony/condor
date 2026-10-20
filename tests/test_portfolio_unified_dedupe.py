@@ -187,7 +187,8 @@ class _FakeQuery:
     def __init__(self, bot):
         self._bot = bot
 
-    def get_bot(self):
+    @property
+    def bot(self):
         return self._bot
 
 

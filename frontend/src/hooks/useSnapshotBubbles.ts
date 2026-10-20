@@ -2,7 +2,7 @@ import { useQueries } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import type { SnapshotBubble } from "@/components/charts/ExecutorChart";
-import { type SnapshotSummary, api } from "@/lib/api";
+import { agentsApi, type SnapshotSummary } from "@/lib/api/agents";
 import { parseSnapshot } from "@/lib/parse-agent";
 
 /**
@@ -18,7 +18,7 @@ import { parseSnapshot } from "@/lib/parse-agent";
 export function snapshotQueryOptions(slug: string, sslug: string, sessionNum: number, tick: number) {
   return {
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "snapshot", tick] as const,
-    queryFn: () => api.getSnapshot(slug, sslug, sessionNum, tick),
+    queryFn: () => agentsApi.getSnapshot(slug, sslug, sessionNum, tick),
     staleTime: 60000,
   };
 }

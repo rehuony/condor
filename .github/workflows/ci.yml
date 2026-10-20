@@ -29,6 +29,20 @@ jobs:
       - name: Check import sorting with isort
         run: uv run --locked isort --check .
 
+  operations:
+    name: Installation and Operations Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check shell syntax and lint
+        run: |
+          for script in scripts/shell/*.sh scripts/shell/lib/*.sh; do bash -n "$script"; done
+          shellcheck -S error -x -P scripts/shell scripts/shell/*.sh scripts/shell/lib/*.sh
+
+      - name: Check Make dispatch
+        run: make --dry-run setup install check-update update build-frontend run run-fg stop restart status logs doctor test lint
+
   backend-import-check:
     name: Backend Import Check
     runs-on: ubuntu-latest

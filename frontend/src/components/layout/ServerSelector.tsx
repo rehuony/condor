@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { useServer } from "@/hooks/useServer";
-import { api, type ServerInfo } from "@/lib/api";
+import { serversApi, type ServerInfo } from "@/lib/api/servers";
 
 export function ServerSelector() {
   const { server, setServer } = useServer();
@@ -14,7 +14,7 @@ export function ServerSelector() {
 
   const { data: servers } = useQuery({
     queryKey: ["servers"],
-    queryFn: api.getServers,
+    queryFn: serversApi.getServers,
     refetchInterval: 10000,
   });
 

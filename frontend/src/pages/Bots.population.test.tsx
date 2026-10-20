@@ -34,7 +34,8 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
-import type { BotRunInfo, BotSummary, ControllerInfo, ExecutorInfo } from "@/lib/api";
+import type { BotRunInfo, BotSummary, ControllerInfo } from "@/lib/api/bots";
+import type { ExecutorInfo } from "@/lib/api/executors";
 
 const getBots = vi.fn();
 const getBotRuns = vi.fn();
@@ -43,22 +44,35 @@ const getExecutorsPage = vi.fn();
 
 // Everything the browser asks for beyond the four queries this case is about
 // answers empty: none of it decides whether the page is drawn.
-vi.mock("@/lib/api", () => {
-  const named: Record<string, (...args: unknown[]) => unknown> = {
-    getBots: (...a) => getBots(...a),
-    getBotRuns: (...a) => getBotRuns(...a),
-    getTerminatedControllers: (...a) => getTerminatedControllers(...a),
-    getExecutorsPage: (...a) => getExecutorsPage(...a),
-    // A list, not the proxy's `{}`: the fleet map is a `FleetOwner[]` and the
-    // page iterates it. No agents is the case this file is about anyway.
-    getFleetMap: () => Promise.resolve({ owners: [], deeds: { bots: {}, since: 0 } }),
-  };
-  return {
-    api: new Proxy(named, {
-      get: (target, key: string) => target[key] ?? (() => Promise.resolve({})),
-    }),
-  };
-});
+const named: Record<string, (...args: unknown[]) => unknown> = {
+  getBots: (...a) => getBots(...a),
+  getBotRuns: (...a) => getBotRuns(...a),
+  getTerminatedControllers: (...a) => getTerminatedControllers(...a),
+  getExecutorsPage: (...a) => getExecutorsPage(...a),
+  // A list, not the proxy's `{}`: the fleet map is a `FleetOwner[]` and the
+  // page iterates it. No agents is the case this file is about anyway.
+  getFleetMap: () => Promise.resolve({ owners: [], deeds: { bots: {}, since: 0 } }),
+};
+
+/** Every domain module answers with the same stub: the named reads above
+ * and an empty resolved object for anything else. */
+function stubApi() {
+  return new Proxy(named, {
+    get: (target, key: string) => target[key] ?? (() => Promise.resolve({})),
+  });
+}
+
+vi.mock("@/lib/api/bots", () => ({ botsApi: stubApi() }));
+vi.mock("@/lib/api/performance", () => ({ performanceApi: stubApi() }));
+vi.mock("@/lib/api/executors", () => ({ executorsApi: stubApi() }));
+vi.mock("@/lib/api/market", () => ({ marketApi: stubApi() }));
+vi.mock("@/lib/api/agents", () => ({ agentsApi: stubApi() }));
+vi.mock("@/lib/api/archived", () => ({ archivedApi: stubApi() }));
+vi.mock("@/lib/api/reports", () => ({ reportsApi: stubApi() }));
+vi.mock("@/lib/api/routines", () => ({ routinesApi: stubApi() }));
+vi.mock("@/lib/api/chat", () => ({ chatApi: stubApi() }));
+vi.mock("@/lib/api/conversations", () => ({ conversationsApi: stubApi() }));
+vi.mock("@/lib/api/notifications", () => ({ notificationsApi: stubApi() }));
 
 // The chart subsystems, the editors and the dialogs are whole worlds of their
 // own and none of them is about which population is on screen.

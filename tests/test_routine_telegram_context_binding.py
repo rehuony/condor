@@ -4,10 +4,10 @@ FEAT-052 made routines composable, and a nested ``call_routine()`` inherits the
 caller's server, bot and user from the context ``primitives.bind_context``
 publishes. Two of the three runners published one; the Telegram runner never
 did, so a ``/routines`` run that composed fell back to a bare
-``WebRoutineContext("")`` — the ambient-default server FEAT-051 closed, and a
+``RoutineContext.pinned("")`` — the ambient-default server FEAT-051 closed, and a
 report stamped with owner 0 that its own starter could not read.
 
-The owner is threaded explicitly as ``_owner_id`` because the Telegram runner
+The owner is threaded explicitly as ``owner_id`` because the Telegram runner
 separates the delivery chat (negative in a group) from the person the run
 belongs to; binding the context alone would attribute a nested run to the room.
 """
@@ -21,6 +21,8 @@ from pydantic import BaseModel
 import handlers.routines as hr
 from condor import primitives
 from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY
+from routines.base import RoutineContext
+from tests.conftest import patch_routines
 
 GROUP_ID = -1001234
 OWNER_ID = 7
@@ -38,8 +40,8 @@ class FakeBot:
 @pytest.fixture
 def quiet(monkeypatch):
     """Silence the parts of a run that talk to the store and to Telegram."""
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine_store",
         lambda: SimpleNamespace(
             store_result=lambda *a, **kw: None, remove_instance=lambda *a: None
@@ -53,8 +55,8 @@ def quiet(monkeypatch):
 
 
 def _library(monkeypatch, run_fn, *, continuous=False):
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine",
         lambda name: SimpleNamespace(
             name="probe",
@@ -96,7 +98,18 @@ def test_a_one_shot_run_publishes_the_context_its_routine_receives(monkeypatch, 
         hr._execute_routine(context, "i1", "probe", {}, GROUP_ID, owner_id=OWNER_ID)
     )
 
-    assert seen["inherited"] is seen["given"] is context
+    # The routine gets an explicit RoutineContext built from the caller's,
+    # and a nested call inherits that very object.
+    given = seen["given"]
+    assert seen["inherited"] is given
+    assert isinstance(given, RoutineContext)
+    assert (given.chat_id, given.owner_id, given.instance_id) == (
+        GROUP_ID,
+        OWNER_ID,
+        "i1",
+    )
+    assert given.bot is context.bot
+    assert given.user_data is context.application.user_data[OWNER_ID]
 
 
 def test_a_one_shot_run_hands_a_nested_call_the_starter_and_the_server(

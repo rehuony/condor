@@ -19,12 +19,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetOwner, LiveLoop } from "@/lib/agent-attribution";
-import type { AgentSummary } from "@/lib/api";
+import type { AgentSummary } from "@/lib/api/agents";
 
 const getFleetMap = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: { getFleetMap: () => getFleetMap() },
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
+    getFleetMap: () => getFleetMap(),
+  },
 }));
 
 const { useLiveLoops, groupLoopsByAgent, loopStats, loopsOnServer } =

@@ -8,7 +8,7 @@ in the repo reads: the preference API reads ``USER_PREFERENCES_KEY``. So the
 injection was inert, its guard was inert with it (it read the same dead key,
 so it never fired and the write always ran), and the run resolved whatever
 ambient default it found — the very case the capture was added to cover. It is
-the same key mismatch ``WebRoutineContext`` carried, left behind in Telegram.
+the same key mismatch the web context carried, left behind in Telegram.
 
 The binding is *pinned*: the captured name is the server the user was looking
 at when they pressed Run, and a scheduled or continuous run ticks long after
@@ -25,6 +25,7 @@ from pydantic import BaseModel
 import config_manager as cm_module
 import handlers.routines as hr
 from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY, get_active_server
+from tests.conftest import patch_routines
 
 GROUP_ID = -1001234
 OWNER_ID = 7
@@ -79,8 +80,8 @@ def cm(monkeypatch):
 @pytest.fixture
 def quiet(monkeypatch):
     """Silence the parts of a run that talk to the store and to Telegram."""
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine_store",
         lambda: SimpleNamespace(
             store_result=lambda *a, **kw: None, remove_instance=lambda *a: None
@@ -94,8 +95,8 @@ def quiet(monkeypatch):
 
 
 def _library(monkeypatch, run_fn, *, continuous=False):
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine",
         lambda name: SimpleNamespace(
             name="probe",
@@ -126,7 +127,9 @@ def _resolver(seen):
     """A routine that reaches for a client exactly as a real routine does."""
 
     async def _run(config, context):
-        seen["client"] = await cm_module.get_client(GROUP_ID, context=context)
+        seen["client"] = await cm_module.get_client(
+            GROUP_ID, user_data=context.user_data
+        )
         return "done"
 
     return _run

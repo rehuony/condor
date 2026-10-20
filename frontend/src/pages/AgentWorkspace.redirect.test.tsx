@@ -25,8 +25,8 @@ import {
 } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgent: () => new Promise(() => {}),
     getAgentRuns: () => new Promise(() => {}),
     getStrategy: () => new Promise(() => {}),

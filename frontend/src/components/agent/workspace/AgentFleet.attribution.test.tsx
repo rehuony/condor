@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
 import { attributionIndex, attributionOf, type FleetOwner } from "@/lib/agent-attribution";
-import type { ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
 
 // Both entry points are wrapped: `attributionOf` reaches `attributionIndex`
 // through the module's local binding, so counting the index export alone would

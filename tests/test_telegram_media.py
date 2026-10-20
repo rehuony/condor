@@ -3,19 +3,26 @@
 import asyncio
 import io
 import os
-import tempfile
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram.types import BufferedInputFile
 from PIL import Image
-from telegram.error import BadRequest, RetryAfter, TelegramError, TimedOut
 
 from condor import paths
 from condor.notifications import Notification, NotifyBot
 from condor.runtime.attachments import MAX_BYTES
-from condor.telegram_media import load_photo, send_photo, validate_photo
+from condor.telegram.errors import (
+    BadRequest,
+    RateLimited,
+    TelegramFailure,
+    bad_request,
+    network_failure,
+    rate_limited,
+)
+from condor.telegram.media import load_photo, send_photo, validate_photo
+from condor.telegram.transport import as_input_file
 
 
 def _picture(format="PNG", size=(40, 30)):
@@ -81,7 +88,7 @@ def test_large_file_is_refused_without_reading_its_contents(tmp_path, monkeypatc
     with target.open("wb") as handle:
         handle.truncate(MAX_BYTES + 1)
     monkeypatch.setattr(
-        "condor.telegram_media.os.fdopen",
+        "condor.telegram.media.os.fdopen",
         lambda *a, **k: pytest.fail("read oversized file"),
     )
 
@@ -129,8 +136,8 @@ class _Bot:
 
     async def send_photo(self, **kwargs):
         photo = kwargs["photo"]
-        self.uploads.append((kwargs["chat_id"], photo.name, photo.read()))
-        photo.close()
+        assert isinstance(photo, BufferedInputFile)
+        self.uploads.append((kwargs["chat_id"], photo.filename, photo.data))
         outcome = next(self.outcomes)
         if isinstance(outcome, Exception):
             raise outcome
@@ -141,54 +148,42 @@ class _Bot:
     "format,mime,filename",
     [("PNG", "image/png", "chart.png"), ("JPEG", "image/jpeg", "chart.jpg")],
 )
-@pytest.mark.parametrize(
-    "receipt",
-    [{"ok": True, "result": {"message_id": 7}}, SimpleNamespace(message_id=7)],
-)
-def test_upload_uses_correct_filename_and_returns_real_receipt(
-    format, mime, filename, receipt
-):
+def test_upload_uses_correct_filename_and_returns_real_receipt(format, mime, filename):
     data = _picture(format)
+    receipt = SimpleNamespace(message_id=7)
     bot = _Bot([receipt])
 
     assert asyncio.run(send_photo(bot, 42, data, mime)) is receipt
     assert bot.uploads == [(42, filename, data)]
 
 
-@pytest.mark.parametrize(
-    "rate_limit", [RetryAfter(1), {"ok": False, "parameters": {"retry_after": 1}}]
-)
-def test_rate_limit_retries_use_fresh_full_streams(monkeypatch, rate_limit):
-    monkeypatch.setattr("condor.telegram_text.asyncio.sleep", AsyncMock())
-    receipt = {"ok": True, "result": {"message_id": 7}}
+def test_rate_limit_retries_use_fresh_full_streams(monkeypatch):
+    monkeypatch.setattr("condor.telegram.transport.asyncio.sleep", AsyncMock())
+    receipt = SimpleNamespace(message_id=7)
     data = _picture()
-    bot = _Bot([rate_limit, receipt])
+    bot = _Bot([rate_limited(1), receipt])
 
-    assert asyncio.run(send_photo(bot, 42, data, "image/png")) == receipt
+    assert asyncio.run(send_photo(bot, 42, data, "image/png")) is receipt
     assert bot.uploads == [(42, "chart.png", data)] * 2
 
 
 def test_rate_limit_retries_are_bounded(monkeypatch):
-    monkeypatch.setattr("condor.telegram_text.asyncio.sleep", AsyncMock())
-    bot = _Bot([RetryAfter(1)] * 3)
+    monkeypatch.setattr("condor.telegram.transport.asyncio.sleep", AsyncMock())
+    bot = _Bot([rate_limited(1)] * 3)
 
-    with pytest.raises(RetryAfter):
+    with pytest.raises(RateLimited):
         asyncio.run(send_photo(bot, 42, _picture(), "image/png"))
     assert len(bot.uploads) == 3
 
 
 @pytest.mark.parametrize(
     "failure",
-    [
-        BadRequest("photo rejected"),
-        TimedOut("response lost"),
-        {"ok": False, "description": "photo rejected"},
-    ],
+    [bad_request("photo rejected"), network_failure("response lost")],
 )
 def test_rejections_and_unconfirmed_delivery_are_never_replayed(failure):
     bot = _Bot([failure])
 
-    with pytest.raises(TelegramError):
+    with pytest.raises(TelegramFailure):
         asyncio.run(send_photo(bot, 42, _picture(), "image/png"))
     assert len(bot.uploads) == 1
 
@@ -199,13 +194,12 @@ def test_rejections_and_unconfirmed_delivery_are_never_replayed(failure):
         None,
         True,
         {},
-        {"ok": True},
-        {"ok": True, "result": {"message_id": 0}},
+        SimpleNamespace(message_id=0),
         Notification("n", 42, 0, "agent", "chart"),
     ],
 )
 def test_nonreceipts_never_claim_telegram_success(receipt):
-    with pytest.raises(TelegramError, match="did not acknowledge"):
+    with pytest.raises(TelegramFailure, match="did not acknowledge"):
         asyncio.run(send_photo(_Bot([receipt]), 42, _picture(), "image/png"))
 
 
@@ -213,97 +207,50 @@ def test_dashboard_bot_is_rejected_before_it_records_a_caption(monkeypatch):
     bot = NotifyBot()
     bot.send_photo = AsyncMock()
 
-    with pytest.raises(TelegramError, match="not configured"):
+    with pytest.raises(TelegramFailure, match="not configured"):
         asyncio.run(send_photo(bot, 42, _picture(), "image/png"))
     bot.send_photo.assert_not_awaited()
 
 
-def test_http_bot_preserves_upload_name_mime_and_caption_mode():
-    from condor.routine_store import _HttpBot
-
-    bot = _HttpBot()
-    bot._post = AsyncMock(return_value={"ok": True, "result": {"message_id": 7}})
+def test_as_input_file_keeps_the_buffer_name():
     photo = io.BytesIO(_picture("JPEG"))
     photo.name = "generated.jpg"
 
-    asyncio.run(
-        bot.send_photo(
-            chat_id=42, photo=photo, caption="<b>Chart</b>", parse_mode="HTML"
-        )
-    )
+    upload = as_input_file(photo)
 
-    bot._post.assert_awaited_once_with(
-        "sendPhoto",
-        {"chat_id": 42, "caption": "<b>Chart</b>", "parse_mode": "HTML"},
-        files={"photo": ("generated.jpg", photo, "image/jpeg")},
-    )
+    assert isinstance(upload, BufferedInputFile)
+    assert (upload.filename, upload.data) == ("generated.jpg", photo.getvalue())
 
 
-def test_http_bot_explicit_filename_overrides_the_buffer_name():
-    from condor.routine_store import _HttpBot
-
-    bot = _HttpBot()
-    bot._post = AsyncMock()
+def test_as_input_file_explicit_filename_overrides_the_buffer_name():
     photo = io.BytesIO(_picture())
     photo.name = "wrong.jpg"
 
-    asyncio.run(bot.send_photo(42, photo, filename="generated.png"))
-
-    assert bot._post.await_args.kwargs["files"]["photo"] == (
-        "generated.png",
-        photo,
-        "image/png",
-    )
-
-
-def test_http_bot_accepts_temporary_file_with_descriptor_name():
-    from condor.routine_store import _HttpBot
-
-    bot = _HttpBot()
-    bot._post = AsyncMock()
-    with tempfile.TemporaryFile() as photo:
-        photo.write(_picture())
-        photo.seek(0)
-        assert isinstance(photo.name, int)
-
-        asyncio.run(bot.send_photo(42, photo))
-
-        assert bot._post.await_args.kwargs["files"]["photo"] == (
-            "chart.png",
-            photo,
-            "image/png",
-        )
+    assert as_input_file(photo, filename="generated.png").filename == "generated.png"
 
 
 @pytest.mark.parametrize("name", [b"generated.jpg", object(), 42])
-def test_http_bot_ignores_nonpath_filelike_names(name):
-    from condor.routine_store import _HttpBot
-
-    bot = _HttpBot()
-    bot._post = AsyncMock()
+def test_as_input_file_ignores_nonpath_filelike_names(name):
     photo = io.BytesIO(_picture())
     photo.name = name
 
-    asyncio.run(bot.send_photo(42, photo))
-
-    assert bot._post.await_args.kwargs["files"]["photo"] == (
-        "chart.png",
-        photo,
-        "image/png",
-    )
+    assert as_input_file(photo).filename == "file"
 
 
-def test_http_bot_normalizes_pathlike_filename_to_text():
-    from condor.routine_store import _HttpBot
+def test_as_input_file_uses_only_the_basename_of_a_path():
+    photo = io.BytesIO(_picture())
+    photo.name = "/tmp/reports/generated.png"
 
-    bot = _HttpBot()
-    bot._post = AsyncMock()
-    photo = io.BytesIO(_picture("JPEG"))
+    assert as_input_file(photo).filename == "generated.png"
 
-    asyncio.run(bot.send_photo(42, photo, filename=Path("generated.jpg")))
 
-    assert bot._post.await_args.kwargs["files"]["photo"] == (
-        "generated.jpg",
-        photo,
-        "image/jpeg",
-    )
+def test_as_input_file_wraps_bytes_and_passes_through_the_rest():
+    assert as_input_file(b"abc", filename="a.bin").data == b"abc"
+    assert as_input_file("AgACAgIAAxkBAAI") == "AgACAgIAAxkBAAI"
+    ready = BufferedInputFile(b"x", filename="x.png")
+    assert as_input_file(ready) is ready
+
+
+def test_bad_request_factory_reads_like_a_telegram_rejection():
+    assert isinstance(bad_request("photo rejected"), BadRequest)
+    assert "photo rejected" in str(bad_request("photo rejected"))

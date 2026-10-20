@@ -7,13 +7,7 @@ import {
   journalNamesDeploy,
   type WorkspaceAlert,
 } from "@/components/agent/workspace/views";
-import {
-  api,
-  type AgentPerformance,
-  type AgentRunRow,
-  type DeploymentRow,
-  type StrategyUnavailable,
-} from "@/lib/api";
+import { agentsApi, type AgentPerformance, type AgentRunRow, type DeploymentRow, type StrategyUnavailable } from "@/lib/api/agents";
 import { parseJournal, type Decision, type ParsedJournal } from "@/lib/parse-agent";
 
 /**
@@ -63,21 +57,21 @@ export function useRunReading({
 
   const { data: journalData } = useQuery({
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "journal"],
-    queryFn: () => api.getSessionJournal(slug, sslug!, sessionNum),
+    queryFn: () => agentsApi.getSessionJournal(slug, sslug!, sessionNum),
     enabled,
     refetchInterval: liveInterval,
   });
 
   const { data: actionsData } = useQuery({
     queryKey: ["session-actions", slug, sslug, sessionNum],
-    queryFn: () => api.getSessionActions(slug, sslug!, sessionNum),
+    queryFn: () => agentsApi.getSessionActions(slug, sslug!, sessionNum),
     enabled,
     refetchInterval: liveInterval,
   });
 
   const { data: perfData } = useQuery({
     queryKey: ["strategy-session-executors", slug, sslug, sessionNum],
-    queryFn: () => api.getStrategySessionExecutors(slug, sslug!, sessionNum),
+    queryFn: () => agentsApi.getStrategySessionExecutors(slug, sslug!, sessionNum),
     enabled,
     // Gated on the run, not on the live engine: the strategy's engine may be
     // running a different session than the one on screen (PERF-384).

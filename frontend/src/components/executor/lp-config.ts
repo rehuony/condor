@@ -3,7 +3,7 @@ import { useEffect, useMemo, useReducer } from "react";
 
 import type { ChartPriceMapping, ExecutorValidation, PickSlot } from "./types";
 import { loadPersistedDefaults, savePersistedDefaults } from "./persisted-defaults";
-import { api, type DexPoolInfo } from "@/lib/api";
+import { dexApi, type DexPoolInfo } from "@/lib/api/dex";
 import { getThemeColors } from "@/lib/theme-colors";
 import { LP_DEFAULTS_KEY } from "@/lib/sessionState";
 
@@ -337,7 +337,7 @@ export function useLpConfig(
 
   const { data: pool, isFetching: poolFetching } = useQuery({
     queryKey: ["dex-pool", server, connector, pair],
-    queryFn: () => api.getDexPool(server!, connector, pair),
+    queryFn: () => dexApi.getDexPool(server!, connector, pair),
     enabled: enabled && !lockedPoolAddress && !!server && !!connector && !!pair,
     staleTime: 60 * 1000,
   });

@@ -20,7 +20,8 @@ import {
   visibleRows,
 } from "./executionTree";
 import type { FleetOwner } from "@/lib/agent-attribution";
-import type { AgentSummary, ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { AgentSummary } from "@/lib/api/agents";
 import type { ConvertQuote, PerfLeaf } from "@/lib/perf-tree";
 
 const NOW = Date.parse("2026-09-04T12:00:00Z");

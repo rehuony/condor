@@ -24,12 +24,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDetail, StrategySummary } from "@/lib/api";
-import { api } from "@/lib/api";
+import { agentsApi, type AgentDetail, type StrategySummary } from "@/lib/api/agents";
 import { AgentStrategies } from "./AgentStrategies";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgent: vi.fn(async () => {
       CALLS += 1;
       return DETAIL;
@@ -183,7 +182,7 @@ describe("AgentStrategies delete (READ-408)", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
 
-    expect(api.deleteStrategy).toHaveBeenCalledTimes(1);
-    expect(api.deleteStrategy).toHaveBeenCalledWith("scout", "s-idle");
+    expect(agentsApi.deleteStrategy).toHaveBeenCalledTimes(1);
+    expect(agentsApi.deleteStrategy).toHaveBeenCalledWith("scout", "s-idle");
   });
 });

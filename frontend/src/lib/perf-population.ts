@@ -15,7 +15,8 @@
 // Nothing here fetches and nothing here renders (the ARCH-300 split).
 
 import { attributionIndex, type DeedIndex, type FleetOwner } from "@/lib/agent-attribution";
-import type { ControllerInfo, ExecutorInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import { isExecutorActive } from "@/lib/formatters";
 import {
   UNATTACHED_BOT,

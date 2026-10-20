@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { PerformanceSnapshot } from "@/lib/api";
+import type { PerformanceSnapshot } from "@/lib/api/performance";
 import type { ClosedOutcome, PnlChartPoint } from "@/lib/pnl-chart";
 import {
   asControllerSnapshot,

@@ -19,13 +19,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type AgentPerformance, type ReportSummary } from "@/lib/api";
+import { agentsApi, type AgentPerformance } from "@/lib/api/agents";
+import type { ReportSummary } from "@/lib/api/reports";
 import type { Decision, ParsedJournal } from "@/lib/parse-agent";
 import { NowView } from "./NowView";
 import { alertsFor } from "./views";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getSessionReport: vi.fn(async () => ({ report: null })),
   },
 }));
@@ -314,11 +315,11 @@ describe("the money card (ARCH-426)", () => {
   };
 
   beforeEach(() => {
-    vi.mocked(api.getSessionReport).mockResolvedValue({ report } as never);
+    vi.mocked(agentsApi.getSessionReport).mockResolvedValue({ report } as never);
   });
 
   afterEach(() => {
-    vi.mocked(api.getSessionReport).mockResolvedValue({ report: null } as never);
+    vi.mocked(agentsApi.getSessionReport).mockResolvedValue({ report: null } as never);
   });
 
   /** Render and let the report query land, bounded. */
@@ -429,11 +430,11 @@ describe("the session report (CORR-422)", () => {
   };
 
   beforeEach(() => {
-    vi.mocked(api.getSessionReport).mockResolvedValue({ report } as never);
+    vi.mocked(agentsApi.getSessionReport).mockResolvedValue({ report } as never);
   });
 
   afterEach(() => {
-    vi.mocked(api.getSessionReport).mockResolvedValue({ report: null } as never);
+    vi.mocked(agentsApi.getSessionReport).mockResolvedValue({ report: null } as never);
   });
 
   /** Render, wait for the report query to land, and open the report. */

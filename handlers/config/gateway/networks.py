@@ -2,10 +2,14 @@
 Gateway network management functions
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_active_server
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
+from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import (
     escape_markdown_v2,
@@ -15,14 +19,14 @@ from ._shared import (
 )
 
 
-async def show_networks_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_networks_menu(query, context: Context) -> None:
     """Show networks configuration menu"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading networks...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -37,7 +41,7 @@ async def show_networks_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "_Ensure Gateway is running\\._"
             )
             keyboard = [
-                [InlineKeyboardButton("« Back", callback_data="config_gateway")]
+                [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
             ]
         else:
             # Get default networks to highlight them
@@ -63,7 +67,7 @@ async def show_networks_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
                     label = network_id
                 # Use index-based callback to avoid exceeding 64-byte limit
                 button = InlineKeyboardButton(
-                    label, callback_data=f"gateway_network_view_{idx}"
+                    text=label, callback_data=f"gateway_network_view_{idx}"
                 )
                 row.append(button)
 
@@ -85,10 +89,10 @@ async def show_networks_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
 
             keyboard = network_buttons + [
-                [InlineKeyboardButton("« Back", callback_data="config_gateway")]
+                [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -97,14 +101,16 @@ async def show_networks_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error(f"Error showing networks: {e}", exc_info=True)
         error_text = f"❌ Error loading networks: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="config_gateway")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_network_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_network_action(query, context: Context) -> None:
     """Handle network-specific actions"""
     action_data = query.data.replace("gateway_network_", "")
 
@@ -138,14 +144,12 @@ async def handle_network_action(query, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.answer("Unknown action")
 
 
-async def show_network_details(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def show_network_details(query, context: Context, network_id: str) -> None:
     """Show network config in edit mode - user can copy/paste to change values"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -180,7 +184,7 @@ async def show_network_details(
                 f"🌍 *Network: {network_escaped}*\n\n" "_No configuration available_"
             )
             keyboard = [
-                [InlineKeyboardButton("« Back", callback_data="gateway_networks")]
+                [InlineKeyboardButton(text="« Back", callback_data="gateway_networks")]
             ]
         else:
             # Build copyable config for editing (exclude default_networks for display)
@@ -212,7 +216,7 @@ async def show_network_details(
             }
             context.user_data["awaiting_network_input"] = "bulk_edit"
             context.user_data["network_message_id"] = query.message.message_id
-            context.user_data["network_chat_id"] = query.message.chat_id
+            context.user_data["network_chat_id"] = query.message.chat.id
 
             # Toggle default button
             if is_default:
@@ -223,14 +227,14 @@ async def show_network_details(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        toggle_text,
+                        text=toggle_text,
                         callback_data=f"gateway_network_toggle_default_{network_id}",
                     )
                 ],
-                [InlineKeyboardButton("« Back", callback_data="gateway_networks")],
+                [InlineKeyboardButton(text="« Back", callback_data="gateway_networks")],
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -239,16 +243,16 @@ async def show_network_details(
     except Exception as e:
         logger.error(f"Error showing network details: {e}", exc_info=True)
         error_text = f"❌ Error loading network: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="gateway_networks")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_networks")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_network_config_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_network_config_input(update: Update, context: Context) -> None:
     """Handle text input during network configuration - parses key=value lines"""
     awaiting_field = context.user_data.get("awaiting_network_input")
     if awaiting_field != "bulk_edit":
@@ -300,12 +304,12 @@ async def handle_network_config_input(
         if errors:
             # Show errors but don't cancel
             error_msg = "⚠️ " + ", ".join(errors)
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id, text=error_msg
             )
 
         if not updates:
-            await update.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="❌ No valid updates found. Use format: key=value",
             )
@@ -316,7 +320,7 @@ async def handle_network_config_input(
         context.user_data["network_config_data"] = config_data
         context.user_data["awaiting_network_input"] = None
 
-        await submit_network_config(context, update.get_bot(), update.effective_chat.id)
+        await submit_network_config(context, context.bot, update.effective_chat.id)
 
     except Exception as e:
         logger.error(f"Error handling network config input: {e}", exc_info=True)
@@ -325,9 +329,7 @@ async def handle_network_config_input(
         context.user_data.pop("network_config_data", None)
 
 
-async def submit_network_config(
-    context: ContextTypes.DEFAULT_TYPE, bot, chat_id: int
-) -> None:
+async def submit_network_config(context: Context, bot, chat_id: int) -> None:
     """Submit the network configuration to Gateway"""
     try:
         from config_manager import get_config_manager
@@ -377,24 +379,12 @@ async def submit_network_config(
 
         # Create a mock query object to reuse the existing show_network_details function
         import asyncio
-        from types import SimpleNamespace
 
         # Wait a moment to let the user see the success message
         await asyncio.sleep(1.5)
 
         # Create a mock query object with the necessary attributes
-        mock_message = SimpleNamespace(
-            edit_text=lambda text, parse_mode=None, reply_markup=None: bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=text,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
-            ),
-            chat_id=chat_id,
-            message_id=message_id,
-        )
-        mock_query = SimpleNamespace(message=mock_message)
+        mock_query = MockQuery(message_handle(bot, chat_id, message_id), None)
 
         # Navigate back to network details view
         await show_network_details(mock_query, context, network_id)
@@ -407,9 +397,7 @@ async def submit_network_config(
         )
 
 
-async def handle_network_config_cancel(
-    query, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_network_config_cancel(query, context: Context) -> None:
     """Handle cancel button during network configuration"""
     try:
         config_data = context.user_data.get("network_config_data", {})
@@ -433,16 +421,14 @@ async def handle_network_config_cancel(
         await query.answer("Error cancelling configuration")
 
 
-async def toggle_default_network(
-    query, context: ContextTypes.DEFAULT_TYPE, network_id: str
-) -> None:
+async def toggle_default_network(query, context: Context, network_id: str) -> None:
     """Toggle whether a network is in the default_networks list"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Updating defaults...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )

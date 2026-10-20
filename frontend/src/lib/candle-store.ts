@@ -1,13 +1,4 @@
-/**
- * Singleton candle data store.
- *
- * Manages candle collections keyed by WS channel, reference-counted WS
- * subscriptions with deferred teardown, and listener notifications for
- * React hooks.  Completely framework-agnostic — the React bridge lives
- * in `useCandleStore.ts`.
- */
-
-import type { CandleData } from "./api";
+import type { CandleData } from "./api/market";
 import type { CondorWebSocket } from "./websocket";
 import {
   intervalSeconds,

@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Loader2, Mic, Paperclip, Send, Square, X } from "lucide-react";
+import { Mic, Paperclip, Send, Square, X } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { settingsApi } from "@/lib/api/settings";
 import { authFetch } from "@/lib/auth-token";
 import { readDraft, writeDraft } from "@/lib/chatDrafts";
 
@@ -111,7 +112,7 @@ export function ChatInput({
   // Voice preferences (auto_send default true)
   const { data: voiceSettings } = useQuery({
     queryKey: ["voice-settings"],
-    queryFn: () => api.getVoiceSettings(),
+    queryFn: () => settingsApi.getVoiceSettings(),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -451,7 +452,7 @@ export function ChatInput({
           ) : isTranscribing ? (
             // Transcribing UI
             <div className="flex flex-1 items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 @max-sm:order-first @max-sm:basis-full">
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />
+              <Spinner tone="primary" />
               <span className="text-sm text-[var(--color-text-muted)]">
                 Transcribing audio...
               </span>

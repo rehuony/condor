@@ -1,4 +1,4 @@
-import type { DelegationStatus, DelegationSummary } from "@/lib/api";
+import type { DelegationStatus, DelegationSummary } from "@/lib/api/delegations";
 import { formatDuration } from "@/lib/formatters";
 
 // How a delegation's states read, owned in one place: the fleet report's task

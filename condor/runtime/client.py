@@ -43,6 +43,12 @@ HTTP = "http"
 
 MODE = os.environ.get("CONDOR_RUNTIME_MODE", LOCAL)
 
+# Request ids whose durable acceptance is in progress, keyed by owner. The
+# transcript write runs off the event loop, so between ``has_request`` saying
+# "new" and the index saying "seen" there is a window another arrival of the
+# same id could slip through; registering here synchronously closes it.
+_in_flight: set[tuple[int, str]] = set()
+
 
 def _local():
     """Return the local registry module.
@@ -164,6 +170,25 @@ def _attach_usage(done: RuntimeEvent, session, recorder) -> None:
     recorder.note_usage(turn_usage)
 
 
+async def _settle_reservation(acquire: asyncio.Task) -> bool:
+    """Cancel a pending lock reservation; True when it had already acquired."""
+    if not acquire.done():
+        acquire.cancel()
+        try:
+            await acquire
+        except asyncio.CancelledError:
+            pass
+    return bool(
+        not acquire.cancelled() and acquire.exception() is None and acquire.result()
+    )
+
+
+async def _abandon_reservation(queue, acquire: asyncio.Task) -> None:
+    """Give up a reservation made for a turn that will never run."""
+    if await _settle_reservation(acquire):
+        queue.lock.release()
+
+
 async def prompt(
     key: SessionKey,
     req: PromptRequest,
@@ -188,13 +213,13 @@ async def prompt(
         return
 
     owner, conversation_id = session.user_id, session.conversation_id
-    if (
-        req.request_id
-        and owner is not None
-        and conversations.has_request(owner, req.request_id)
-    ):
-        yield RuntimeEvent.done("duplicate", session_key=raw_key)
-        return
+    flight_key: tuple[int, str] | None = None
+    if req.request_id and owner is not None:
+        flight_key = (owner, req.request_id)
+        if flight_key in _in_flight or conversations.has_request(owner, req.request_id):
+            yield RuntimeEvent.done("duplicate", session_key=raw_key)
+            return
+        _in_flight.add(flight_key)
 
     clean, _ = secrets.redact(req.text)
     view, _ = secrets.redact(req.view_context)
@@ -217,9 +242,23 @@ async def prompt(
             if image.id
         ],
     )
+    # Reserve FIFO position before the first await: the durable write below
+    # runs in a thread, and two inputs whose writes finish out of order must
+    # still be answered in the order they were sent.
+    was_busy = len(queue.pending) > 1 or session.is_busy
+    acquire = asyncio.create_task(queue.lock.acquire())
     try:
-        recorder.accept()
+        # Off the loop: the fsync'd transcript append would otherwise stall
+        # the Telegram poller and the dashboard alike. Nothing is yielded to
+        # the consumer until it has landed, so acceptance stays atomic from
+        # the caller's point of view. ``accept_lock`` is FIFO, so the
+        # transcript keeps the arrival order the execution queue has.
+        async with queue.accept_lock:
+            await asyncio.to_thread(recorder.accept)
     except Exception:
+        # Reservation first: ``release`` only forgets an idle queue, and the
+        # reservation may already hold its lock.
+        await _abandon_reservation(queue, acquire)
         turns.release(owner, queue_id, request_id)
         log.exception("Could not save incoming message for session %s", raw_key)
         yield RuntimeEvent.error(
@@ -228,13 +267,15 @@ async def prompt(
         )
         yield RuntimeEvent.done("error", session_key=raw_key)
         return
+    finally:
+        # Accepted or failed, the index (or its absence) now answers for the
+        # id; the in-flight guard was only for the write's duration.
+        if flight_key is not None:
+            _in_flight.discard(flight_key)
 
     locked = False
     executed = False
     outcome = "aborted"
-    # Reserve FIFO position before yielding to a transport that may be slow.
-    was_busy = len(queue.pending) > 1 or session.is_busy
-    acquire = asyncio.create_task(queue.lock.acquire())
     try:
         turns.publish(owner, conversation_id, raw_key, "accepted")
         accepted = RuntimeEvent.accepted(session_key=raw_key)
@@ -398,15 +439,7 @@ async def prompt(
             _attach_usage(done, session, recorder)
         yield done
     finally:
-        if not acquire.done():
-            acquire.cancel()
-            try:
-                await acquire
-            except asyncio.CancelledError:
-                pass
-        owns_lock = locked or (
-            not acquire.cancelled() and acquire.exception() is None and acquire.result()
-        )
+        owns_lock = locked or await _settle_reservation(acquire)
         if executed:
             recorder.note_usage(session.take_usage())
         if outcome == "aborted":

@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Pause, Play } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { botsApi } from "@/lib/api/bots";
 
 /**
  * Pause a quoting controller, or start a paused one — wherever it is listed.
@@ -57,8 +58,8 @@ export function ControllerToggle({
   const toggle = useMutation({
     mutationFn: () =>
       stopped
-        ? api.startControllers(server, bot, [controllerId])
-        : api.stopControllers(server, bot, [controllerId]),
+        ? botsApi.startControllers(server, bot, [controllerId])
+        : botsApi.stopControllers(server, bot, [controllerId]),
     // The kill switch lives in the bots payload — every surface that draws this
     // control reads its state from there.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["bots", server] }),
@@ -103,11 +104,7 @@ export function ControllerToggle({
       }`}
     >
       {busy ? (
-        <span
-          className={`animate-spin rounded-full border-[1.5px] border-current border-t-transparent ${
-            variant === "icon" ? "h-2.5 w-2.5" : "h-3.5 w-3.5"
-          }`}
-        />
+        <Spinner size={variant === "icon" ? "xs" : "sm"} />
       ) : stopped ? (
         <Play className={icon} />
       ) : (

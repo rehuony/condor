@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import { normalizeAgentSlug } from "@/lib/agentSlug";
-import { api, type ConversationMeta } from "@/lib/api";
+import { conversationsApi, type ConversationMeta } from "@/lib/api/conversations";
 
 /**
  * The bubble's second way to a conversation: the newest one this agent already
@@ -33,7 +33,7 @@ export function useBubbleResume(
 ) {
   const { data } = useQuery({
     queryKey: ["conversations"],
-    queryFn: () => api.listConversations(),
+    queryFn: () => conversationsApi.listConversations(),
     enabled,
   });
 

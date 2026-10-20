@@ -1,8 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowLeft, Check, Loader2, Sparkles, Wallet } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Sparkles, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { INPUT_CLASS, Label } from "@/components/ui/Field";
+import { Spinner } from "@/components/ui/Spinner";
+import { settingsApi } from "@/lib/api/settings";
 import { invalidateCredentialQueries } from "@/lib/queryClient";
 import { type DiscoveredWallet, connectWallet, discoverWallets } from "@/lib/wallet/evm";
 import {
@@ -126,8 +128,7 @@ export function ConnectHyperliquid({
       setSaveStatus(Object.fromEntries(entries.map(([name]) => [name, "saving" as SaveState])));
       const results = await Promise.allSettled(
         entries.map(([connectorName, credentials]) =>
-          api
-            .addCredential(server, { connector_name: connectorName, credentials })
+          settingsApi.addCredential(server, { connector_name: connectorName, credentials })
             .then((r) => {
               setSaveStatus((s) => ({ ...s, [connectorName]: "done" }));
               return r;
@@ -222,16 +223,16 @@ export function ConnectHyperliquid({
 
       {/* Account name (used as the on-chain agent wallet name) */}
       <div>
-        <label className="mb-1 block text-xs text-[var(--color-text-muted)]">
+        <Label>
           Agent name <span className="text-[var(--color-text-muted)]/60">(max 16 chars)</span>
-        </label>
+        </Label>
         <input
           value={accountName}
           onChange={(e) => setAccountName(e.target.value)}
           disabled={busy}
           maxLength={MAX_AGENT_NAME}
           placeholder={defaultAgentName()}
-          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none disabled:opacity-50"
+          className={`${INPUT_CLASS} font-mono`}
         />
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">
           Authorized for {AGENT_VALIDITY_DAYS} days (Hyperliquid's maximum) — reconnect before it
@@ -296,11 +297,11 @@ export function ConnectHyperliquid({
                 <button
                   onClick={handleLinkReferral}
                   disabled={referral === "linking"}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                   {referral === "linking" ? (
                     <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Linking…
+                      <Spinner size="sm" /> Linking…
                     </>
                   ) : (
                     "Link code"
@@ -331,7 +332,7 @@ export function ConnectHyperliquid({
                 ) : st === "error" ? (
                   <AlertCircle className="h-4 w-4 shrink-0 text-[var(--color-red)]" />
                 ) : (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--color-primary)]" />
+                  <Spinner tone="primary" />
                 )}
                 <span className={st === "error" ? "text-[var(--color-red)]" : undefined}>{label}</span>
                 {st === "error" && (
@@ -343,7 +344,7 @@ export function ConnectHyperliquid({
         </div>
       ) : busy ? (
         <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm text-[var(--color-text)]">
-          <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />
+          <Spinner tone="primary" />
           {phase === "connecting" && "Connecting to your wallet…"}
           {phase === "switch-chain" && STEP_LABEL["switch-chain"]}
           {phase === "approve-agent" && STEP_LABEL["approve-agent"]}
@@ -354,7 +355,7 @@ export function ConnectHyperliquid({
           <label className="block text-xs text-[var(--color-text-muted)]">Connect wallet</label>
           {scanning ? (
             <div className="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> Detecting wallets…
+              <Spinner /> Detecting wallets…
             </div>
           ) : wallets.length === 0 ? (
             <p className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text-muted)]">

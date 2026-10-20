@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { useServer } from "@/hooks/useServer";
-import { api } from "@/lib/api";
+import { settingsApi } from "@/lib/api/settings";
 import { credentialsQuery, gatewayWalletsQuery } from "@/lib/queryClient";
 
 export function useCredentials() {
@@ -9,7 +9,7 @@ export function useCredentials() {
 
   const { data, error: credsError, isLoading: credsLoading } = useQuery({
     ...credentialsQuery(server),
-    queryFn: () => api.getCredentials(server!),
+    queryFn: () => settingsApi.getCredentials(server!),
     enabled: !!server,
   });
 
@@ -17,7 +17,7 @@ export function useCredentials() {
   // Errors (e.g. Gateway not running) simply count as "no wallets".
   const { data: walletsData, isLoading: walletsLoading } = useQuery({
     ...gatewayWalletsQuery(server),
-    queryFn: () => api.getGatewayWallets(server!),
+    queryFn: () => settingsApi.getGatewayWallets(server!),
     enabled: !!server,
     retry: false,
   });

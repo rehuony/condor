@@ -13,6 +13,8 @@ import {
 import { useEffect, useState } from "react";
 
 import { ConfirmDialog } from "@/components/agent/ConfirmDialog";
+import { Card } from "@/components/ui/Card";
+import { Spinner } from "@/components/ui/Spinner";
 import { RELAUNCH_KEY, useRelaunch } from "@/hooks/useRelaunch";
 import { formatRelativeTime } from "@/lib/formatters";
 import {
@@ -53,10 +55,10 @@ export function UpdatesSettings() {
     retry: false,
   });
 
-  // Polled while a run is live. A hummingbot-api update recreates containers
-  // and the API can stop answering mid-run, so `retry` is pinned rather than
-  // left at the default: a query that gave up would strand the panel exactly
-  // when it matters.
+  // Polled while a run is live. Syncing dependencies or rebuilding the
+  // dashboard can keep the server too busy to answer for a while, so `retry`
+  // is pinned rather than left at the default: a query that gave up would
+  // strand the panel exactly when it matters.
   const runQuery = useQuery({
     queryKey: UPDATES_RUN_KEY,
     queryFn: updatesApi.getRun,
@@ -124,7 +126,7 @@ export function UpdatesSettings() {
   if (status.isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -211,9 +213,9 @@ export function UpdatesSettings() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-[var(--color-text-muted)]">
-          Updating the API recreates its containers. Updating Condor does not
-          restart it: the new code lands on disk and you relaunch when it suits
-          you.
+          Updating Condor does not restart it: the new code lands on disk and
+          you relaunch when it suits you. Hummingbot API is updated on its own
+          host; see Settings → Hummingbot API.
         </p>
         <button
           onClick={() => checkMut.mutate()}
@@ -274,16 +276,11 @@ function ComponentCard({
   const facets = Object.entries(component.facets);
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <Card>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">
             {component.name}
-            {component.mode && (
-              <span className="rounded bg-[var(--color-surface-hover)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                {component.mode}
-              </span>
-            )}
           </h3>
         </div>
         {component.up_to_date ? (
@@ -349,7 +346,7 @@ function ComponentCard({
           ),
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -386,7 +383,7 @@ function PreflightView({
 }) {
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <Card>
         <h3 className="text-sm font-semibold text-[var(--color-text)]">
           This will run
         </h3>
@@ -398,7 +395,7 @@ function PreflightView({
             </li>
           ))}
         </ol>
-      </div>
+      </Card>
 
       {preflight.warnings.map((w) => (
         <div
@@ -476,12 +473,12 @@ function PreflightView({
 function RunningView({ run, offline }: { run: Run; offline: boolean }) {
   return (
     <div className="space-y-4">
-      {/* Rebuilding an image or recreating containers can starve the API of a
-          reply for a while. The run is still going; say so rather than letting
+      {/* Syncing dependencies or rebuilding the dashboard can starve the server
+          of a reply for a while. The run is still going; say so rather than letting
           the panel look stuck. */}
       {offline && (
         <div className="flex items-start gap-2 rounded-lg border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 p-3 text-xs text-[var(--color-text)]">
-          <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-[var(--color-primary)]" />
+          <Spinner size="sm" tone="primary" className="mt-0.5" />
           <span>
             Not getting an answer right now — this page keeps trying and picks
             the run back up on its own.
@@ -489,7 +486,7 @@ function RunningView({ run, offline }: { run: Run; offline: boolean }) {
         </div>
       )}
 
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <Card>
         <h3 className="text-sm font-semibold text-[var(--color-text)]">
           Updating {run.components.join(", ")}
         </h3>
@@ -498,7 +495,7 @@ function RunningView({ run, offline }: { run: Run; offline: boolean }) {
             <StepRow key={step.key} step={step} />
           ))}
         </ul>
-      </div>
+      </Card>
     </div>
   );
 }
@@ -618,11 +615,11 @@ function FinishedView({
         </div>
       )}
 
-      <ul className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <Card className="space-y-2" as="ul">
         {run.steps.map((step) => (
           <StepRow key={step.key} step={step} />
         ))}
-      </ul>
+      </Card>
 
       <button
         onClick={onDismiss}

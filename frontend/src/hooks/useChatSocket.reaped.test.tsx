@@ -26,10 +26,14 @@ import { ServerContext } from "@/hooks/useServer";
 const getConversation = vi.fn();
 const listConversations = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    listConversations: (...args: unknown[]) => listConversations(...args),
+vi.mock("@/lib/api/chat", () => ({
+  chatApi: {
     getSessionOptions: () => Promise.resolve({ default_agent: "claude-code" }),
+  },
+}));
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    listConversations: (...args: unknown[]) => listConversations(...args),
     getConversation: (...args: unknown[]) => getConversation(...args),
   },
 }));

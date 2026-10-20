@@ -22,15 +22,19 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDetail } from "@/lib/api";
+import type { AgentDetail } from "@/lib/api/agents";
 
 const getAgent = vi.fn(async () => DETAIL);
 const resumeStrategy = vi.fn(async () => ({}));
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    getAgent: () => getAgent(),
+vi.mock("@/lib/api/servers", () => ({
+  serversApi: {
     getServers: () => Promise.resolve([]),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
+    getAgent: () => getAgent(),
     resumeStrategy: (...a: unknown[]) => resumeStrategy(...(a as [])),
     pauseStrategy: () => Promise.resolve({}),
     stopStrategy: () => Promise.resolve({}),

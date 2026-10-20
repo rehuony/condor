@@ -2,22 +2,27 @@
 Gateway connector management functions
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_active_server
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
+from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import escape_markdown_v2, logger
 
 
-async def show_connectors_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_connectors_menu(query, context: Context) -> None:
     """Show DEX connectors configuration menu"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("Loading connectors...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -32,7 +37,7 @@ async def show_connectors_menu(query, context: ContextTypes.DEFAULT_TYPE) -> Non
                 "_Ensure Gateway is running\\._"
             )
             keyboard = [
-                [InlineKeyboardButton("« Back", callback_data="config_gateway")]
+                [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
             ]
         else:
             message_text = (
@@ -48,7 +53,7 @@ async def show_connectors_menu(query, context: ContextTypes.DEFAULT_TYPE) -> Non
                 connector_name = connector.get("name", "unknown")
                 current_row.append(
                     InlineKeyboardButton(
-                        connector_name,
+                        text=connector_name,
                         callback_data=f"gateway_connector_view_{connector_name}",
                     )
                 )
@@ -66,20 +71,20 @@ async def show_connectors_menu(query, context: ContextTypes.DEFAULT_TYPE) -> Non
             keyboard = connector_buttons + [
                 [
                     InlineKeyboardButton(
-                        "🔄 Refresh", callback_data="gateway_connectors"
+                        text="🔄 Refresh", callback_data="gateway_connectors"
                     ),
-                    InlineKeyboardButton("« Back", callback_data="config_gateway"),
+                    InlineKeyboardButton(text="« Back", callback_data="config_gateway"),
                 ]
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         try:
             await query.message.edit_text(
                 message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
         except Exception as e:
-            if "Message is not modified" in str(e):
+            if is_not_modified(e):
                 await query.answer("✅ Already up to date")
             else:
                 raise
@@ -87,14 +92,16 @@ async def show_connectors_menu(query, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception as e:
         logger.error(f"Error showing connectors: {e}", exc_info=True)
         error_text = f"❌ Error loading connectors: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="config_gateway")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_connector_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_connector_action(query, context: Context) -> None:
     """Handle connector-specific actions"""
     action_data = query.data.replace("gateway_connector_", "")
 
@@ -121,14 +128,12 @@ async def handle_connector_action(query, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("Unknown action")
 
 
-async def show_connector_details(
-    query, context: ContextTypes.DEFAULT_TYPE, connector_name: str
-) -> None:
+async def show_connector_details(query, context: Context, connector_name: str) -> None:
     """Show details and configuration for a specific connector"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -181,18 +186,18 @@ async def show_connector_details(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✏️ Edit Configuration",
+                    text="✏️ Edit Configuration",
                     callback_data=f"gateway_connector_edit_{connector_name}",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "« Back to Connectors", callback_data="gateway_connectors"
+                    text="« Back to Connectors", callback_data="gateway_connectors"
                 )
             ],
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -202,22 +207,22 @@ async def show_connector_details(
         logger.error(f"Error showing connector details: {e}", exc_info=True)
         error_text = f"❌ Error loading connector: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back", callback_data="gateway_connectors")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_connectors")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
 async def start_connector_config_edit(
-    query, context: ContextTypes.DEFAULT_TYPE, connector_name: str
+    query, context: Context, connector_name: str
 ) -> None:
     """Start progressive configuration editing flow for a connector"""
     try:
         from config_manager import get_config_manager
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -251,7 +256,7 @@ async def start_connector_config_edit(
         }
         context.user_data["awaiting_connector_input"] = field_names[0]
         context.user_data["connector_message_id"] = query.message.message_id
-        context.user_data["connector_chat_id"] = query.message.chat_id
+        context.user_data["connector_chat_id"] = query.message.chat.id
 
         # Show first field
         message_text, reply_markup = _build_connector_config_message(
@@ -267,17 +272,15 @@ async def start_connector_config_edit(
         logger.error(f"Error starting connector config edit: {e}", exc_info=True)
         error_text = f"❌ Error loading configuration: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton("« Back", callback_data="gateway_connectors")]
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_connectors")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_connector_config_back(
-    query, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_connector_config_back(query, context: Context) -> None:
     """Handle back button during connector configuration"""
     config_data = context.user_data.get("connector_config_data", {})
     all_fields = config_data.get("fields", [])
@@ -298,16 +301,14 @@ async def handle_connector_config_back(
             # Update awaiting field
             context.user_data["awaiting_connector_input"] = previous_field
             await query.answer("« Going back")
-            await _update_connector_config_message(context, query.message.get_bot())
+            await _update_connector_config_message(context, query.message.bot)
         else:
             await query.answer("Cannot go back")
     else:
         await query.answer("Cannot go back")
 
 
-async def handle_connector_config_keep(
-    query, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_connector_config_keep(query, context: Context) -> None:
     """Handle keep current value button during connector configuration"""
     try:
         awaiting_field = context.user_data.get("awaiting_connector_input")
@@ -336,12 +337,12 @@ async def handle_connector_config_keep(
             context.user_data["awaiting_connector_input"] = all_fields[
                 current_index + 1
             ]
-            await _update_connector_config_message(context, query.message.get_bot())
+            await _update_connector_config_message(context, query.message.bot)
         else:
             # All fields filled - submit configuration
             context.user_data["awaiting_connector_input"] = None
             await submit_connector_config(
-                context, query.message.get_bot(), query.message.chat_id
+                context, query.message.bot, query.message.chat.id
             )
 
     except Exception as e:
@@ -349,9 +350,7 @@ async def handle_connector_config_keep(
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def handle_connector_config_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_connector_config_input(update: Update, context: Context) -> None:
     """Handle text input during connector configuration flow"""
     awaiting_field = context.user_data.get("awaiting_connector_input")
     if not awaiting_field:
@@ -403,12 +402,12 @@ async def handle_connector_config_input(
             context.user_data["awaiting_connector_input"] = all_fields[
                 current_index + 1
             ]
-            await _update_connector_config_message(context, update.get_bot())
+            await _update_connector_config_message(context, context.bot)
         else:
             # All fields filled - submit configuration
             context.user_data["awaiting_connector_input"] = None
             await submit_connector_config(
-                context, update.get_bot(), update.effective_chat.id
+                context, context.bot, update.effective_chat.id
             )
 
     except Exception as e:
@@ -418,9 +417,7 @@ async def handle_connector_config_input(
         context.user_data.pop("connector_config_data", None)
 
 
-async def submit_connector_config(
-    context: ContextTypes.DEFAULT_TYPE, bot, chat_id: int
-) -> None:
+async def submit_connector_config(context: Context, bot, chat_id: int) -> None:
     """Submit the connector configuration to Gateway"""
     try:
         from config_manager import get_config_manager
@@ -487,24 +484,12 @@ async def submit_connector_config(
 
         # Create a mock query object to reuse the existing show_connector_details function
         import asyncio
-        from types import SimpleNamespace
 
         # Wait a moment to let the user see the success message
         await asyncio.sleep(1.5)
 
         # Create a mock query object with the necessary attributes
-        mock_message = SimpleNamespace(
-            edit_text=lambda text, parse_mode=None, reply_markup=None: bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=text,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
-            ),
-            chat_id=chat_id,
-            message_id=message_id,
-        )
-        mock_query = SimpleNamespace(message=mock_message)
+        mock_query = MockQuery(message_handle(bot, chat_id, message_id), None)
 
         # Navigate back to connector details view
         await show_connector_details(mock_query, context, connector_name)
@@ -611,7 +596,9 @@ def _build_connector_config_message(
         button_text = f"Keep: {display_val}"
 
     keep_buttons.append(
-        InlineKeyboardButton(button_text, callback_data="gateway_connector_config_keep")
+        InlineKeyboardButton(
+            text=button_text, callback_data="gateway_connector_config_keep"
+        )
     )
     buttons = [keep_buttons]
 
@@ -623,14 +610,15 @@ def _build_connector_config_message(
     if current_index > 0:
         nav_buttons.append(
             InlineKeyboardButton(
-                "« Back", callback_data="gateway_connector_config_back"
+                text="« Back", callback_data="gateway_connector_config_back"
             )
         )
 
     # Always add cancel button
     nav_buttons.append(
         InlineKeyboardButton(
-            "❌ Cancel", callback_data=f"gateway_connector_cancel_edit_{connector_name}"
+            text="❌ Cancel",
+            callback_data=f"gateway_connector_cancel_edit_{connector_name}",
         )
     )
 
@@ -638,14 +626,12 @@ def _build_connector_config_message(
         buttons.append(nav_buttons)
 
     keyboard = buttons
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     return message_text, reply_markup
 
 
-async def _update_connector_config_message(
-    context: ContextTypes.DEFAULT_TYPE, bot
-) -> None:
+async def _update_connector_config_message(context: Context, bot) -> None:
     """Update the connector configuration message with current progress"""
     config_data = context.user_data.get("connector_config_data", {})
     current_field = context.user_data.get("awaiting_connector_input")

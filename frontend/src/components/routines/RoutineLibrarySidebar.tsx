@@ -1,8 +1,9 @@
 import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, PanelLeftClose, PanelLeftOpen, Search, Square, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { IconButton } from "@/components/ui/IconButton";
 import { SelectField } from "@/components/ui/select-field";
-import type { RoutineInfo, RoutineInstance } from "@/lib/api";
+import type { RoutineInfo, RoutineInstance } from "@/lib/api/routines";
 import { formatRelativeTime, toMs } from "@/lib/formatters";
 import { formatInterval, formatRoutineName, formatSlug, routineAgent, routineAgents } from "@/lib/routineUtils";
 
@@ -148,14 +149,14 @@ export function RoutineLibrarySidebar({
           </span>
         )}
         {headerAction}
-        <button
-          type="button"
+        <IconButton
+          label={compact ? "Expand the library" : "Collapse to the rail"}
+          size="sm"
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/40"
           onClick={onToggleCompact}
-          className="shrink-0 rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/40"
-          title={compact ? "Expand the library" : "Collapse to the rail"}
         >
           {compact ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-        </button>
+        </IconButton>
       </div>
 
       {!compact && (
@@ -366,14 +367,16 @@ export function RoutineLibrarySidebar({
                 {/* Only something still going can be stopped. A finished run
                     keeps its row — that is the point — but not the button. */}
                 {live(inst.status) && (
-                  <button
+                  <IconButton
+                    label="Stop"
+                    size="sm"
+                    tone="danger"
+                    className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                     onClick={() => onStopInstance(inst.instance_id)}
                     disabled={stopping}
-                    className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-colors hover:bg-[var(--color-red)]/10 hover:text-[var(--color-red)] group-hover:opacity-100 focus-visible:opacity-100"
-                    title="Stop"
                   >
                     <Square className="h-2.5 w-2.5" />
-                  </button>
+                  </IconButton>
                 )}
               </div>
             ))}

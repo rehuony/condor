@@ -1,9 +1,4 @@
-// ── Refreshing a performance history the socket is already tailing ──
-
-import type {
-  ControllerPerformanceHistoryAllResponse,
-  ControllerPerformanceSnapshot,
-} from "@/lib/api";
+import type { ControllerPerformanceHistoryAllResponse, ControllerPerformanceSnapshot } from "@/lib/api/performance";
 import { controllerKey } from "@/lib/controller-identity";
 import { MAX_HISTORY_ROWS } from "@/lib/history-pagination";
 import { samplingIntervalMs } from "@/lib/pnl-chart";

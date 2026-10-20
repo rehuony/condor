@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Dict, List
 
+from condor.cache import cached_call
 from condor.fetchers._identifiers import validate_identifier
 from condor.fetchers.market_data import fetch_candle_connectors
 from condor.pool_data import NETWORK_TO_GECKO, network_has_clmm
@@ -99,6 +100,32 @@ async def fetch_available_cex_connectors(
             raise
         logger.error("Error fetching connectors: %s", e, exc_info=True)
         return []
+
+
+async def get_available_cex_connectors(
+    user_data: dict,
+    client,
+    account_name: str = "master_account",
+    ttl: int = 300,
+    server_name: str = "default",
+    *,
+    namespace: str = "_cache",
+) -> List[str]:
+    """``fetch_available_cex_connectors`` cached in ``user_data``.
+
+    The key carries ``server_name`` so one chat switching servers does not see
+    the other server's connectors; ``namespace`` is the caller's cache bucket.
+    """
+    cache_key = f"available_cex_connectors_{server_name}_{account_name}"
+    return await cached_call(
+        user_data,
+        cache_key,
+        fetch_available_cex_connectors,
+        ttl,
+        client,
+        account_name,
+        namespace=namespace,
+    )
 
 
 def _degraded(result, message):

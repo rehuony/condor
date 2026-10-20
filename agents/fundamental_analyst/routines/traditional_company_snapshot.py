@@ -2,9 +2,9 @@ import asyncio
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from condor.reports import ReportBuilder
+from routines.base import RoutineContext
 
 CATEGORY = "Analysis"
 
@@ -224,7 +224,7 @@ def _get_peer_tickers(data: dict) -> list[str]:
 # ── main ─────────────────────────────────────────────────────────────────────
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     now = datetime.now(timezone.utc)
     ticker_upper = config.ticker.upper().strip()
     loop = asyncio.get_event_loop()

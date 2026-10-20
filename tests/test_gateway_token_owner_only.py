@@ -103,7 +103,7 @@ class FakeQuery:
         self.answers = []
         self.texts = []
         self.message = SimpleNamespace(
-            chat_id=CHAT_ID, message_id=7, edit_text=self._edit_text
+            chat=SimpleNamespace(id=CHAT_ID), message_id=7, edit_text=self._edit_text
         )
 
     async def answer(self, text="", show_alert=False):
@@ -128,13 +128,9 @@ class FakeUpdate:
     """A text message arriving mid-flow, as the edit branch sees it."""
 
     def __init__(self, user_id, text):
-        self.bot = FakeBot()
         self.effective_user = SimpleNamespace(id=user_id)
         self.effective_chat = SimpleNamespace(id=CHAT_ID)
         self.message = SimpleNamespace(text=text, delete=_noop)
-
-    def get_bot(self):
-        return self.bot
 
 
 def _context():
@@ -143,13 +139,14 @@ def _context():
 
 def _edit_context():
     return SimpleNamespace(
+        bot=FakeBot(),
         user_data={
             "awaiting_token_input": "token_edit",
             "token_network": NETWORK,
             "token_message_id": 7,
             "token_chat_id": CHAT_ID,
             "token_edit_address": MINT,
-        }
+        },
     )
 
 
@@ -218,7 +215,7 @@ async def test_a_trader_cannot_delete_through_the_edit_flow(gateway_as):
 
     assert gw.deletes == []
     assert gw.adds == []
-    assert update.bot.texts and "⛔" in update.bot.texts[0]
+    assert context.bot.texts and "⛔" in context.bot.texts[0]
     # The input state is cleared either way: a refused trader is not left with the
     # next thing they type being read as an edit.
     assert "awaiting_token_input" not in context.user_data

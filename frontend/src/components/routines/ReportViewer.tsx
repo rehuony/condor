@@ -9,9 +9,11 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { ReportFrame } from "@/components/routines/ReportFrame";
+import { IconButton } from "@/components/ui/IconButton";
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
+import { FULLSCREEN_LAYER } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/select-field";
-import { type ReportSummary } from "@/lib/api";
+import type { ReportSummary } from "@/lib/api/reports";
 
 interface ReportViewerProps {
   report: ReportSummary;
@@ -69,7 +71,7 @@ export function ReportViewer({
     <div
       className={`@container/report-viewer min-h-0 min-w-0 flex flex-col overflow-hidden ${
         fullscreen
-          ? "fixed inset-0 z-50 rounded-none bg-[var(--color-bg)]"
+          ? FULLSCREEN_LAYER
           : "flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
       }`}
     >
@@ -109,30 +111,27 @@ export function ReportViewer({
             </span>
           )}
           {/* Nav buttons */}
-          <button
+          <IconButton
+            label="Previous (Left Arrow)"
             onClick={goPrev}
             disabled={!hasPrev}
-            className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30"
-            title="Previous (Left Arrow)"
           >
             <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
+          </IconButton>
+          <IconButton
+            label="Next (Right Arrow)"
             onClick={goNext}
             disabled={!hasNext}
-            className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30"
-            title="Next (Right Arrow)"
           >
             <ChevronRight className="h-4 w-4" />
-          </button>
+          </IconButton>
           {allowFullscreen && (
-            <button
+            <IconButton
+              label={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen (f)"}
               onClick={() => setFullscreen((f) => !f)}
-              className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen (f)"}
             >
               {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </button>
+            </IconButton>
           )}
           {onDelete && (
             <InlineConfirm
@@ -153,16 +152,14 @@ export function ReportViewer({
               fullscreen: a viewer opened over a view with fullscreen off had
               no way out at all (CORR-422). */}
           {onClose && (
-            <button
-              type="button"
+            <IconButton
+              label="Close report"
+              title="Back (Esc)"
               data-report-close
               onClick={onClose}
-              className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              title="Back (Esc)"
-              aria-label="Close report"
             >
               <ArrowLeft className="h-4 w-4" />
-            </button>
+            </IconButton>
           )}
         </div>
       </div>

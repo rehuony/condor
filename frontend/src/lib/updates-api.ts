@@ -15,7 +15,7 @@ import { adminFetch } from "./admin-api";
 
 /** One answer to "what version is this", for one way of being versioned. */
 export interface Facet {
-  kind: "repo" | "image";
+  kind: "repo";
   current: string;
   available: string | null;
   behind: number;
@@ -26,18 +26,13 @@ export interface Facet {
 }
 
 /**
- * Everything one component's card needs.
- *
- * `facets` is keyed by kind: Condor has only `repo`; hummingbot-api has both,
- * and `mode` says which one actually decides its version — an install running
- * the published image is not updated by pulling its repo.
+ * Everything one component's card needs. Condor is the only component:
+ * hummingbot-api is built and deployed on its own host, never from here.
  */
 export interface ComponentStatus {
   key: string;
   name: string;
-  facets: Partial<Record<"repo" | "image", Facet>>;
-  /** Always "image": hummingbot-api is deployed from the published image. */
-  mode: "image" | null;
+  facets: Partial<Record<"repo", Facet>>;
   up_to_date: boolean;
 }
 

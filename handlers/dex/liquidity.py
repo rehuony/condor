@@ -10,9 +10,14 @@ Provides:
 
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    NO_LINK_PREVIEW,
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from config_manager import get_client
 from utils.auth import gateway_required
 from utils.telegram_formatters import (
@@ -28,8 +33,10 @@ from ._shared import (
     build_filter_buttons,
     build_filter_selection_keyboard,
     build_pagination_buttons,
+    build_token_cache,
     cached_call,
     format_relative_time,
+    format_usd_value,
     get_history_filters,
     invalidate_cache,
     set_history_filters,
@@ -41,16 +48,6 @@ logger = logging.getLogger(__name__)
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
-
-
-def _format_value(value: float) -> str:
-    """Format USD values"""
-    if value >= 1000000:
-        return f"${value/1000000:.2f}M"
-    elif value >= 1000:
-        return f"${value/1000:.2f}K"
-    else:
-        return f"${value:.2f}"
 
 
 def _format_token_amount(value) -> str:
@@ -191,26 +188,9 @@ async def _fetch_lp_positions(client, status: str = "OPEN") -> dict:
         data["positions"] = positions
 
         # Fetch tokens for symbol resolution
-        networks = list(
-            set(pos.get("network", "solana-mainnet-beta") for pos in positions)
+        data["token_cache"] = await build_token_cache(
+            client, (pos.get("network", "solana-mainnet-beta") for pos in positions)
         )
-        if networks and hasattr(client, "gateway"):
-            for network in networks:
-                try:
-                    tokens = []
-                    if hasattr(client.gateway, "get_network_tokens"):
-                        resp = await client.gateway.get_network_tokens(network)
-                        tokens = resp.get("tokens", []) if resp else []
-                    elif hasattr(client.gateway, "get_network_config"):
-                        resp = await client.gateway.get_network_config(network)
-                        tokens = resp.get("tokens", []) if resp else []
-                    for token in tokens:
-                        addr = token.get("address", "")
-                        symbol = token.get("symbol", "")
-                        if addr and symbol:
-                            data["token_cache"][addr] = symbol
-                except Exception as e:
-                    logger.debug(f"Failed to fetch tokens for {network}: {e}")
 
     except Exception as e:
         logger.error(f"Error fetching LP positions: {e}", exc_info=True)
@@ -472,14 +452,14 @@ def _format_closed_position_line(
 
 
 @gateway_required
-async def handle_liquidity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_liquidity(update: Update, context: Context) -> None:
     """Handle liquidity pools - unified menu"""
     context.user_data["dex_state"] = "liquidity"
     await show_liquidity_menu(update, context)
 
 
 async def show_liquidity_menu(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, send_new: bool = False
+    update: Update, context: Context, send_new: bool = False
 ) -> None:
     """Display the unified liquidity pools menu with balances and positions
 
@@ -493,7 +473,7 @@ async def show_liquidity_menu(
     help_text = r"💧 *Liquidity Pools*" + "\n\n"
 
     try:
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Fetch balances (cached)
         gateway_data = await cached_call(
@@ -507,7 +487,7 @@ async def show_liquidity_menu(
                 if "solana" in network.lower():
                     # Filter tokens with value >= $0.5
                     tokens = [
-                        (bal["token"], _format_value(bal["value"]))
+                        (bal["token"], format_usd_value(bal["value"]))
                         for bal in balances
                         if bal["value"] >= 0.5
                     ]
@@ -542,7 +522,7 @@ async def show_liquidity_menu(
 
                         if gateway_data["total_value"] > 0:
                             help_text += (
-                                rf"*Total: {escape_markdown_v2(_format_value(gateway_data['total_value']))}*"
+                                rf"*Total: {escape_markdown_v2(format_usd_value(gateway_data['total_value']))}*"
                                 + "\n"
                             )
                         help_text += "\n"
@@ -673,10 +653,12 @@ async def show_liquidity_menu(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        pair_label, callback_data=f"dex:lp_pos_view:{i}"
+                        text=pair_label, callback_data=f"dex:lp_pos_view:{i}"
                     ),
-                    InlineKeyboardButton("🎁", callback_data=f"dex:pos_collect:{i}"),
-                    InlineKeyboardButton("❌", callback_data=f"dex:pos_close:{i}"),
+                    InlineKeyboardButton(
+                        text="🎁", callback_data=f"dex:pos_collect:{i}"
+                    ),
+                    InlineKeyboardButton(text="❌", callback_data=f"dex:pos_close:{i}"),
                 ]
             )
 
@@ -685,10 +667,10 @@ async def show_liquidity_menu(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "🎁 Collect All", callback_data="dex:lp_collect_all"
+                        text="🎁 Collect All", callback_data="dex:lp_collect_all"
                     ),
                     InlineKeyboardButton(
-                        "📊 View All", callback_data="dex:manage_positions"
+                        text="📊 View All", callback_data="dex:manage_positions"
                     ),
                 ]
             )
@@ -696,7 +678,7 @@ async def show_liquidity_menu(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "🎁 Collect All Fees", callback_data="dex:lp_collect_all"
+                        text="🎁 Collect All Fees", callback_data="dex:lp_collect_all"
                     ),
                 ]
             )
@@ -704,43 +686,43 @@ async def show_liquidity_menu(
     # Explore pools row - direct access to pool discovery
     keyboard.append(
         [
-            InlineKeyboardButton("🦎 Gecko", callback_data="dex:gecko_explore"),
-            InlineKeyboardButton("🔍 Pool Info", callback_data="dex:pool_info"),
+            InlineKeyboardButton(text="🦎 Gecko", callback_data="dex:gecko_explore"),
+            InlineKeyboardButton(text="🔍 Pool Info", callback_data="dex:pool_info"),
         ]
     )
     keyboard.append(
         [
-            InlineKeyboardButton("📋 Meteora", callback_data="dex:pool_list"),
-            InlineKeyboardButton("🌀 Orca", callback_data="dex:pool_list_orca"),
+            InlineKeyboardButton(text="📋 Meteora", callback_data="dex:pool_list"),
+            InlineKeyboardButton(text="🌀 Orca", callback_data="dex:pool_list_orca"),
         ]
     )
 
     # Utility buttons - History, Refresh
     keyboard.append(
         [
-            InlineKeyboardButton("📜 History", callback_data="dex:lp_history"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="dex:lp_refresh"),
+            InlineKeyboardButton(text="📜 History", callback_data="dex:lp_history"),
+            InlineKeyboardButton(text="🔄 Refresh", callback_data="dex:lp_refresh"),
         ]
     )
 
-    keyboard.append([InlineKeyboardButton("✕ Close", callback_data="dex:close")])
+    keyboard.append([InlineKeyboardButton(text="✕ Close", callback_data="dex:close")])
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     if send_new or not update.callback_query:
         if update.message:
-            await update.message.reply_text(
+            await update.message.answer(
                 help_text,
                 parse_mode="MarkdownV2",
                 reply_markup=reply_markup,
-                disable_web_page_preview=True,
+                link_preview_options=NO_LINK_PREVIEW,
             )
         elif update.callback_query:
-            await update.callback_query.message.reply_text(
+            await update.callback_query.message.answer(
                 help_text,
                 parse_mode="MarkdownV2",
                 reply_markup=reply_markup,
-                disable_web_page_preview=True,
+                link_preview_options=NO_LINK_PREVIEW,
             )
     else:
         msg = update.callback_query.message
@@ -751,35 +733,35 @@ async def show_liquidity_menu(
                     await msg.delete()
                 except Exception:
                     pass
-                await msg.chat.send_message(
+                await msg.answer(
                     help_text,
                     parse_mode="MarkdownV2",
                     reply_markup=reply_markup,
-                    disable_web_page_preview=True,
+                    link_preview_options=NO_LINK_PREVIEW,
                 )
             else:
                 await msg.edit_text(
                     help_text,
                     parse_mode="MarkdownV2",
                     reply_markup=reply_markup,
-                    disable_web_page_preview=True,
+                    link_preview_options=NO_LINK_PREVIEW,
                 )
         except Exception as e:
-            if "not modified" not in str(e).lower():
+            if not is_not_modified(e):
                 logger.warning(f"Failed to edit liquidity menu: {e}")
                 # Fallback: send new message
                 try:
-                    await msg.reply_text(
+                    await msg.answer(
                         help_text,
                         parse_mode="MarkdownV2",
                         reply_markup=reply_markup,
-                        disable_web_page_preview=True,
+                        link_preview_options=NO_LINK_PREVIEW,
                     )
                 except Exception:
                     pass
 
 
-async def handle_lp_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_lp_refresh(update: Update, context: Context) -> None:
     """Handle refresh button - clear cache and reload"""
     query = update.callback_query
     await query.answer("Refreshing...")
@@ -790,9 +772,7 @@ async def handle_lp_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await show_liquidity_menu(update, context)
 
 
-async def handle_lp_pos_view(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, pos_index: int
-) -> None:
+async def handle_lp_pos_view(update: Update, context: Context, pos_index: int) -> None:
     """Handle position view button - shows detailed position info"""
     from .pools import handle_pos_view
 
@@ -808,9 +788,7 @@ async def handle_lp_pos_view(
     await handle_pos_view(update, context, str(pos_index))
 
 
-async def handle_lp_collect_all(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_lp_collect_all(update: Update, context: Context) -> None:
     """Handle collect all fees button - collects fees from all positions"""
     query = update.callback_query
 
@@ -1000,7 +978,7 @@ def _format_detailed_position_line(pos: dict, token_cache: dict = None) -> str:
 
 
 async def handle_lp_history(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, reset_filters: bool = False
+    update: Update, context: Context, reset_filters: bool = False
 ) -> None:
     """Show position history with filters and pagination"""
     from datetime import datetime
@@ -1014,11 +992,11 @@ async def handle_lp_history(
         else:
             filters = get_history_filters(context.user_data, "position")
 
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         if not hasattr(client, "gateway_clmm"):
             error_message = format_error_message("Gateway CLMM not available")
-            await update.callback_query.message.reply_text(
+            await update.callback_query.message.answer(
                 error_message, parse_mode="MarkdownV2"
             )
             return
@@ -1060,14 +1038,14 @@ async def handle_lp_history(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "🔄 Clear Filters", callback_data="dex:lp_hist_clear"
+                        text="🔄 Clear Filters", callback_data="dex:lp_hist_clear"
                     )
                 ]
             )
             keyboard.append(
-                [InlineKeyboardButton("« Back", callback_data="dex:lp_refresh")]
+                [InlineKeyboardButton(text="« Back", callback_data="dex:lp_refresh")]
             )
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
             await update.callback_query.message.edit_text(
                 message, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -1127,19 +1105,19 @@ async def handle_lp_history(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "🔄 Clear Filters", callback_data="dex:lp_hist_clear"
+                    text="🔄 Clear Filters", callback_data="dex:lp_hist_clear"
                 ),
-                InlineKeyboardButton("« Back", callback_data="dex:lp_refresh"),
+                InlineKeyboardButton(text="« Back", callback_data="dex:lp_refresh"),
             ]
         )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
             reply_markup=reply_markup,
-            disable_web_page_preview=True,
+            link_preview_options=NO_LINK_PREVIEW,
         )
 
     except Exception as e:
@@ -1155,9 +1133,7 @@ async def handle_lp_history(
 # ============================================
 
 
-async def handle_lp_hist_filter_pair(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_lp_hist_filter_pair(update: Update, context: Context) -> None:
     """Show trading pair filter options - dynamically from history data"""
     filters = get_history_filters(context.user_data, "position")
 
@@ -1187,9 +1163,7 @@ async def handle_lp_hist_filter_pair(
     )
 
 
-async def handle_lp_hist_filter_connector(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_lp_hist_filter_connector(update: Update, context: Context) -> None:
     """Show connector filter options - dynamically from history data"""
     filters = get_history_filters(context.user_data, "position")
 
@@ -1215,9 +1189,7 @@ async def handle_lp_hist_filter_connector(
     )
 
 
-async def handle_lp_hist_filter_status(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_lp_hist_filter_status(update: Update, context: Context) -> None:
     """Show status filter options"""
     filters = get_history_filters(context.user_data, "position")
     options = HISTORY_FILTERS["position"]["status"]
@@ -1233,7 +1205,7 @@ async def handle_lp_hist_filter_status(
 
 
 async def handle_lp_hist_set_filter(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, filter_type: str, value: str
+    update: Update, context: Context, filter_type: str, value: str
 ) -> None:
     """Set a filter value and refresh history"""
     filters = get_history_filters(context.user_data, "position")
@@ -1256,9 +1228,7 @@ async def handle_lp_hist_set_filter(
     await handle_lp_history(update, context)
 
 
-async def handle_lp_hist_page(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, direction: str
-) -> None:
+async def handle_lp_hist_page(update: Update, context: Context, direction: str) -> None:
     """Handle pagination for LP history"""
     filters = get_history_filters(context.user_data, "position")
 
@@ -1271,8 +1241,6 @@ async def handle_lp_hist_page(
     await handle_lp_history(update, context)
 
 
-async def handle_lp_hist_clear(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_lp_hist_clear(update: Update, context: Context) -> None:
     """Clear all filters and refresh"""
     await handle_lp_history(update, context, reset_filters=True)

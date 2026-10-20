@@ -30,7 +30,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ServerInfo } from "@/lib/api";
+import type { ServerInfo } from "@/lib/api/servers";
 import { ServersSettings } from "./ServersSettings";
 
 declare global {

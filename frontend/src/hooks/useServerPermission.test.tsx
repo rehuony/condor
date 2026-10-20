@@ -23,11 +23,15 @@ import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ServerInfo } from "@/lib/api";
+import type { ServerInfo } from "@/lib/api/servers";
 
 const getServers = vi.fn();
 
-vi.mock("@/lib/api", () => ({ api: { getServers: () => getServers() } }));
+vi.mock("@/lib/api/servers", () => ({
+  serversApi: {
+    getServers: () => getServers(),
+  },
+}));
 vi.mock("@/hooks/useServer", () => ({ useServer: () => ({ server: "shared" }) }));
 
 const { OWNER_ONLY_HINT, useServerPermission } = await import("./useServerPermission");

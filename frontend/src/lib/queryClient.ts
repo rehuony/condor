@@ -1,7 +1,7 @@
 import { type Query, QueryClient } from "@tanstack/react-query";
 
 import { venuesQueryKey } from "@/components/market/useVenues";
-import { api, type AgentDetail } from "@/lib/api";
+import { agentsApi, type AgentDetail } from "@/lib/api/agents";
 
 /**
  * App-wide TanStack Query cache.
@@ -211,7 +211,7 @@ export function hasRunningLoop(
 export function agentQuery(slug: string) {
   return {
     queryKey: ["agent", slug] as ["agent", string],
-    queryFn: () => api.getAgent(slug),
+    queryFn: () => agentsApi.getAgent(slug),
     enabled: !!slug,
     staleTime: AGENT_STALE_MS,
     refetchInterval: (q: Query<AgentDetail, Error, AgentDetail, ["agent", string]>) =>
@@ -242,7 +242,7 @@ export const AGENTS_REFETCH_MS = 10_000;
 export function agentsQuery(opts: { enabled?: boolean } = {}) {
   return {
     queryKey: ["agents"] as ["agents"],
-    queryFn: () => api.getAgents(),
+    queryFn: () => agentsApi.getAgents(),
     enabled: opts.enabled ?? true,
     refetchInterval: AGENTS_REFETCH_MS,
   };

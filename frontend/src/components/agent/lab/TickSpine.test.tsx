@@ -23,8 +23,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentActionRow } from "@/lib/agent-attribution";
 import { TickSpine } from "./TickSpine";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getSessionJournal: vi.fn(async () => ({ content: JOURNAL })),
     getSessionActions: vi.fn(async () => ({ actions: ACTIONS })),
   },

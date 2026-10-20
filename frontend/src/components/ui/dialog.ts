@@ -13,6 +13,14 @@ export const DIALOG_BACKDROP =
 export const DIALOG_PANEL =
   "w-full overflow-y-auto rounded-2xl border border-[var(--color-border)] shadow-2xl shadow-black/20 animate-dialog-panel motion-reduce:animate-none";
 
+/**
+ * A layer that takes the whole viewport as a page of its own (a fullscreen
+ * chart, the report browser, the config editor): no backdrop, the page ground
+ * color, a column for header and body. `_TOP` stacks over an open layer.
+ */
+export const FULLSCREEN_LAYER = "fixed inset-0 z-50 flex flex-col bg-[var(--color-bg)]";
+export const FULLSCREEN_LAYER_TOP = "fixed inset-0 z-[60] flex flex-col bg-[var(--color-bg)]";
+
 /** Footer buttons: one size everywhere; on phones they split the row evenly. */
 const BUTTON =
   "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full";

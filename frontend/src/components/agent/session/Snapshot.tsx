@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
 import { snapshotQueryOptions } from "@/hooks/useSnapshotBubbles";
 import { type ParsedSnapshot, type ToolCall, parseSnapshot } from "@/lib/parse-agent";
 import { toolCallState } from "@/lib/formatters";
@@ -42,13 +45,13 @@ export function SnapshotDetail({ slug, sslug, sessionNum, tick }: { slug: string
   if (isLoading) {
     return (
       <div className="flex h-48 items-center justify-center">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+        <Spinner size="lg" />
       </div>
     );
   }
 
   if (!parsed) {
-    return <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">Select a snapshot to view details.</p>;
+    return <EmptyState>Select a snapshot to view details.</EmptyState>;
   }
 
   return <SnapshotBody parsed={parsed} />;
@@ -99,7 +102,7 @@ export function SnapshotBody({ parsed }: { parsed: ParsedSnapshot }) {
 
       {/* Tool Calls */}
       {parsed.toolCalls.length > 0 && (
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <Card>
           <h4 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
             <Wrench className="h-3 w-3" /> Tool Calls ({parsed.toolCalls.length})
           </h4>
@@ -108,13 +111,13 @@ export function SnapshotBody({ parsed }: { parsed: ParsedSnapshot }) {
               <ToolCallChip key={tc.number} tc={tc} />
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Risk + Executor side by side */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {parsed.riskState && (
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <Card>
             <h4 className="mb-2 text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Risk State</h4>
             <div className="space-y-1 font-mono text-xs leading-relaxed text-[var(--color-text-muted)]">
               {parsed.riskState.split("\n").map((line, i) => {
@@ -128,16 +131,16 @@ export function SnapshotBody({ parsed }: { parsed: ParsedSnapshot }) {
                 );
               })}
             </div>
-          </div>
+          </Card>
         )}
 
         {parsed.executorState && (
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <Card>
             <h4 className="mb-2 text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Executor State</h4>
             <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-text-muted)]">
               {parsed.executorState}
             </pre>
-          </div>
+          </Card>
         )}
       </div>
 

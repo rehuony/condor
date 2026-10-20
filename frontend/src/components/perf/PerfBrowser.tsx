@@ -1,34 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  Database,
-  Layers,
-  Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Rocket,
-  ScrollText,
-  Server,
-  SlidersHorizontal,
-  Square,
-  TerminalSquare,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { EditorModal } from "@/components/editor/EditorModal";
-import { ControllerPnlChart } from "@/components/bots/ControllerPnlChart";
 import { DeployBotDialog } from "@/components/bots/DeployBotDialog";
-import { LogsSection } from "@/components/bots/LogsSection";
-import { PnlEvolutionChart } from "@/components/bots/PnlEvolutionChart";
-import { ExecutorChart } from "@/components/charts/ExecutorChart";
 import { DetailPanel } from "@/components/perf/ExecutorTable";
-import { DeleteConfirmDialog, ExecutorRows, StopConfirmDialog } from "@/components/perf/ExecutorRows";
-import { ControllerToggle } from "@/components/perf/ControllerToggle";
+import { DeleteConfirmDialog, StopConfirmDialog } from "@/components/perf/ExecutorRows";
 import { terminatedExecutorIds, useExecutorDelete, useExecutorStop } from "@/components/perf/executorActions";
 import {
   agentBucketLabel,
@@ -41,32 +19,20 @@ import {
   runOwner,
   runRecords,
 } from "@/components/perf/agentFilter";
-import { BubbleGroup, type BubbleOption } from "@/components/perf/FilterBubbles";
-import { PopulationToggle } from "@/components/perf/PopulationToggle";
-import { PositionsTable } from "@/components/perf/PositionsTable";
-import { OwnerPnlChart } from "@/components/perf/OwnerPnlChart";
-import { ScopeBreakdowns } from "@/components/perf/ScopeBreakdowns";
+import type { BubbleOption } from "@/components/perf/FilterBubbles";
 import { ownerNoun, scopeOwners } from "@/components/perf/scopeOwners";
-import { ScopeTree, StatusDot } from "@/components/perf/ScopeTree";
-import { YamlConfigEditor } from "@/components/perf/YamlConfigEditor";
 import { ArchivedBotDetail } from "@/components/bots/ArchivedBotDetail";
-import {
-  api,
-  type BotLogEntry,
-  type BotSummary,
-  type ControllerInfo,
-  type BotRunInfo,
-  type ControllerPerformanceSnapshot,
-  type ExecutorInfo,
-} from "@/lib/api";
+import { IconButton } from "@/components/ui/IconButton";
+import { Spinner } from "@/components/ui/Spinner";
+import { botsApi, type BotLogEntry, type BotRunInfo, type BotSummary, type ControllerInfo } from "@/lib/api/bots";
+import { performanceApi, type ControllerPerformanceSnapshot } from "@/lib/api/performance";
+import type { ExecutorInfo } from "@/lib/api/executors";
+import { agentsApi } from "@/lib/api/agents";
 import { useCoarseClock } from "@/hooks/useCoarseClock";
 import { controllerKey } from "@/lib/controller-identity";
 import {
-  formatCurrencyVolume,
   formatCurrencyPnl,
-  formatRuntimeHours,
   isExecutorActive,
-  pnlColor,
   shortBotName,
   toMs,
 } from "@/lib/formatters";
@@ -88,7 +54,6 @@ import {
   matchesGrain,
   parsePopulation,
   resolveScope,
-  runStatus,
   UNATTACHED_BOT,
   UNKNOWN_LABEL,
   visibleNodeIds,
@@ -107,14 +72,13 @@ import {
   rootAxis,
   type GroupAxis,
 } from "@/lib/perf-grouping";
-import { GroupByPicker } from "@/components/perf/GroupByPicker";
 import {
   resolvePerfSeries,
   scopeInterval,
   type PerfSeriesResult,
 } from "@/lib/perf-history";
 import { chartNotice } from "@/lib/perf-notices";
-import { buildPositionRows, parseSide, type PositionRow } from "@/lib/perf-positions";
+import { buildPositionRows, type PositionRow } from "@/lib/perf-positions";
 import { groupSpine, type FloorBucket } from "@/components/agent/floor/floor";
 import { mergeOwnerRows, ownerSeries } from "@/lib/owner-series";
 import { aggregatePnlSeries, snapshotsFromRunHistory } from "@/lib/pnl-chart";
@@ -132,7 +96,19 @@ import {
   type DeedIndex,
   type FleetOwner,
 } from "@/lib/agent-attribution";
-import { AgentScopeHeader } from "./AgentScopeHeader";
+import { BottomBand, type BandKey } from "./browser/BottomBand";
+import { KpiStrip } from "./browser/KpiStrip";
+import { ReportActions } from "./browser/ReportActions";
+import { ReportChart } from "./browser/ReportChart";
+import { ReportDrawer } from "./browser/ReportDrawer";
+import { ReportTitle } from "./browser/ReportTitle";
+import { PERIODS, type PeriodKey } from "./browser/options";
+import { ScopeFilters } from "./browser/ScopeFilters";
+import { ScopeNotices } from "./browser/ScopeNotices";
+import { ScopeSheet, ScopeSheetToggle } from "./browser/ScopeSheet";
+import { ScopeTreePane, type ExecutorPaging } from "./browser/ScopeTreePane";
+import { plural } from "./browser/text";
+import { useScopeSheet } from "./browser/useScopeSheet";
 
 /**
  * What an empty root row is called, read off its id alone (FEAT-108).
@@ -148,42 +124,6 @@ function rootScopeLabel(id: string, owners: readonly FleetOwner[]): string {
   if (agent) return agentBucketLabel(agent, owners);
   return botOfNodeId(id) ?? id;
 }
-
-/** `3, "bot"` → `"3 bots"`. Thousands separated, because a fleet's closed set runs to five figures. */
-function plural(count: number, noun: string): string {
-  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-/**
- * Says that some of what is on screen was never converted.
- *
- * `foldLeaves` converts a leaf through its `pair`, so a leaf with no pair is
- * added up **as though it were dollars** — for a BRL fleet, overstating it by
- * the whole BRL/USD rate. The pair is not always recoverable: a
- * controller-performance row carries no top-level pair, only the ones inside
- * its open positions, so a controller that stopped flat has nothing left to
- * say what it traded.
- *
- * The answer is the one `ArchivedBotDetail`'s `ConversionNote` already gives:
- * fold at face value and disclose it. Never guess a quote from a bot's name,
- * and never pass the total off as dollars in silence. Drawn wherever a scope's
- * numbers are, which is why it is a component rather than a line in one header.
- */
-function UnpricedNote({ leaves }: { leaves: PerfLeaf[] }) {
-  if (leaves.length === 0) return null;
-  return (
-    <span
-      className="block truncate text-[10px] text-amber-500/90"
-      title={`These stopped holding no position, so the record no longer says which pair they traded: ${leaves
-        .map((leaf) => leaf.label)
-        .join(", ")}`}
-    >
-      {plural(leaves.length, "record")} named no quote currency — counted at face value, not
-      converted
-    </span>
-  );
-}
-
 
 // ── Scope (READ: what the browser is currently reporting on) ──
 //
@@ -270,40 +210,6 @@ const PERF_CAPABILITY_STALE_MS = 30 * 60_000;
  */
 const EXEC_HISTORY_STALE_MS = 60_000;
 const EXEC_HISTORY_MAX_PAGES = 2;
-
-/** Which of the bottom band's two occupants is showing, if either. */
-type BandKey = "positions" | "executors" | "breakdown" | null;
-
-/**
- * How far back a terminated fold reaches, and how long that is in ms.
- *
- * Only the terminated population offers this: a live controller's window is
- * its deploy time, which it already reports, and cutting a live fold at a week
- * would report a PnL its own Realized tile disagrees with.
- */
-const PERIODS = { "1W": 7, "1M": 30, "3M": 90, All: 0 } as const;
-type PeriodKey = keyof typeof PERIODS;
-
-/**
- * The granularities the tree can be drawn at, and what each strip segment says.
- *
- * A strip rather than a bubble row: the bubble groups are multi-select, and
- * these three are one answer — the same shape the period strip below it has,
- * for the same reason.
- */
-const GRAINS: ReadonlyArray<{ key: Grain; label: string; hint: string }> = [
-  { key: "both", label: "Both", hint: "Every record: controllers, with the executors under them." },
-  {
-    key: "controllers",
-    label: "Controllers",
-    hint: "Controller records only — each row reports its own numbers, with no executors under it.",
-  },
-  {
-    key: "executors",
-    label: "Executors",
-    hint: "Executors only — a controller row folds the executors that ran under it, and reports nothing of its own.",
-  },
-];
 
 // ── Types ──
 
@@ -400,131 +306,6 @@ interface PerfBrowserProps {
   onClearRun?: () => void;
 }
 
-/**
- * How much of the executor history is actually loaded.
- *
- * The walk is capped, so the tree built from it can be a partial view of the
- * fleet — and a tree that is missing branches looks exactly like a fleet that
- * never had them. The header says which it is (see the loaded/cap notice).
- */
-export interface ExecutorPaging {
-  loaded: number;
-  loading: boolean;
-  /** The walk reached the end of the history. */
-  done: boolean;
-  /** The walk stopped at its page cap with more still to come. */
-  capped: boolean;
-  loadMore: () => void;
-}
-
-// ── Chart sizing ──
-
-/**
- * Everything in the chart *card* that is not one of the two panes: the header
- * strip, the two pane captions and the range strip below them. The panes are
- * sized from the space that is left, so the card fills its column exactly
- * instead of being a fixed 200px island in a screen-tall pane.
- *
- * It covers the card and nothing outside it. The strip above and the positions
- * band below are siblings of the measured element, not part of it — the chart
- * sits in a `flex-1` box between them, so growing the strip (the close-type
- * chips, FEAT-085) or opening the band shrinks that box, the ResizeObserver
- * below reports the new height, and the panes follow. Adding their heights here
- * as well would subtract them twice.
- */
-const CHART_CHROME_PX = 152;
-const MIN_CHART_PX = 220;
-
-/**
- * The same subtraction for `ExecutorChart`, whose chrome is one 30px header bar
- * and a border — it draws no title, no legend and no range buttons of its own,
- * so charging it the PnL chart's allowance would waste a fifth of the box.
- */
-const EXEC_CHART_CHROME_PX = 34;
-
-function useMeasuredHeight<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [height, setHeight] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver((entries) => {
-      const next = Math.round(entries[0].contentRect.height);
-      setHeight((prev) => (Math.abs(prev - next) > 2 ? next : prev));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, height] as const;
-}
-
-// ── KPI row ──
-
-/**
- * One headline number and the line that qualifies it.
- *
- * The sub-line is what makes the row comparable across scopes: a fleet that has
- * been up eight hours and one that has been up eight days both report a total,
- * and only the rate says which is actually earning. Modelled on the KPI strip
- * of the `bot_report` routine.
- *
- * The sub-line's height is reserved even when there is nothing to say, so the
- * tiles' baselines line up whether or not a given one has a qualifier.
- */
-function Kpi({
-  label,
-  value,
-  sub,
-  color,
-  title,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  color?: string;
-  /** What the number is a *reading of*, when that is not what it looks like. */
-  title?: string;
-}) {
-  return (
-    <div data-kpi={label} title={title} className="min-w-0">
-      <div className="mb-0.5 truncate text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">{label}</div>
-      <div className="truncate text-sm font-semibold leading-tight tabular-nums md:text-lg" style={color ? { color } : undefined}>
-        {value}
-      </div>
-      <div className="mt-0.5 h-3.5 text-[10px] tabular-nums text-[var(--color-text-muted)] truncate" title={sub}>
-        {sub ?? ""}
-      </div>
-    </div>
-  );
-}
-
-/** One of the bottom band's headers: a disclosure that is also a switch. */
-function BandTab({
-  label,
-  open,
-  onClick,
-  ...rest
-}: {
-  label: string;
-  open: boolean;
-  onClick: () => void;
-} & Record<`data-${string}`, unknown>) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-expanded={open}
-      className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors hover:bg-[var(--color-surface-hover)] ${
-        open ? "text-[var(--color-text)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-      }`}
-      {...rest}
-    >
-      <ChevronRight className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`} />
-      {label}
-    </button>
-  );
-}
-
 // ── Component ──
 
 export function PerfBrowser({
@@ -555,37 +336,7 @@ export function PerfBrowser({
   const cv = useMemo(() => quoteConverter(convert), [convert]);
   const queryClient = useQueryClient();
   const [isCompact, setIsCompact] = useState(false);
-  const [mobileScopeOpen, setMobileScopeOpen] = useState(false);
-  const scopePanelRef = useRef<HTMLDivElement>(null);
-  const scopeToggleRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!mobileScopeOpen) return;
-    const media = window.matchMedia("(max-width: 767px), (min-width: 768px) and (max-width: 1023px) and (max-height: 500px)");
-    if (!media.matches) return;
-    const panel = scopePanelRef.current;
-    const toggle = scopeToggleRef.current;
-    panel?.querySelector<HTMLButtonElement>("[data-perf-scope-close]")?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      // A confirmation above this panel owns Tab and Escape until it closes.
-      const anotherModal = Array.from(document.querySelectorAll('[aria-modal="true"]'))
-        .some((modal) => modal !== panel && !modal.contains(panel));
-      if (document.querySelector('[role="listbox"]') || anotherModal) return;
-      if (event.key === "Escape") { event.preventDefault(); setMobileScopeOpen(false); }
-      if (event.key !== "Tab" || !panel) return;
-      const elements = Array.from(panel.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')).filter((element) => element.getClientRects().length > 0);
-      const first = elements[0], last = elements.at(-1);
-      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
-    };
-    const onResize = () => { if (!media.matches) setMobileScopeOpen(false); };
-    document.addEventListener("keydown", onKey);
-    media.addEventListener("change", onResize);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      media.removeEventListener("change", onResize);
-      toggle?.focus({ preventScroll: true });
-    };
-  }, [mobileScopeOpen]);
+  const sheet = useScopeSheet();
   // One right-hand slot, three occupants. Config and logs used to be able to
   // fight for the same 380px column; as one value only one can win, and a
   // drawer the scope stops supporting simply stops being drawn (see
@@ -620,7 +371,6 @@ export function PerfBrowser({
   // user was looking at belonged to one bot and would have stopped another.
   const [confirmStopBot, setConfirmStopBot] = useState<string | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const [chartRef, chartBoxH] = useMeasuredHeight<HTMLDivElement>();
 
   // The bottom band is a disclosure, shut until asked for (FEAT-085). It used
   // to be a third of the pane's height standing open whether or not the reader
@@ -806,7 +556,7 @@ export function PerfBrowser({
   const runQueryOn = runNum !== null && owner !== null;
   const { data: runLedger } = useQuery({
     queryKey: ["strategy-session-executors", owner?.slug ?? "", owner?.sslug ?? "", runNum ?? 0],
-    queryFn: () => api.getStrategySessionExecutors(owner!.slug, owner!.sslug, runNum!),
+    queryFn: () => agentsApi.getStrategySessionExecutors(owner!.slug, owner!.sslug, runNum!),
     enabled: runQueryOn,
   });
   // `null` until the ledger lands: a page waiting on the fetch reports its
@@ -1491,7 +1241,7 @@ export function PerfBrowser({
   const { data: runHistory, isFetching: runHistoryLoading } = useQuery({
     queryKey: ["run-history", server, scopeRun?.bot_name, scopeRun?.created_at],
     queryFn: () =>
-      api.getRunHistory(
+      botsApi.getRunHistory(
         server,
         scopeRun!.bot_name,
         scopeRun!.created_at!,
@@ -1531,7 +1281,7 @@ export function PerfBrowser({
               .prefetchQuery({
                 queryKey: ["run-history", server, run.bot_name, run.created_at],
                 queryFn: () =>
-                  api.getRunHistory(server, run.bot_name, run.created_at!, run.archive_db_path),
+                  botsApi.getRunHistory(server, run.bot_name, run.created_at!, run.archive_db_path),
                 staleTime: Infinity,
                 gcTime: 60 * 60_000,
               })
@@ -1645,7 +1395,7 @@ export function PerfBrowser({
    */
   const { data: perfCapability } = useQuery({
     queryKey: ["perf-capability", server],
-    queryFn: () => api.getPerformanceCapability(server),
+    queryFn: () => performanceApi.getPerformanceCapability(server),
     enabled: !!server,
     staleTime: PERF_CAPABILITY_STALE_MS,
     gcTime: PERF_CAPABILITY_STALE_MS * 2,
@@ -1668,7 +1418,7 @@ export function PerfBrowser({
   } = useQuery({
     queryKey: ["perf-history", server, "executor", execScopeId, execInterval],
     queryFn: () =>
-      api.getPerformanceHistory(
+      performanceApi.getPerformanceHistory(
         server,
         { subject: "executor", executor_id: execScopeId!, interval: execInterval },
         { maxPages: EXEC_HISTORY_MAX_PAGES },
@@ -1695,7 +1445,7 @@ export function PerfBrowser({
   // belongs to — the sidebar can move on while a stop is in flight, and neither
   // the spinner nor the error should follow it to the next bot.
   const stopBotMutation = useMutation({
-    mutationFn: (botName: string) => api.stopBot(server, botName),
+    mutationFn: (botName: string) => botsApi.stopBot(server, botName),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bots", server] });
       setConfirmStopBot(null);
@@ -1732,10 +1482,9 @@ export function PerfBrowser({
       const pending = stopBotMutation.isPending && stopBotMutation.variables === bot.bot_name;
       if (bot.status === "stopping" || pending) {
         return (
-          <span
-            className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-[var(--color-yellow)] border-t-transparent"
-            title="Stopping…"
-          />
+          <span title="Stopping…" className="inline-flex">
+            <Spinner size="sm" className="text-[var(--color-yellow)]" />
+          </span>
         );
       }
 
@@ -1763,15 +1512,14 @@ export function PerfBrowser({
       }
 
       return (
-        <button
-          type="button"
+        <IconButton
+          label={`Stop ${bot.bot_name}`}
+          size="sm"
+          tone="danger"
           onClick={() => setConfirmStopBot(bot.bot_name)}
-          className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-red)]/10 hover:text-[var(--color-red)]"
-          title={`Stop ${bot.bot_name}`}
-          aria-label={`Stop ${bot.bot_name}`}
         >
           <Square className="h-3 w-3" />
-        </button>
+        </IconButton>
       );
     },
     [bots, confirmStopBot, stopBotMutation],
@@ -1780,7 +1528,7 @@ export function PerfBrowser({
   // Deleting a finished run: irreversible, and the only door to it now that the
   // runs table is gone, so it keeps the table's arm-then-confirm.
   const deleteRunMutation = useMutation({
-    mutationFn: (botRunId: number) => api.deleteBotRun(server, botRunId),
+    mutationFn: (botRunId: number) => botsApi.deleteBotRun(server, botRunId),
     onSuccess: (_result, botRunId) => {
       // The runs query is not the only cache that still believes in this run:
       // the Terminated tree is drawn from the controllers listing, which would
@@ -2311,8 +2059,6 @@ export function PerfBrowser({
   });
 
   const configId = activeCtrl ? activeCtrl.controller_id || activeCtrl.controller_name : "";
-  const chartHeight = Math.max(MIN_CHART_PX, (chartBoxH || 420) - CHART_CHROME_PX);
-  const execChartHeight = Math.max(MIN_CHART_PX, (chartBoxH || 420) - EXEC_CHART_CHROME_PX);
 
   // The title names the scope, always. It used to name the *parent controller*
   // for an executor scope, because that was whose curve was drawn; an executor
@@ -2343,307 +2089,53 @@ export function PerfBrowser({
 
   return (
     <div className="flex h-full min-h-0 flex-row bg-[var(--color-bg)] narrow-pane:flex-col">
-      <button ref={scopeToggleRef} type="button" aria-expanded={mobileScopeOpen} onClick={() => {
-        // Opening filters must also expand a rail collapsed on a wider screen.
-        if (!mobileScopeOpen) setIsCompact(false);
-        setMobileScopeOpen((open) => !open);
-      }}
-        data-perf-scope-toggle
-        className="hidden min-h-10 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-3 py-2 text-left text-xs narrow-pane:flex">
-        <span className="min-w-0 break-words">{scope.label} · {population === "running" ? "Running" : "Terminated"}</span>
-        <span className="shrink-0 text-[var(--color-primary)]">{mobileScopeOpen ? "Hide filters" : "Scope & filters"}</span>
-      </button>
-      {mobileScopeOpen && (
-        <div data-perf-scope-backdrop aria-hidden="true" onClick={() => setMobileScopeOpen(false)}
-          className="hidden touch-none narrow-pane:fixed narrow-pane:inset-0 narrow-pane:z-[44] narrow-pane:block narrow-pane:bg-black/50" />
-      )}
+      <ScopeSheetToggle
+        open={sheet.open}
+        setOpen={sheet.setOpen}
+        toggleRef={sheet.toggleRef}
+        summary={`${scope.label} · ${population === "running" ? "Running" : "Terminated"}`}
+        onExpand={() => setIsCompact(false)}
+      />
       {/* Left sidebar: the scope picker */}
-      <div
-        ref={scopePanelRef}
-        role={mobileScopeOpen ? "dialog" : undefined}
-        aria-modal={mobileScopeOpen ? true : undefined}
-        aria-label={mobileScopeOpen ? "Scope and filters" : undefined}
-        className={`flex min-h-0 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-all ${
-          isCompact ? "w-12" : "w-72"
-        } ${
-          // Narrow panes show the scope as a bottom sheet, only while asked for.
-          mobileScopeOpen
-            ? "narrow-pane:fixed narrow-pane:inset-x-0 narrow-pane:bottom-0 narrow-pane:z-[45] narrow-pane:max-h-[85dvh] narrow-pane:w-full narrow-pane:rounded-t-xl narrow-pane:border narrow-pane:border-b-0 narrow-pane:pb-[env(safe-area-inset-bottom)] narrow-pane:shadow-2xl narrow-pane:transition-none"
-            : "narrow-pane:hidden"
-        }`}
-      >
-        <div className="hidden shrink-0 items-center justify-between border-b border-[var(--color-border)] py-1 pl-4 pr-1 narrow-pane:flex">
-          <strong className="text-sm">Scope &amp; filters</strong>
-          <button type="button" data-perf-scope-close aria-label="Close filters" onClick={() => setMobileScopeOpen(false)}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"><X className="h-4 w-4" /></button>
-        </div>
-        <div className="contents narrow-pane:block narrow-pane:min-h-0 narrow-pane:flex-1 narrow-pane:overflow-y-auto narrow-pane:overscroll-contain narrow-pane:[&_.truncate]:whitespace-normal">
-        {/* Header: what is in scope, and what has been narrowed out of it.
+      <ScopeSheet open={sheet.open} onClose={() => sheet.setOpen(false)} panelRef={sheet.panelRef} compact={isCompact}>
+        <ScopeFilters
+          isCompact={isCompact}
+          setIsCompact={setIsCompact}
+          population={population}
+          setPopulation={setPopulation}
+          urlGrouping={urlGrouping}
+          setGrouping={setGrouping}
+          grain={grain}
+          setGrain={setGrain}
+          period={period}
+          setPeriod={setPeriod}
+          filters={filters}
+          setFilters={setFilters}
+          filterOptions={filterOptions}
+          filtersActive={filtersActive}
+        />
 
-            Everything here describes the *tree* rather than the report — the
-            panes to the right are the same panes whichever way these are set,
-            which is the point (FEAT-086). The bubbles are where the `By bot /
-            By type` toggle used to be, and they do the job it did without
-            spending a level of the tree on it. */}
-        <div className="shrink-0 border-b border-[var(--color-border)]">
-          <div className="flex items-center justify-between px-3 py-2.5 narrow-pane:hidden">
-            {!isCompact && (
-              <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
-                Scope
-              </span>
-            )}
-            <button
-              onClick={() => setIsCompact(!isCompact)}
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              title={isCompact ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {isCompact ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-            </button>
-          </div>
-          {/* Capped and scrollable: three expanded bubble groups over a
-              hundred-run history would otherwise push the tree off a short
-              window, and the tree is the thing the sidebar is for. */}
-          {!isCompact && (
-            <div className="flex max-h-[45vh] flex-col gap-1.5 overflow-y-auto scrollbar-thin px-2 pb-2 narrow-pane:max-h-none narrow-pane:overflow-visible narrow-pane:pt-2">
-              <PopulationToggle population={population} onChange={setPopulation} />
-
-              {/* Which question the tree is answering: owner, bot, pair or
-                  class. Beside the population toggle rather than among the
-                  bubbles, because it says what is being *compared* — the
-                  bubbles say which of it to keep (FEAT-107). */}
-              <GroupByPicker grouping={urlGrouping} onChange={setGrouping} />
-
-              {/* Which granularity of record the tree draws (ARCH-317). One of
-                  the panel's questions rather than one of its filters — the
-                  population says *whose* records, the bubbles say *what class*,
-                  and this says which *kind of thing* is being compared. A strip
-                  and not a bubble row because the three are one answer. */}
-              <div className="flex gap-0.5 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-0.5">
-                {GRAINS.map(({ key, label, hint }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setGrain(key)}
-                    aria-pressed={grain === key}
-                    title={hint}
-                    className={`flex-1 rounded px-1 py-1 text-[10px] font-medium transition-colors ${
-                      grain === key
-                        ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {/* The window a terminated fold reaches back over. Offered here
-                  and not for the live fleet, whose window is its own deploy —
-                  cutting a live fold at a week would report a PnL that its
-                  Realized tile disagrees with. */}
-              {population === "terminated" && (
-                <div className="flex gap-0.5 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-0.5">
-                  {(Object.keys(PERIODS) as PeriodKey[]).map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setPeriod(key)}
-                      aria-pressed={period === key}
-                      className={`flex-1 rounded px-1 py-1 text-[10px] font-medium transition-colors ${
-                        period === key
-                          ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                          : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                      }`}
-                    >
-                      {key}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* The executors page's filters, now narrowing the tree itself
-                  rather than one table under a total that ignored them. */}
-              <input
-                type="text"
-                value={filters.pair}
-                onChange={(e) => setFilters((f) => ({ ...f, pair: e.target.value }))}
-                placeholder="Filter pair…"
-                className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-[11px] transition-colors hover:border-[var(--color-primary)]/50 focus:border-[var(--color-primary)] focus:outline-none"
-              />
-
-              {/* One bubble row per question a reader asks of a fleet. Each is
-                  drawn only when it has something to choose between: a
-                  terminated side whose controllers all report the same
-                  (unknown) class is not a filter. *Which bot* is missing on
-                  purpose — the tree below draws a row per bot, and that row can
-                  be acted on (ARCH-316). */}
-              {filterOptions.ctrlTypes.length > 1 && (
-                <BubbleGroup
-                  // "Controller type" rather than "Type": the row under it is
-                  // "Executor type", and two rows of bubbles that look alike
-                  // need their names to say which is which.
-                  title="Controller type"
-                  hint="The class each controller is — pmm_simple, grid_strike, and so on. Executors are narrowed by the class of the controller that ran them; to pick them by what they are, use Executor type."
-                  options={filterOptions.ctrlTypes}
-                  selected={filters.ctrlTypes}
-                  onChange={(v) => setFilters((f) => ({ ...f, ctrlTypes: v }))}
-                />
-              )}
-              {/* Not drawn in `Controllers` mode: there are no executors in the
-                  tree to pick between. `Controller type` stays in all three —
-                  it classes an executor by the controller that ran it, so it
-                  narrows whatever is on screen. */}
-              {grain !== "controllers" && filterOptions.execTypes.length > 1 && (
-                <BubbleGroup
-                  title="Executor type"
-                  hint="Picking one reports the executors themselves: a controller record covers every type it ever ran, so it steps aside and each row folds the matching executors instead."
-                  options={filterOptions.execTypes}
-                  selected={filters.execTypes}
-                  onChange={(v) => setFilters((f) => ({ ...f, execTypes: v }))}
-                />
-              )}
-              {/* Whose this trading is. Third rather than first: the two above
-                  it are about *what* a record is, which is what a reader
-                  narrows by most days, and this one answers a question the
-                  tree already answers wherever it has grown an agent level. */}
-              {filterOptions.agents.length > 1 && (
-                <BubbleGroup
-                  title="Agent"
-                  hint="Which agent's loop owns each record — by the bot's namespace, or by the session an executor was tagged with. Unattributed is everything the fleet map credits to nobody, which on most servers is nearly all of it."
-                  options={filterOptions.agents}
-                  selected={filters.agents}
-                  onChange={(v) => setFilters((f) => ({ ...f, agents: v }))}
-                />
-              )}
-              {filtersActive && (
-                <button
-                  type="button"
-                  onClick={() => setFilters({ pair: "", ctrlTypes: [], execTypes: [], agents: [] })}
-                  className="self-start text-[10px] text-[var(--color-text-muted)] underline-offset-2 hover:text-[var(--color-text)] hover:underline"
-                >
-                  Clear all filters
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Scope list: controller → executor, and nothing else.
-
-            The fleet is the button above it rather than the first row of it.
-            An "All controllers" card at the top of the list was a total dressed
-            as one of the things it totalled: always first, always the biggest
-            number on the column, and always in the way of the rows the reader
-            opened the sidebar to compare. As a button it costs a line instead
-            of a card, says how much it is about to select, and lights up when
-            it is what the panes are reporting. */}
-        <div ref={sidebarRef} data-perf-scope-tree className="flex-1 overflow-y-auto scrollbar-thin narrow-pane:overflow-visible">
-          <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-            {isCompact ? (
-              <button
-                onClick={() => setScope(rootScope)}
-                {...(atRoot ? { "data-active-scope": true } : {})}
-                aria-pressed={atRoot}
-                title={`Select all — ${plural(scopeCounts.controllers, "controller")}`}
-                className={`flex w-full items-center justify-center py-3 transition-colors ${
-                  atRoot
-                    ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                    : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-                }`}
-              >
-                <Layers className="h-3.5 w-3.5" />
-              </button>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2 py-1.5">
-                <span className="truncate text-[10px] tabular-nums text-[var(--color-text-muted)]">
-                  {scopeCounts.bots > 0 && `${plural(scopeCounts.bots, "bot")} · `}
-                  {plural(scopeCounts.controllers, "controller")}
-                  {scopeCounts.executors > 0 && ` · ${plural(scopeCounts.executors, "executor")}`}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setScope(rootScope)}
-                  aria-pressed={atRoot}
-                  {...(atRoot ? { "data-active-scope": true } : {})}
-                  title="Report on everything in scope, combined"
-                  className={`ml-auto flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
-                    atRoot
-                      ? "border-[var(--color-primary)] bg-[var(--color-primary)]/15 font-semibold text-[var(--color-primary)]"
-                      : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-text)]"
-                  }`}
-                >
-                  <Layers className="h-3 w-3 shrink-0" />
-                  Select all
-                </button>
-              </div>
-            )}
-          </div>
-          <ScopeTree
-            root={rootNode}
-            activeId={effectiveScopeId}
-            open={openRows}
-            showBot={!soloBot && !groupByBot}
-            owners={owners}
-            onSelect={setScope}
-            onToggleOpen={toggleOpen}
-            cv={cv}
-            currencySymbol={currencySymbol}
-            now={now}
-            compact={isCompact}
-            renderAction={isCompact ? undefined : renderBotAction}
-          />
-        </div>
-
-        {/* How much of the executor history the tree was built from.
-            A tree missing branches looks exactly like a fleet that never had
-            them, so a capped walk has to say so here — the cap now bounds the
-            *sidebar*, not just a table's row count (FEAT-086). */}
-        {!isCompact && paging && paging.loaded > 0 && (
-          <div className="shrink-0 border-t border-[var(--color-border)] px-3 py-1.5 text-[10px] text-[var(--color-text-muted)]">
-            <div className="flex items-center gap-1.5">
-              <span className="tabular-nums">{paging.loaded.toLocaleString()} executors loaded</span>
-              {paging.loading && <span>· loading…</span>}
-              {paging.done && <span>· all</span>}
-              {paging.capped && (
-                <button
-                  onClick={paging.loadMore}
-                  className="ml-auto rounded border border-[var(--color-border)] px-1.5 py-0.5 font-medium hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                >
-                  Load more
-                </button>
-              )}
-            </div>
-            {paging.capped && (
-              <p className="mt-0.5 text-[var(--color-yellow)]">
-                Cap reached — this tree shows part of the history, not all of it.
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Nav hints */}
-        {!isCompact && (
-          <div className="narrow-pane:hidden border-t border-[var(--color-border)] px-3 py-2 text-[10px] text-[var(--color-text-muted)]/60">
-            <span className="flex items-center gap-1.5">
-              <span className="flex items-center gap-0.5">
-                <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-[var(--color-border)] bg-[var(--color-surface-hover)] px-0.5 text-[8px] font-medium">
-                  <ChevronUp className="h-2.5 w-2.5" />
-                </kbd>
-                <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-[var(--color-border)] bg-[var(--color-surface-hover)] px-0.5 text-[8px] font-medium">
-                  <ChevronDown className="h-2.5 w-2.5" />
-                </kbd>
-                <span className="ml-0.5">navigate</span>
-              </span>
-            </span>
-          </div>
-        )}
-        </div>
-        <div className="hidden shrink-0 border-t border-[var(--color-border)] p-3 narrow-pane:block">
-          <button type="button" onClick={() => setMobileScopeOpen(false)}
-            className="h-9 w-full rounded-md bg-[var(--color-primary)] px-4 text-sm font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80">View results</button>
-        </div>
-      </div>
-
+        <ScopeTreePane
+          sidebarRef={sidebarRef}
+          isCompact={isCompact}
+          rootScope={rootScope}
+          atRoot={atRoot}
+          scopeCounts={scopeCounts}
+          setScope={setScope}
+          rootNode={rootNode}
+          effectiveScopeId={effectiveScopeId}
+          openRows={openRows}
+          toggleOpen={toggleOpen}
+          soloBot={soloBot}
+          groupByBot={groupByBot}
+          owners={owners}
+          cv={cv}
+          currencySymbol={currencySymbol}
+          now={now}
+          renderBotAction={renderBotAction}
+          paging={paging}
+        />
+      </ScopeSheet>
       {/* Main content — or an archived run's own database, opened over it.
 
           The archive is a different database with its own controllers and its
@@ -2661,419 +2153,66 @@ export function PerfBrowser({
       <div className="flex flex-1 flex-col min-h-0 min-w-0">
         {/* Top bar */}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-5 py-2.5 narrow-pane:flex-wrap narrow-pane:px-3">
-          <div className="flex items-center gap-3 min-w-0 narrow-pane:max-w-full narrow-pane:basis-full narrow-pane:flex-wrap narrow-pane:gap-y-1">
-            {activeCtrl ? (
-              <>
-                <div className="truncate">
-                  <h2 className="text-sm font-semibold truncate">
-                    {activeCtrl.controller_name || activeCtrl.controller_id}
-                  </h2>
-                  {activeCtrl.controller_name && activeCtrl.controller_id && activeCtrl.controller_id !== activeCtrl.controller_name && (
-                    <span className="text-[10px] text-[var(--color-text-muted)] font-mono block truncate">
-                      {activeCtrl.controller_id}
-                    </span>
-                  )}
-                  <UnpricedNote leaves={unpricedLeaves} />
-                </div>
-                {activeCtrl.connector && (
-                  <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)]/50">
-                    {activeCtrl.connector}
-                  </span>
-                )}
-                {activeCtrl.trading_pair && (
-                  <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs font-medium border border-[var(--color-border)]/50">
-                    {activeCtrl.trading_pair}
-                  </span>
-                )}
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <StatusDot status={isStopping ? "stopping" : isKilled ? "stopped" : activeCtrl.status} />
-                  <span className="text-xs capitalize">{isStopping ? "stopping" : isKilled ? "stopped" : activeCtrl.status}</span>
-                </div>
-              </>
-            ) : activeRun ? (
-              // A finished run has no node of its own, so the header a run used
-              // to get under the `runs` branch is the header the fleet row gets
-              // when the bubbles have narrowed it to that one run: the same
-              // name, the same provenance line, the same status. The controller
-              // count comes from the tree rather than from the run record,
-              // whose `num_controllers` is aggregated off the *live* fleet and
-              // is therefore zero for everything in here.
-              <>
-                <div className="truncate">
-                  <h2 className="text-sm font-semibold truncate" title={activeRun.bot_name}>
-                    {shortBotName(activeRun.bot_name)}
-                  </h2>
-                  <span className="text-[10px] text-[var(--color-text-muted)] block truncate">
-                    {[
-                      activeRun.account_name,
-                      activeRun.strategy_name,
-                      plural(scope.children.length, "controller"),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                  <UnpricedNote leaves={unpricedLeaves} />
-                </div>
-                <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)]/50">
-                  {activeRun.deployment_status}
-                </span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <StatusDot status={runStatus(activeRun)} />
-                  <span className="text-xs capitalize">{runStatus(activeRun) || "—"}</span>
-                </div>
-              </>
-            ) : activeExec ? (
-              <>
-                <div className="truncate">
-                  <h2 className="text-sm font-semibold truncate font-mono" title={activeExec.id}>
-                    {activeExec.id.slice(0, 14)}…
-                  </h2>
-                  <span className="text-[10px] text-[var(--color-text-muted)] block truncate">
-                    {activeExec.type}
-                    {activeExec.controller_id ? ` · ${activeExec.controller_id}` : ""}
-                  </span>
-                </div>
-                {activeExec.connector && (
-                  <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)]/50">
-                    {activeExec.connector}
-                  </span>
-                )}
-                {activeExec.trading_pair && (
-                  <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs font-medium border border-[var(--color-border)]/50">
-                    {activeExec.trading_pair}
-                  </span>
-                )}
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <StatusDot status={activeExec.status} />
-                  <span className="text-xs capitalize">
-                    {activeExec.close_type ? parseSide(activeExec.close_type) : activeExec.status}
-                  </span>
-                </div>
-              </>
-            ) : scopeAgentKey ? (
-              // An agent scope: the same report every other scope gets, plus
-              // the one thing only this scope can say — whether the loop that
-              // produced these numbers is still alive, and what it last said.
-              <AgentScopeHeader
-                runKey={scopeAgentKey}
-                owners={owners}
-                owner={activeAgent}
-                legacyBots={scopeLegacyBots}
-                botName={scopeBotName ?? undefined}
-              >
-                <span className="block truncate text-[10px] text-[var(--color-text-muted)]">
-                  {plural(scopedLeaves.length, scopeNoun)} aggregated
-                  {filtersActive && " · filtered"}
-                </span>
-                <UnpricedNote leaves={unpricedLeaves} />
-              </AgentScopeHeader>
-            ) : (
-              // Every other scope — the whole fleet, one live bot's share of
-              // it, or a controller reconstructed out of closed executors. One
-              // header for all of them: what it is, and what it folds.
-              <div className="truncate">
-                <h2 className="text-sm font-semibold truncate flex items-center gap-2">
-                  {scopeBotName ? (
-                    <Server className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
-                  ) : (
-                    <Layers className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
-                  )}
-                  <span className="truncate" title={scopeBotName ?? scope.label}>
-                    {scopeBotName
-                      ? shortBotName(scopeBotName)
-                      : scope.kind !== "fleet"
-                        ? scope.label
-                        : population === "running"
-                          ? "All controllers combined"
-                          : "Everything that has finished"}
-                  </span>
-                </h2>
-                <span className="text-[10px] text-[var(--color-text-muted)] block truncate">
-                  {plural(scopedLeaves.length, scopeNoun)} aggregated
-                  {filtersActive && " · filtered"}
-                </span>
-                <UnpricedNote leaves={unpricedLeaves} />
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {/* The run this scope is narrowed to, and the way back out of it.
-                A filter that cannot be seen is a filter that cannot be undone,
-                which is the rule the bubbles beside the tree were built on —
-                and this one arrived in a link rather than being ticked. */}
-            {runNum !== null && (
-              <span
-                className="flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--color-primary)]"
-                title={
-                  owner
-                    ? `Only the bots, controllers and executors run ${runNum} deployed`
-                    : `A run narrows an agent scope; this scope is not one, so nothing is filtered`
-                }
-              >
-                {runChipLabel(runNum)}
-                <button
-                  type="button"
-                  onClick={clearRun}
-                  aria-label="Clear the run filter"
-                  className="transition-opacity hover:opacity-70"
-                >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </span>
-            )}
-            {runUnavailable && (
-              <span data-run-unavailable className="shrink-0 text-[10px] text-amber-500/90">
-                {runUnavailable}
-              </span>
-            )}
-            <div className="flex items-center border border-[var(--color-border)] rounded overflow-hidden mr-1">
-              <button
-                onClick={goUp}
-                disabled={navIdx <= 0}
-                className="p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30"
-                title="Previous (↑)"
-              >
-                <ChevronUp className="h-3.5 w-3.5" />
-              </button>
-              <span className="text-[10px] tabular-nums text-[var(--color-text-muted)] px-1 border-x border-[var(--color-border)]">
-                {navIdx + 1}/{navItems.length}
-              </span>
-              <button
-                onClick={goDown}
-                disabled={navIdx < 0 || navIdx >= navItems.length - 1}
-                className="p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30"
-                title="Next (↓)"
-              >
-                <ChevronDown className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            {/* Every action belongs to a scope, and is drawn only there: the
-                fleet deploys bots, a bot is stopped and read, a controller is
-                paused and configured. The accordion and the table that used to
-                carry the first two are gone (FEAT-084). */}
-            {scope.kind === "fleet" && (
-              <button
-                onClick={() => setShowDeploy(true)}
-                className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
-                title="Deploy a new bot"
-              >
-                <Rocket className="h-3.5 w-3.5" />
-                Deploy bot
-              </button>
-            )}
-
-            {activeBot && (
-              <>
-                {botStopping ? (
-                  <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-yellow)]">
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    Stopping
-                  </span>
-                ) : stopArmed ? (
-                  <span className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => stopBotMutation.mutate(activeBot.bot_name)}
-                      disabled={stoppingThisBot}
-                      className="rounded bg-[var(--color-red)] px-2 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                    >
-                      {stoppingThisBot ? "Stopping..." : "Confirm"}
-                    </button>
-                    <button
-                      onClick={() => setConfirmStopBot(null)}
-                      className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-                    >
-                      Cancel
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => setConfirmStopBot(activeBot.bot_name)}
-                    className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10"
-                    title="Stop bot"
-                  >
-                    <Square className="h-3.5 w-3.5" />
-                    Stop bot
-                  </button>
-                )}
-                {stopFailedHere && (
-                  <span
-                    className="text-[10px] whitespace-nowrap text-[var(--color-red)]"
-                    title={
-                      stopBotMutation.error instanceof Error
-                        ? stopBotMutation.error.message
-                        : "Unknown error"
-                    }
-                  >
-                    Failed to stop
-                  </span>
-                )}
-                <button
-                  onClick={() => setDrawer((d) => (d === "logs" ? null : "logs"))}
-                  className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                    openDrawer === "logs"
-                      ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                      : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-                  }`}
-                  title={openDrawer === "logs" ? "Hide logs" : "Show logs"}
-                >
-                  <ScrollText className="h-3.5 w-3.5" />
-                  Logs
-                  {activeBot.error_count > 0 && (
-                    <span className="text-[10px] text-[var(--color-yellow)]">
-                      {activeBot.error_count}
-                    </span>
-                  )}
-                </button>
-              </>
-            )}
-
-            {activeRun?.archive_db_path && (
-              <button
-                onClick={() => setOpenArchive(activeRun)}
-                className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
-                title="Open this run's archived database"
-              >
-                <Database className="h-3.5 w-3.5" />
-                Open archive
-              </button>
-            )}
-
-            {activeRun?.bot_run_id && activeRun.deployment_status === "ARCHIVED" && (
-              deleteArmed ? (
-                <span className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => deleteRunMutation.mutate(activeRun.bot_run_id!)}
-                    disabled={deletingThisRun}
-                    className="rounded bg-[var(--color-red)] px-2 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                  >
-                    {deletingThisRun ? "Deleting…" : "Confirm delete"}
-                  </button>
-                  <button
-                    onClick={() => setConfirmDeleteRun(null)}
-                    className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-                  >
-                    Cancel
-                  </button>
-                </span>
-              ) : (
-                <button
-                  onClick={() => setConfirmDeleteRun(activeRun.bot_name)}
-                  className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10"
-                  title="Delete this bot run permanently"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete run
-                </button>
-              )
-            )}
-            {deleteRunMutation.isError && activeRun && (
-              <span
-                className="text-[10px] whitespace-nowrap text-[var(--color-red)]"
-                title={
-                  deleteRunMutation.error instanceof Error
-                    ? deleteRunMutation.error.message
-                    : "Unknown error"
-                }
-              >
-                Failed to delete
-              </span>
-            )}
-
-            {/* Which picture this executor is telling its story with. Drawn
-                only where there is a choice: no candles, no toggle. */}
-            {activeExec && execHasPrice && (
-              <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-0.5">
-                {(["price", "pnl"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setExecChart(mode)}
-                    aria-pressed={execChart === mode}
-                    title={
-                      mode === "price"
-                        ? "Candles, with this executor's entry, exit and levels drawn over them"
-                        : "This executor's own PnL over time"
-                    }
-                    className={`rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-                      execChart === mode
-                        ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                    }`}
-                  >
-                    {mode === "price" ? "Price" : "PnL"}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {activeExec && isExecutorActive(activeExec.status) && (
-              <button
-                onClick={() => stop.request([activeExec.id])}
-                disabled={stop.stoppingIds.has(activeExec.id)}
-                className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10 disabled:opacity-50"
-                title="Stop this executor"
-              >
-                <Square className="h-3.5 w-3.5" />
-                {stop.stoppingIds.has(activeExec.id) ? "Stopping…" : "Stop"}
-              </button>
-            )}
-
-            {liveCtrl && activeCtrl && (
-              <ControllerToggle
-                server={server}
-                bot={activeCtrl.bot_name}
-                controllerId={activeCtrl.controller_id}
-                stopped={isKilled}
-                stopping={isStopping}
-                label={activeCtrl.controller_id}
-                variant="labelled"
-              />
-            )}
-            {/* The config editor: a drawer you open, not a column that is always
-                there. It only describes a single controller, so an aggregate
-                scope has nothing for it to show. */}
-            {liveCtrl && (
-              <button
-                onClick={() => setDrawer((d) => (d === "config" ? null : "config"))}
-                className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                  openDrawer === "config"
-                    ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                    : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-                }`}
-                title={openDrawer === "config" ? "Hide config" : "Show config"}
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                Config
-              </button>
-            )}
-
-            {/* Controller sources and their configs, over the whole fleet — so
-                it belongs to every scope rather than to one. */}
-            <button
-              onClick={openEditor}
-              className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              title="Open the controller & config editor"
-            >
-              <TerminalSquare className="h-3.5 w-3.5" />
-              Editor
-            </button>
-
-            {/* The selected scope's finished history, from one executor up to a
-                whole agent. The fleet root never offers it. */}
-            {!atRoot && scopeDelete.ids.length > 0 && (
-              <button
-                type="button"
-                onClick={() => deletion.request(scopeDelete.ids, scopeDelete.label)}
-                disabled={deletion.pending}
-                aria-label={`Delete history under ${scopeDelete.label}`}
-                title={`Delete ${scopeDelete.ids.length} terminated ${scopeDelete.ids.length === 1 ? "record" : "records"} under ${scopeDelete.label}`}
-                className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10 disabled:opacity-50"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {scopeDelete.ids.some((id) => deletion.deletingIds.has(id)) ? "Deleting…" : "Delete History"}
-              </button>
-            )}
-          </div>
+          <ReportTitle
+            scope={scope}
+            population={population}
+            activeCtrl={activeCtrl}
+            activeRun={activeRun}
+            activeExec={activeExec}
+            activeAgent={activeAgent}
+            isStopping={isStopping}
+            isKilled={isKilled}
+            scopeAgentKey={scopeAgentKey}
+            scopeBotName={scopeBotName}
+            scopeLegacyBots={scopeLegacyBots}
+            owners={owners}
+            scopedLeaves={scopedLeaves}
+            unpricedLeaves={unpricedLeaves}
+            scopeNoun={scopeNoun}
+            filtersActive={filtersActive}
+          />
+          <ReportActions
+            scope={scope}
+            atRoot={atRoot}
+            server={server}
+            activeBot={activeBot}
+            activeCtrl={activeCtrl}
+            activeExec={activeExec}
+            activeRun={activeRun}
+            liveCtrl={liveCtrl}
+            isKilled={isKilled}
+            isStopping={isStopping}
+            botStopping={botStopping}
+            botStop={{
+              armed: stopArmed,
+              pending: stoppingThisBot,
+              failed: stopFailedHere,
+              error: stopBotMutation.error,
+              arm: setConfirmStopBot,
+              confirm: (name) => stopBotMutation.mutate(name),
+            }}
+            runDelete={{
+              armed: deleteArmed,
+              pending: deletingThisRun,
+              failed: deleteRunMutation.isError,
+              error: deleteRunMutation.error,
+              arm: setConfirmDeleteRun,
+              confirm: (id) => deleteRunMutation.mutate(id),
+            }}
+            runFilter={{ num: runNum, owned: owner !== null, unavailable: runUnavailable, clear: clearRun }}
+            nav={{ index: navIdx, total: navItems.length, up: goUp, down: goDown }}
+            openDrawer={openDrawer}
+            setDrawer={setDrawer}
+            execChart={execChart}
+            setExecChart={setExecChart}
+            execHasPrice={execHasPrice}
+            stop={stop}
+            deletion={deletion}
+            scopeDelete={scopeDelete}
+            onDeploy={() => setShowDeploy(true)}
+            onOpenArchive={setOpenArchive}
+            onOpenEditor={openEditor}
+          />
         </div>
 
         {/* Body: report pane (+ config drawer) */}
@@ -3083,480 +2222,76 @@ export function PerfBrowser({
               a short one the reader can reach the rows that no longer do rather
               than have them hang off the bottom of the screen. */}
           <div className="flex flex-1 flex-col min-w-0 min-h-0 gap-3 overflow-y-auto scrollbar-thin p-4 narrow-pane:p-3 narrow-pane:pb-[calc(5rem+env(safe-area-inset-bottom))]">
-            {/* What an empty live population *means*, said before any number is
-                drawn (CORR-356). Without it a server that has never run a bot
-                reads as a measurement of zero: a strip of `$0.00` tiles and "No
-                performance history available", with a 10px muted "Nothing in
-                scope." in the sidebar as the only hint — and that line is
-                written for a different case (every filter ticked off, a window
-                with nothing in it) and is not drawn at all once the sidebar is
-                collapsed. So it goes in the report pane, which every reader has.
+            <ScopeNotices
+              scope={scope}
+              silentBots={silentBots}
+              runWithheld={runWithheld}
+              runUnavailable={runUnavailable}
+              emptyPopulation={emptyPopulation}
+              onDeploy={() => setShowDeploy(true)}
+            />
+            <KpiStrip
+              totals={totals}
+              currencySymbol={currencySymbol}
+              runWithheld={runWithheld}
+              perHour={perHour}
+              activeCtrl={activeCtrl}
+              scopeNoun={scopeNoun}
+            />
 
-                The broker diagnostic wins where it applies, because telling an
-                outage apart from an empty fleet is the higher-value half, and it
-                is drawn *over* the numbers rather than instead of them: a silent
-                bot can sit beside a live unattached executor, and that executor's
-                money is real. */}
-            {silentBots.length > 0 ? (
-              <div className="shrink-0 rounded-lg border border-[var(--color-yellow)]/40 bg-[var(--color-yellow)]/10 px-4 py-3">
-                <p className="text-sm font-medium text-[var(--color-yellow)]">
-                  {silentBots.length === 1
-                    ? `${silentBots[0].bot_name} is running but reporting no controllers`
-                    : `${silentBots.length} bots are running but reporting no controllers`}
-                </p>
-                <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                  Controller reports reach the API over its MQTT broker. Check that the broker is
-                  up and that the API is connected to it — on the server,{" "}
-                  <code className="font-mono">make doctor</code> names it.
-                </p>
-              </div>
-            ) : runWithheld ? (
-              // A run whose server could not be read filters to nothing, and a
-              // fold of nothing is a strip of `$0.00` (CORR-433). Said here, in
-              // the same idiom as an empty fleet, because the 10px line beside
-              // the run chip is not where anyone looks for why the numbers are
-              // zero — and the tiles below read "—" rather than a measurement.
-              <div
-                data-run-withheld
-                className="shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
-              >
-                <p className="text-sm font-medium">{runUnavailable}</p>
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  This run's ledger could not be read, so the figures below are withheld rather than a
-                  result — the run may well have traded.
-                </p>
-              </div>
-            ) : emptyPopulation ? (
-              <div
-                className="flex shrink-0 items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
-                title="Nothing is deployed on this server and no executor is open, so the figures below are an absence rather than a result. What has already run is under Terminated."
-              >
-                <p className="min-w-0 flex-1 truncate text-xs">
-                  <span className="font-medium">No bots running</span>
-                  <span className="text-[var(--color-text-muted)]"> · nothing deployed on this server</span>
-                </p>
-                {scope.kind === "fleet" && (
-                  <button
-                    onClick={() => setShowDeploy(true)}
-                    className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-primary)]/40 px-2 text-xs font-medium text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
-                    title="Deploy a new bot"
-                  >
-                    <Rocket className="h-3.5 w-3.5" />
-                    Deploy bot
-                  </button>
-                )}
-              </div>
-            ) : null}
-            {/* Headline numbers first: the chart below is the shape of these. */}
-            <div className="shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 md:px-4 md:py-3">
-              {/* A fixed set of tiles, not a set that depends on what the scope
-                  happens to have. Two reasons. The strip's height decides the
-                  chart's, so tiles coming and going would resize the chart as
-                  the reader walks the sidebar. And a tile reading "—" is a
-                  fact worth having: a terminated scope holds no unrealized PnL,
-                  and a live one has not won or lost anything yet — which is
-                  different from those numbers being unavailable. */}
-              {/* Reflowed by the *pane's* width, not the window's. `lg:` is a
-                  viewport breakpoint, so on a wide screen these stayed eight
-                  across however narrow the pane got — and opening the executor
-                  detail column takes ~480px off it, at which point eight
-                  columns of a hundred-odd pixels each printed
-                  "REALIZEDUNREALIZED" over one another. `auto-fit` asks the
-                  column the tiles are actually in. */}
-              {/* Phones fix four columns: two short rows instead of a tall stack. */}
-              <div className="grid grid-cols-4 gap-x-2 gap-y-2.5 md:grid-cols-[repeat(auto-fit,minmax(88px,1fr))] md:gap-3">
-                <Kpi
-                  label="Net PnL"
-                  value={runWithheld ? "—" : formatCurrencyPnl(totals.net, currencySymbol)}
-                  color={runWithheld ? undefined : pnlColor(totals.net)}
-                  // The return % is per-leaf — each is measured against its own
-                  // notional — so it rides along only where it means something.
-                  // Summing or averaging them across a fold would report a
-                  // return nobody earned.
-                  sub={runWithheld ? undefined : [
-                    perHour(totals.net, formatCurrencyPnl),
-                    totals.returnPct !== undefined
-                      ? `${totals.returnPct >= 0 ? "+" : ""}${totals.returnPct.toFixed(2)}%`
-                      : undefined,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || undefined}
-                />
-                <Kpi
-                  label="Realized"
-                  value={runWithheld ? "—" : formatCurrencyPnl(totals.realized, currencySymbol)}
-                  color={runWithheld ? undefined : pnlColor(totals.realized)}
-                  sub={runWithheld ? undefined : perHour(totals.realized, formatCurrencyPnl)}
-                />
-                <Kpi
-                  label="Unrealized"
-                  value={runWithheld ? "—" : formatCurrencyPnl(totals.unrealized, currencySymbol)}
-                  color={runWithheld ? undefined : pnlColor(totals.unrealized)}
-                  // What the unrealized figure is *of*: with no open position
-                  // there is nothing for it to be, and a stale non-zero reading
-                  // beside "no open positions" is worth seeing.
-                  sub={
-                    runWithheld
-                      ? undefined
-                      : totals.positions === 0
-                      ? "no open positions"
-                      : `${totals.positions} position${totals.positions !== 1 ? "s" : ""}`
-                  }
-                />
-                {/* Win rate is only meaningful over what has *closed*, so the
-                    count beside it is the denominator rather than decoration:
-                    a fold of live controllers has closed nothing and says so,
-                    and a mixed fold quotes the closed subset it was measured
-                    over rather than pretending the open ones lost. */}
-                <Kpi
-                  label="Win rate"
-                  value={
-                    runWithheld || totals.winRate === undefined
-                      ? "—"
-                      : `${(totals.winRate * 100).toFixed(1)}%`
-                  }
-                  sub={
-                    runWithheld
-                      ? undefined
-                      : totals.closed > 0
-                      ? `${totals.wins.toLocaleString()} of ${totals.closed.toLocaleString()} closed`
-                      : "nothing closed yet"
-                  }
-                />
-                <Kpi
-                  label="Volume"
-                  value={runWithheld ? "—" : formatCurrencyVolume(totals.volume, currencySymbol)}
-                  sub={runWithheld ? undefined : perHour(totals.volume, formatCurrencyVolume)}
-                />
-                <Kpi
-                  label="Fees"
-                  value={
-                    !runWithheld && totals.fees > 0 ? formatCurrencyVolume(totals.fees, currencySymbol) : "—"
-                  }
-                  // A floor and not a total: `leafFromController` hardcodes
-                  // `fees: 0` because the controllers payload reports no fee
-                  // total of its own, so what is measurable here is the
-                  // executors' fees. The caption rides on the tile rather than
-                  // the number gaining a footnote — a figure that has to be
-                  // read with an asterisk is a figure with an asterisk in it.
-                  title="Executor fees only — the controllers payload reports no fee total, so this is a floor, not a total."
-                  // What the fees ate: the share of gross the venue took, which
-                  // is the thing an absolute fee total cannot say on its own.
-                  sub={
-                    !runWithheld && totals.fees > 0 && totals.net + totals.fees !== 0
-                      ? `${((totals.fees / Math.abs(totals.net + totals.fees)) * 100).toFixed(1)}% of gross`
-                      : undefined
-                  }
-                />
-                <Kpi
-                  label="Capital"
-                  value={
-                    !runWithheld && totals.capital > 0
-                      ? formatCurrencyVolume(totals.capital, currencySymbol)
-                      : "—"
-                  }
-                  // Turnover rather than a controller count: how hard the
-                  // capital is working is the thing the two numbers beside it
-                  // do not already say, and the count is on the Runtime tile.
-                  sub={
-                    !runWithheld && totals.capital > 0
-                      ? `${(totals.volume / totals.capital).toFixed(1)}x turnover`
-                      : undefined
-                  }
-                />
-                <Kpi
-                  label="Runtime"
-                  value={totals.hours > 0 ? formatRuntimeHours(totals.hours) : "—"}
-                  // Named in hours, not "2d 9h", because it is the divisor of
-                  // every per-hour figure in this row — the reader can check the
-                  // pace against the total without converting anything. Under
-                  // the hour it is minutes: `0.1h` is not a number anyone can
-                  // check a pace against (see `formatRuntimeHours`).
-                  sub={
-                    activeCtrl
-                      ? activeCtrl.bot_name
-                      : `${plural(totals.bots, "bot")}, ${plural(totals.count, scopeNoun)}`
-                  }
-                />
-              </div>
+            <ReportChart
+              scope={scope}
+              population={population}
+              server={server}
+              activeCtrl={activeCtrl}
+              activeExec={activeExec}
+              configId={configId}
+              convert={convert}
+              currencySymbol={currencySymbol}
+              chartTitle={chartTitle}
+              execChart={execChart}
+              execHasPrice={execHasPrice}
+              execChartGroup={execChartGroup}
+              ownerChart={ownerChart}
+              ownerLines={ownerLines}
+              totals={totals}
+              chartData={chartData}
+              notice={notice}
+              runHistoryLoading={runHistoryLoading}
+              archiveOnlyController={archiveOnlyController}
+              searchParams={searchParams}
+              setSearchParams={setSearchParams}
+            />
 
-              {/* ── How the positions ended (FEAT-085) ──
-
-                  Inside the same card as the tiles, because it is the same kind
-                  of fact at a different cardinality: the tiles are what this
-                  scope adds up to, and these are what it adds up to broken out
-                  by close type. They cannot *be* tiles — the fixed six-column
-                  grid above breaks the moment a fleet shows seven distinct
-                  types — and they were not worth the third of the pane the
-                  bottom band used to spend on three short chips.
-
-                  One row that scrolls sideways rather than wrapping, and that
-                  is load-bearing: the chart is sized from what this strip
-                  leaves, so a strip whose height depended on how many close
-                  types a scope happens to have would resize the chart as the
-                  reader walked the sidebar. A scope with none drops the row
-                  entirely — a fleet of LP controllers should not pay for a line
-                  that says nothing. */}
-              {totals.closeTypes.length > 0 && (
-                <div
-                  data-close-types
-                  className="mt-3 flex items-center gap-1.5 overflow-x-auto scrollbar-thin border-t border-[var(--color-border)]/60 pt-2"
-                >
-                  <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Closes{" "}
-                    <span className="font-semibold tabular-nums text-[var(--color-text)]">
-                      {totals.closeTotal.toLocaleString()}
-                    </span>
-                  </span>
-                  {totals.closeTypes.map(([type, count]) => (
-                    <span
-                      key={type}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--color-bg)] px-2 py-0.5 text-[11px] border border-[var(--color-border)]/50"
-                    >
-                      <span className="text-[var(--color-text-muted)]">{parseSide(type)}</span>
-                      <span className="font-semibold tabular-nums">{count}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* The chart takes whatever vertical room is left, down to the room
-                it actually occupies and no further: the panes are drawn at
-                `MIN_CHART_PX` however little is left, so a box shorter than that
-                plus its chrome does not shrink the chart — it makes the chart
-                overflow downward and paint across the band's header, which is
-                what swallowed the "Positions held" label when a twelve-row fleet
-                opened the band. The floor is the same two constants the panes are
-                sized from, so the two can't drift apart. `overflow-hidden` is the
-                belt to that braces: if a pane ever is squeezed below its floor,
-                it clips itself instead of covering its neighbour. */}
-            <div
-              ref={chartRef}
-              className="relative flex-1 overflow-hidden narrow-pane:shrink-0"
-              style={{ minHeight: MIN_CHART_PX + CHART_CHROME_PX }}
-            >
-              <div className="absolute inset-0">
-                {activeExec && execHasPrice && execChart === "price" ? (
-                  /* One executor selected, drawn the way the executors page
-                     drew it: the pair's candles with this executor's entry,
-                     exit, barriers and — for a grid — its levels laid over
-                     them. The aggregate panes below are right for a fold of
-                     many records and say almost nothing about a single one,
-                     whose whole story is where it opened and where it closed.
-
-                     Keyed by executor id so switching between two of them
-                     remounts rather than re-pointing a chart that keeps the
-                     previous one's visible range. */
-                  <ExecutorChart
-                    key={activeExec.id}
-                    server={server}
-                    executors={execChartGroup}
-                    connector={activeExec.connector}
-                    tradingPair={activeExec.trading_pair}
-                    height={execChartHeight}
-                  />
-                ) : activeCtrl && population === "running" ? (
-                  <ControllerPnlChart
-                    // Keyed by bot + config id: two bots can be running this very
-                    // config, and a key that did not tell them apart would keep the
-                    // sibling's mounted state when the user switches (CORR-241).
-                    key={controllerKey(activeCtrl)}
-                    server={server}
-                    controllerId={configId}
-                    botName={activeCtrl.bot_name}
-                    deployedAt={activeCtrl.deployed_at}
-                    height={chartHeight}
-                    convert={convert}
-                    currencySymbol={currencySymbol}
-                    controller={activeCtrl}
-                  />
-                ) : ownerChart ? (
-                  /* This scope splits, so the report is the split: a Total plus
-                     one line per child, in the tree's own colours and order.
-                     Before the aggregate series below rather than instead of
-                     it — a scope with one child, a controller or an executor
-                     draws the single curve it always drew (FEAT-116). */
-                  <OwnerPnlChart
-                    owners={ownerLines}
-                    rows={ownerChart.rows}
-                    keys={ownerChart.keys}
-                    symbol={currencySymbol}
-                    net={totals.net}
-                    capital={totals.capital}
-                    // The header two lines up already names the scope, so
-                    // repeating a 40-character bot name here only crowded the
-                    // legend out of its row: this title says what the *split*
-                    // is. The fleet has no such header, so it keeps its name.
-                    title={
-                      scope.kind === "fleet"
-                        ? `${chartTitle} by ${ownerNoun(scope.children[0].kind)}`
-                        : `PnL by ${ownerNoun(scope.children[0].kind)}`
-                    }
-                    height={chartHeight}
-                    params={searchParams}
-                    setParams={setSearchParams}
-                  />
-                ) : chartData.length >= 2 ? (
-                  <PnlEvolutionChart
-                    data={chartData}
-                    title={chartTitle}
-                    pnlHeight={Math.round(chartHeight * 0.65)}
-                    volumeHeight={chartHeight - Math.round(chartHeight * 0.65)}
-                    currencySymbol={currencySymbol}
-                    notice={notice}
-                  />
-                ) : runHistoryLoading ? (
-                  // The first open of a cold run pays one walk. Behind the same
-                  // spinner a cold archive already shows, and never blocking the
-                  // tree: the sidebar and the strip are drawn from the
-                  // controllers listing whether or not this has landed.
-                  <div className="flex h-full items-center justify-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-                    <Loader2 className="h-4 w-4 animate-spin text-[var(--color-text-muted)]" />
-                    <p className="text-xs text-[var(--color-text-muted)]">Reading this run's history…</p>
-                  </div>
-                ) : (
-                  <div className="flex h-full items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-6">
-                    <p className="max-w-sm text-center text-xs text-[var(--color-text-muted)]">
-                      {archiveOnlyController
-                        ? "This run predates the server's stored performance history. Its archived database records the run as a whole rather than per controller — select the bot above to see that curve."
-                        : "No performance history available"}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ── The bottom band (FEAT-085, FEAT-086) ──
-
-                A one-line header pinned under the chart, opening over it when
-                the reader wants a breakdown. Three things can be underneath a
-                scope — the positions it is holding, the executors that make it
-                up, and the same records cut by instrument and by venue
-                (FEAT-116) — and they share one band rather than stacking, so
-                the chart's height depends on the strip alone and not on what
-                the selected node happens to have.
-
-                Both are tables rather than grids of cards: at fleet scope these
-                are dozens or thousands of one-line facts, and a row each is
-                what makes them comparable at a glance.
-
-                Open, it asks for up to 45% of the pane but yields to the chart's
-                floor above — the chart is the reason the reader is here, and a
-                table that scrolls two rows shorter costs less than a curve drawn
-                in half the room it needs. */}
-            {(positionRows.length > 0 ||
-              scopedExecutors.length > 0 ||
-              scopedLeaves.length > 0) && (
-              <div
-                className={`flex min-h-0 flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden ${
-                  band ? "max-h-[45%] min-h-[132px]" : "shrink-0"
-                }`}
-              >
-                <div className="flex shrink-0 items-center">
-                  {positionRows.length > 0 && (
-                    <BandTab
-                      label={`Positions held (${positionRows.length})`}
-                      open={band === "positions"}
-                      onClick={() => toggleBand("positions")}
-                      data-positions-toggle
-                    />
-                  )}
-                  {scopedExecutors.length > 0 && (
-                    <BandTab
-                      label={`Executors (${scopedExecutors.length})`}
-                      open={band === "executors"}
-                      onClick={() => toggleBand("executors")}
-                      data-executors-toggle
-                    />
-                  )}
-                  {/* Offered wherever there is a spine to cut, which is every
-                      scope with a record in it — including a single controller,
-                      whose one instrument and one venue is a true answer. */}
-                  {scopedLeaves.length > 0 && (
-                    <BandTab
-                      label="Breakdown"
-                      open={band === "breakdown"}
-                      onClick={() => toggleBand("breakdown")}
-                      data-breakdown-toggle
-                    />
-                  )}
-                </div>
-
-                {band === "executors" && scopedExecutors.length > 0 && (
-                  <div className="min-h-0 flex-1 border-t border-[var(--color-border)]/60">
-                    <ExecutorRows
-                      executors={scopedExecutors}
-                      stop={stop}
-                      deletion={deletion}
-                      selectedId={detail?.id ?? null}
-                      onSelect={setDetail}
-                      rateFormatPnl={rateFormatPnl}
-                      rateFormatValue={rateFormatValue}
-                      rateFormatDetailed={rateFormatDetailed}
-                    />
-                  </div>
-                )}
-
-                {band === "breakdown" && scopedLeaves.length > 0 && (
-                  <ScopeBreakdowns
-                    byPair={byPair}
-                    byVenue={byVenue}
-                    symbol={currencySymbol}
-                  />
-                )}
-
-                {band === "positions" && positionRows.length > 0 && (
-                  <PositionsTable
-                    rows={positionRows}
-                    currencySymbol={currencySymbol}
-                    // Every row would repeat the controller's name when the
-                    // scope already is one controller.
-                    showController={!activeCtrl}
-                  />
-                )}
-              </div>
-            )}
+            <BottomBand
+              band={band}
+              toggleBand={toggleBand}
+              positionRows={positionRows}
+              scopedExecutors={scopedExecutors}
+              scopedLeaves={scopedLeaves}
+              byPair={byPair}
+              byVenue={byVenue}
+              currencySymbol={currencySymbol}
+              activeCtrl={activeCtrl}
+              stop={stop}
+              deletion={deletion}
+              detail={detail}
+              setDetail={setDetail}
+              rateFormatPnl={rateFormatPnl}
+              rateFormatValue={rateFormatValue}
+              rateFormatDetailed={rateFormatDetailed}
+            />
           </div>
 
-          {/* The right drawer: one column, whichever of the two the scope
-              supports. A controller's config, or a bot's logs — never both,
-              and never one belonging to a scope the user has left. */}
-          {openDrawer && (
-            <div className="w-full max-h-[50%] lg:max-h-none lg:w-[380px] xl:w-[440px] shrink-0 border-l border-[var(--color-border)] flex flex-col bg-[var(--color-surface)]">
-              {openDrawer === "config" && activeCtrl ? (
-                <YamlConfigEditor
-                  // Same: an editor keyed on the config id alone kept its unsaved
-                  // buffer when the user switched to the other bot running it.
-                  key={controllerKey(activeCtrl)}
-                  config={activeCtrl.config || {}}
-                  server={server}
-                  configId={configId}
-                  botName={activeCtrl.bot_name}
-                  onSaved={() => queryClient.invalidateQueries({ queryKey: ["bots", server] })}
-                  onCollapse={() => setDrawer(null)}
-                />
-              ) : (
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)]/50 px-4 py-2">
-                    <button
-                      onClick={() => setDrawer(null)}
-                      className="rounded p-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                      title="Hide logs"
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                    <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                      Logs
-                    </h3>
-                  </div>
-                  <div className="flex-1 min-h-0 p-3">
-                    <LogsSection logs={botLogs} />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <ReportDrawer
+            openDrawer={openDrawer}
+            server={server}
+            activeCtrl={activeCtrl}
+            configId={configId}
+            botLogs={botLogs}
+            onConfigSaved={() => queryClient.invalidateQueries({ queryKey: ["bots", server] })}
+            onClose={() => setDrawer(null)}
+          />
         </div>
       </div>
       )}

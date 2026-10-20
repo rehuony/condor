@@ -13,6 +13,7 @@ next render cannot regress to the older polled value.
 """
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -96,10 +97,10 @@ class _SentMessage:
 class _FakeMessage:
     def __init__(self, sink):
         self._sink = sink
-        self.chat_id = 1
+        self.chat = SimpleNamespace(id=1)
         self.replies = []
 
-    async def reply_text(self, text, **kwargs):
+    async def answer(self, text, **kwargs):
         self.replies.append(text)
         return _SentMessage(self._sink)
 
@@ -132,7 +133,8 @@ class _FakeQuery:
     def __init__(self, bot):
         self._bot = bot
 
-    def get_bot(self):
+    @property
+    def bot(self):
         return self._bot
 
 

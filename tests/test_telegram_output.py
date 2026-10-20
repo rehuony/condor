@@ -4,11 +4,11 @@ import asyncio
 
 import pytest
 
-from condor import telegram_output
 from condor.runtime.events import RuntimeEvent
-from condor.telegram_output import OutputLease
+from condor.telegram.output import lease as output_lease
+from condor.telegram.output.lease import OutputLease
 from handlers.agents.stream import TelegramStreamer
-from tests.test_telegram_layered_replies import Bot, feed, until
+from tests.test_telegram_layered_replies import Bot, feed
 
 
 @pytest.mark.asyncio
@@ -30,7 +30,7 @@ async def test_cancelled_before_worker_runs_releases_owned_output():
     await feed(target, "answer")
     target.start_edit_loop()
     await target.stop_edit_loop()
-    assert not telegram_output._tails
+    assert not output_lease._tails
 
 
 @pytest.mark.asyncio
@@ -38,15 +38,15 @@ async def test_final_stops_inflight_progress_before_sending_and_ignores_late_eve
     bot = Bot()
     entered, cancelled = asyncio.Event(), asyncio.Event()
 
-    async def edit(**kwargs):
+    async def draft(**kwargs):
         entered.set()
         try:
             await asyncio.Event().wait()
         finally:
             cancelled.set()
 
-    bot.edit_message_text = edit
-    target = TelegramStreamer(bot, 42, 10, mode="edit")
+    bot.send_rich_message_draft = draft
+    target = TelegramStreamer(bot, 42, 10)
     target.start_edit_loop()
     await feed(target, "answer")
     await entered.wait()
@@ -67,7 +67,7 @@ async def test_owner_cancellation_does_not_leave_an_orphan_final_sender():
         entered.set()
         await asyncio.Event().wait()
 
-    bot.send_message = send
+    bot.send_rich_message = send
     target = TelegramStreamer(bot, 42)
     await feed(target, "answer")
     await target.process_event(RuntimeEvent.done())
@@ -76,7 +76,7 @@ async def test_owner_cancellation_does_not_leave_an_orphan_final_sender():
     waiter.cancel()
     await asyncio.gather(waiter, return_exceptions=True)
     await target.stop_edit_loop()
-    assert target._final_task.done() and not telegram_output._tails
+    assert target._final_task.done() and not output_lease._tails
 
 
 @pytest.mark.asyncio

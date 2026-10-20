@@ -15,7 +15,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RunningInstance, StrategySummary } from "@/lib/api";
+import type { RunningInstance, StrategySummary } from "@/lib/api/agents";
 import { LoopBanner } from "./LoopBanner";
 
 let host: HTMLDivElement;

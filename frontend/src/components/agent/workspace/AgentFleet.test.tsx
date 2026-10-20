@@ -20,28 +20,43 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerContext } from "@/hooks/useServer";
-import type { AgentRunRow, ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { AgentRunRow } from "@/lib/api/agents";
 
 const getBots = vi.fn();
 const getExecutorsPage = vi.fn();
 const getFleetMap = vi.fn();
 const getStrategySessionExecutors = vi.fn();
 
-vi.mock("@/lib/api", () => {
-  const named: Record<string, (...args: unknown[]) => unknown> = {
-    getBots: (...a) => getBots(...a),
-    getExecutorsPage: (...a) => getExecutorsPage(...a),
-    getFleetMap: (...a) => getFleetMap(...a),
-    getStrategySessionExecutors: (...a) => getStrategySessionExecutors(...a),
-    getBotRuns: () => Promise.resolve({ runs: [], total: 0 }),
-    getTerminatedControllers: () => Promise.resolve({ controllers: [], runs_seen: 0 }),
-  };
-  return {
-    api: new Proxy(named, {
-      get: (target, key: string) => target[key] ?? (() => Promise.resolve({})),
-    }),
-  };
-});
+const named: Record<string, (...args: unknown[]) => unknown> = {
+  getBots: (...a) => getBots(...a),
+  getExecutorsPage: (...a) => getExecutorsPage(...a),
+  getFleetMap: (...a) => getFleetMap(...a),
+  getStrategySessionExecutors: (...a) => getStrategySessionExecutors(...a),
+  getBotRuns: () => Promise.resolve({ runs: [], total: 0 }),
+  getTerminatedControllers: () => Promise.resolve({ controllers: [], runs_seen: 0 }),
+};
+
+/** Every domain module answers with the same stub: the named reads above and
+ * an empty resolved object for anything else the fleet tree asks for. */
+function stubApi() {
+  return new Proxy(named, {
+    get: (target, key: string) => target[key] ?? (() => Promise.resolve({})),
+  });
+}
+
+vi.mock("@/lib/api/agents", () => ({ agentsApi: stubApi() }));
+vi.mock("@/lib/api/bots", () => ({ botsApi: stubApi() }));
+vi.mock("@/lib/api/executors", () => ({ executorsApi: stubApi() }));
+vi.mock("@/lib/api/performance", () => ({ performanceApi: stubApi() }));
+vi.mock("@/lib/api/archived", () => ({ archivedApi: stubApi() }));
+vi.mock("@/lib/api/servers", () => ({ serversApi: stubApi() }));
+vi.mock("@/lib/api/market", () => ({ marketApi: stubApi() }));
+vi.mock("@/lib/api/settings", () => ({ settingsApi: stubApi() }));
+vi.mock("@/lib/api/portfolio", () => ({ portfolioApi: stubApi() }));
+vi.mock("@/lib/api/reports", () => ({ reportsApi: stubApi() }));
+vi.mock("@/lib/api/routines", () => ({ routinesApi: stubApi() }));
+vi.mock("@/lib/api/delegations", () => ({ delegationsApi: stubApi() }));
 
 // The chart subsystems, the editors and the dialogs are whole worlds of their
 // own and none of them is about which records are in scope.

@@ -18,7 +18,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DeploymentLedger } from "./DeploymentLedger";
-import type { DeploymentRow } from "@/lib/api";
+import type { DeploymentRow } from "@/lib/api/agents";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;

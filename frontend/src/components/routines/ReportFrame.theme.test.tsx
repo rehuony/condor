@@ -18,8 +18,10 @@ import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/api", () => ({
-  api: { getReportHtml: () => Promise.resolve("<html></html>") },
+vi.mock("@/lib/api/reports", () => ({
+  reportsApi: {
+    getReportHtml: () => Promise.resolve("<html></html>"),
+  },
 }));
 
 // Read at module scope by the theme hook; jsdom has no implementation, and the

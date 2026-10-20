@@ -8,7 +8,7 @@ import {
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import type { PoolSummary } from "@/lib/api";
+import type { PoolSummary } from "@/lib/api/dex";
 import { useDexFavorites } from "@/lib/dexFavorites";
 
 import { num, pct, poolLabel, usdCompact } from "./format";

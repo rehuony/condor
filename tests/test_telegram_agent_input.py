@@ -6,17 +6,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram.types import Message, Update
 from PIL import Image
-from telegram import Message, Update
 
 import config_manager
 from condor.acp.client import PromptDone, TextChunk
 from condor.runtime import SessionKey, SessionSpec, attachments
 from condor.runtime import client as runtime
 from condor.runtime import conversations, sessions
-from condor.telegram_ingress import get_ingress
-from condor.telegram_input import InputError, TelegramInputResolver
+from condor.telegram.ingress import get_ingress
+from condor.telegram.input import InputError, TelegramInputResolver
+from condor.telegram.update import TgUpdate
 from handlers import agents
+from tests.conftest import patch_agents
 
 USER = 4242
 
@@ -39,7 +41,9 @@ def update(message_id=1, **fields):
         "from": {"id": USER, "is_bot": False, "first_name": "Test"},
         **fields,
     }
-    return Update.de_json({"update_id": message_id, "message": payload}, None)
+    return TgUpdate.from_aiogram(
+        Update.model_validate({"update_id": message_id, "message": payload})
+    )
 
 
 @pytest.fixture
@@ -84,13 +88,22 @@ def world(monkeypatch):
     )
     status = SimpleNamespace(message_id=900, edit_text=AsyncMock())
     replies = AsyncMock(return_value=status)
-    monkeypatch.setattr(Message, "reply_text", replies)
+    monkeypatch.setattr(Message, "answer", replies)
     monkeypatch.setattr(Message, "delete", AsyncMock())
     bot = SimpleNamespace(
         send_message=AsyncMock(return_value=status),
+        send_rich_message_draft=AsyncMock(return_value=True),
         edit_message_text=AsyncMock(),
         delete_message=AsyncMock(),
     )
+
+    async def send_rich_message(**kwargs):
+        payload = dict(kwargs)
+        rich = payload.pop("rich_message", None)
+        payload["text"] = getattr(rich, "markdown", "") or payload.get("text", "")
+        return await bot.send_message(**payload)
+
+    bot.send_rich_message = send_rich_message
     context = SimpleNamespace(bot=bot, user_data={}, chat_data={})
     resolver = TelegramInputResolver(bot)
     downloads = AsyncMock(
@@ -99,7 +112,7 @@ def world(monkeypatch):
         )
     )
     monkeypatch.setattr(resolver, "_download", downloads)
-    monkeypatch.setattr("condor.telegram_input.get_resolver", lambda _: resolver)
+    monkeypatch.setattr("condor.telegram.input.get_resolver", lambda _: resolver)
 
     async def start():
         return await runtime.create_session(
@@ -147,7 +160,9 @@ def test_pixels_reach_model_and_are_saved_with_the_user_turn(world, kind):
             )
         elif kind == "reply":
             incoming = update(
-                2, text="Read this chart", reply_to_message=incoming.message.to_dict()
+                2,
+                text="Read this chart",
+                reply_to_message=incoming.message.model_dump(exclude_none=True),
             )
         await agents.agent_message_handler(incoming, world.context)
         assert len(world.calls) == 1
@@ -200,7 +215,7 @@ def test_media_replay_after_ingress_restart_skips_download_and_model(
         await world.start()
         incoming = update(photo=photo())
         await agents.agent_message_handler(incoming, world.context)
-        monkeypatch.setattr("condor.telegram_ingress._instance", None)
+        monkeypatch.setattr("condor.telegram.ingress._instance", None)
         await agents.agent_message_handler(incoming, world.context)
         assert len(world.calls) == world.downloads.await_count == 1
         await world.finish()
@@ -378,7 +393,7 @@ def test_switch_during_secret_notice_cannot_move_media_into_new_conversation(
         await runtime.destroy(SessionKey.telegram(USER))
         await world.start()
 
-    monkeypatch.setattr(agents, "_handle_pasted_secrets", notice)
+    patch_agents(monkeypatch, "_handle_pasted_secrets", notice)
 
     async def run():
         original = await world.start()
@@ -597,7 +612,11 @@ def test_reset_uses_own_text_even_when_reply_contains_media(world):
         await world.start()
         await agents.agent_message_handler(
             update(
-                2, text="-", reply_to_message=update(photo=photo()).message.to_dict()
+                2,
+                text="-",
+                reply_to_message=update(photo=photo()).message.model_dump(
+                    exclude_none=True
+                ),
             ),
             world.context,
         )
@@ -611,7 +630,7 @@ def test_reset_uses_own_text_even_when_reply_contains_media(world):
 
 
 def test_shutdown_rejects_late_ptb_updates_without_reopening_intake(world):
-    from condor.telegram_ingress import close_ingress
+    from condor.telegram.ingress import close_ingress
 
     async def run():
         await world.start()

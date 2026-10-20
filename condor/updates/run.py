@@ -351,7 +351,7 @@ async def resolve(component_key: str, action: str) -> tuple[bool, str]:
     return ok, message
 
 
-def _plan(component_keys: list[str], statuses: dict[str, components.ComponentStatus]):
+def _plan(component_keys: list[str]) -> list[Step]:
     """The steps that will run, as pending entries, in order.
 
     Built up front so the confirm screen and the progress screen are the same
@@ -362,22 +362,7 @@ def _plan(component_keys: list[str], statuses: dict[str, components.ComponentSta
     for key in components.keys():
         if key not in component_keys:
             continue
-        if key == components.HUMMINGBOT_API:
-            status = statuses.get(key)
-            steps.append(
-                Step(f"{key}.fast-forward", "Fast-forwarding the hummingbot-api repo")
-            )
-            # The image steps only exist when the published tag can correspond
-            # to this checkout. Off the default branch the container is the
-            # operator's, so there is nothing to pull and nothing to restart
-            # for -- and a plan that listed them anyway would be promising to do
-            # something the run then skips.
-            image = status.facets.get("image") if status else None
-            if image is None or not image.up_to_date:
-                steps.append(Step(f"{key}.image", "Pulling the API image"))
-                steps.append(Step(f"{key}.up", "Recreating the containers"))
-                steps.append(Step(f"{key}.health", "Waiting for the API to answer"))
-        else:
+        if key == components.CONDOR:
             # No restart step: the run stops with the new code on disk and asks
             # for the relaunch instead (see the module docstring).
             steps.append(Step(f"{key}.fast-forward", "Fast-forwarding Condor"))
@@ -485,20 +470,15 @@ async def start(
 
         # From here to the task existing, nothing else will release the lock:
         # `_execute`'s finally clause is the only place that does, and there is
-        # no `_execute` yet. `check()` shells out to git and docker, so it can
-        # raise for reasons that have nothing to do with this checkout -- and
-        # the lock would then be held by a process that is not updating, and
-        # not released until it exits.
+        # no `_execute` yet, so anything that raises here must release it.
         try:
             selected = [k for k in components.keys() if k in set(component_keys)]
-            statuses = {s.key: s for s in await components.check()}
-
             run = Run(
                 id=f"u-{int(time.time())}",
                 started=time.time(),
                 actor={"user_id": actor_user_id, "chat_id": actor_chat_id},
                 components=selected,
-                steps=_plan(selected, statuses),
+                steps=_plan(selected),
             )
             _current = run
             _task = asyncio.create_task(_execute(run, resolutions or {}))
@@ -547,12 +527,8 @@ async def _execute(run: Run, resolutions: dict[str, str]) -> None:
                 return
 
         for key in run.components:
-            if key == components.HUMMINGBOT_API:
-                if not await _update_hb_api(run):
-                    return
-            else:
-                if not await _update_condor(run):
-                    return
+            if key == components.CONDOR and not await _update_condor(run):
+                return
 
         components.invalidate()
         run.state = SUCCEEDED
@@ -570,76 +546,6 @@ async def _execute(run: Run, resolutions: dict[str, str]) -> None:
         global _lock_handle
         _release_run_lock(_lock_handle)
         _lock_handle = None
-
-
-async def _update_hb_api(run: Run) -> bool:
-    """Move the checkout, put the new image on disk, and wait for it to serve."""
-    component = components.get(components.HUMMINGBOT_API)
-    assert component is not None and component.service is not None
-    prefix = component.key
-
-    step = await _begin(run, f"{prefix}.fast-forward")
-    if step is not None:
-        blocks = await components.repo_blocks(component)
-        if blocks:
-            await _finish(run, step, FAILED, blocks[0].message)
-            await _fail(run, blocks[0].message)
-            return False
-        behind = await updater.check_for_updates(repo_dir=component.repo_dir)
-        if behind.get("up_to_date") and not behind.get("error"):
-            await _finish(run, step, SKIPPED, "Already up to date.")
-        else:
-            ok, output = await updater.fast_forward(component.repo_dir)
-            await _finish(run, step, OK if ok else FAILED, output)
-            if not ok:
-                await _fail(run, "The hummingbot-api checkout could not be moved.")
-                return False
-
-    step = await _begin(run, f"{prefix}.image")
-    if step is not None:
-        ok, output = await updater.compose_pull(component.repo_dir, component.service)
-        await _finish(run, step, OK if ok else FAILED, output)
-        if not ok:
-            await _fail(run, "The API image could not be produced.")
-            return False
-
-    step = await _begin(run, f"{prefix}.up")
-    if step is not None:
-        # Re-asked here, not just at preflight: adopting another checkout's
-        # containers takes its database with them, and the screen the operator
-        # confirmed on may be minutes old.
-        owner = await updater.compose_stack_owner(component.repo_dir, component.service)
-        if owner is not None:
-            message = (
-                f"The {component.service} containers belong to {owner}, not to "
-                f"{component.repo_dir}. Refusing to recreate them from here."
-            )
-            await _finish(run, step, FAILED, message)
-            await _fail(run, message)
-            return False
-        ok, output = await updater.compose_up(component.repo_dir)
-        await _finish(run, step, OK if ok else FAILED, output)
-        if not ok:
-            await _fail(run, "The containers could not be recreated.")
-            return False
-
-    step = await _begin(run, f"{prefix}.health")
-    if step is not None:
-        url = components.hb_api_health_url()
-        if not url:
-            await _finish(run, step, SKIPPED, "No API server is configured to probe.")
-        else:
-            ok, output = await updater.wait_healthy(url)
-            await _finish(run, step, OK if ok else FAILED, output)
-            if not ok:
-                await _fail(
-                    run,
-                    "The API container came up but never answered; it may be "
-                    "crash-looping. Check `docker compose logs hummingbot-api`.",
-                )
-                return False
-
-    return True
 
 
 async def _update_condor(run: Run) -> bool:
@@ -691,7 +597,7 @@ async def _update_condor(run: Run) -> bool:
             )
             return False
 
-    # The Makefile builds the frontend before starting; an in-place update has
+    # `make run` builds the frontend before starting; an in-place update has
     # to do it here or the dashboard keeps serving the previous bundle.
     step = await _begin(run, f"{prefix}.frontend")
     if step is not None:

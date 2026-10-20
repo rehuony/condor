@@ -26,7 +26,8 @@ import {
 import { type PaneSection } from "@/components/agent/workspace/sections";
 import { paneReturnHref, writePane } from "@/components/chat/paneUrl";
 import type { PaneReturnState } from "@/components/chat/StrategySheet";
-import { api } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { agentsApi } from "@/lib/api/agents";
 import { agentQuery, agentsQuery, hasRunningLoop } from "@/lib/queryClient";
 
 /**
@@ -77,7 +78,7 @@ export function AgentWorkspace() {
   const { data: agent, isLoading, error } = useQuery(agentQuery(slug));
 
   const deleteAgentMutation = useMutation({
-    mutationFn: () => api.deleteAgent(slug),
+    mutationFn: () => agentsApi.deleteAgent(slug),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentsQuery().queryKey });
       navigate("/");
@@ -162,7 +163,7 @@ export function AgentWorkspace() {
   if (isLoading || !agent) {
     return (
       <div className="flex h-64 items-center justify-center text-[var(--color-text-muted)]">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+        <Spinner size="xl" />
       </div>
     );
   }

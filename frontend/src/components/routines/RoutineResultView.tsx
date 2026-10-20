@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useAuthedImage } from "@/hooks/useAuthedImage";
-import type { RoutineInstance } from "@/lib/api";
+import type { RoutineInstance } from "@/lib/api/routines";
 
 interface Props {
   instance: RoutineInstance;

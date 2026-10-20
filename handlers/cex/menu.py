@@ -2,34 +2,36 @@
 CEX Trading main menu - redirects to unified trade menu
 """
 
+import asyncio
 import logging
 
-from telegram import Update
-from telegram.ext import ContextTypes
+from condor.telegram.types import Context, Update
 
 logger = logging.getLogger(__name__)
 
-# Key for storing the background loading task
-CEX_LOADING_TASK_KEY = "_cex_menu_loading_task"
+# The background loading task per user. Module state rather than
+# ``user_data``: an ``asyncio.Task`` in ``user_data`` reaches the persistence
+# snapshot, and a Task cannot be pickled.
+_loading_tasks: dict[int, asyncio.Task] = {}
 
 
 def cancel_cex_loading_task(context) -> None:
     """Cancel any pending CEX menu loading task"""
-    task = context.user_data.get(CEX_LOADING_TASK_KEY)
+    owner = context.user_data.get("_user_id") or id(context.user_data)
+    task = _loading_tasks.pop(owner, None)
     if task and not task.done():
         task.cancel()
         logger.debug("Cancelled pending CEX menu loading task")
-    context.user_data.pop(CEX_LOADING_TASK_KEY, None)
 
 
-async def show_cex_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_cex_menu(update: Update, context: Context) -> None:
     """Display main CEX trading menu - redirects to unified trade menu"""
     from .trade import handle_trade
 
     await handle_trade(update, context)
 
 
-async def handle_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_close(update: Update, context: Context) -> None:
     """Handle closing the CEX trading interface"""
     from .trade import handle_close as trade_close
 

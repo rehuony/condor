@@ -30,8 +30,8 @@ class FakeBot:
         self.documents.append(
             {
                 "chat_id": chat_id,
-                "bytes": document.read(),
-                "filename": filename,
+                "bytes": document.data,
+                "filename": document.filename,
                 "caption": caption,
             }
         )

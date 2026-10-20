@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -9,12 +9,8 @@ import {
 } from "@/components/agent/knowledge/KnowledgeChrome";
 import { MemoryEditor } from "@/components/agent/knowledge/MemoryEditor";
 import { SkillEditor } from "@/components/agent/knowledge/SkillEditor";
-import {
-  api,
-  type MemoryCard,
-  type SkillBody,
-  type SkillCard,
-} from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { agentsApi, type MemoryCard, type SkillBody, type SkillCard } from "@/lib/api/agents";
 
 /** What the reader drilled into, if anything — a playbook or a memory. */
 export type Reading =
@@ -56,8 +52,8 @@ export function BodyReader({
     queryKey: ["agent-brain-body", slug, reading.kind, name],
     queryFn: () =>
       reading.kind === "skill"
-        ? api.getAgentSkill(slug, name)
-        : api.getAgentMemory(slug, name),
+        ? agentsApi.getAgentSkill(slug, name)
+        : agentsApi.getAgentMemory(slug, name),
     staleTime: 30_000,
   });
 
@@ -83,7 +79,7 @@ export function BodyReader({
         <div>
           {back}
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+            <Spinner size="sm" /> Loading…
           </div>
         </div>
       );
@@ -148,7 +144,7 @@ export function BodyReader({
       <div className="mt-3">
         {isLoading && (
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+            <Spinner size="sm" /> Loading…
           </div>
         )}
         {error && (

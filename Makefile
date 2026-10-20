@@ -1,193 +1,67 @@
-# Ensure tools are in PATH
-SHELL := /bin/bash
-export PATH := $(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
+.DEFAULT_GOAL := help
+.PHONY: help setup install pick-model setup-chrome refresh-codex doctor check-update update build-frontend run run-fg stop restart status logs test lint
 
-# Recursive $(MAKE) calls (e.g. `install` -> doctor) otherwise print a
-# "Entering/Leaving directory" line around every sub-invocation.
-MAKEFLAGS += --no-print-directory
-
-.PHONY: help setup install run run-fg stop restart logs status check-stopped test lint build-frontend setup-chrome pick-model doctor refresh-codex
-
-# tmux session Condor runs in
-SESSION := condor
-
-# Helper function to find node/npm via nvm or system
-define find_node
-	@(export NVM_DIR="$HOME/.nvm"; \
-	if [ -s "$NVM_DIR/nvm.sh" ]; then \
-		. "$NVM_DIR/nvm.sh" >/dev/null 2>&1; \
-		nvm use default >/dev/null 2>&1 || nvm use node >/dev/null 2>&1 || true; \
-	fi; \
-	$(1))
-endef
+# Command-line Make values are exported, never interpolated into shell code.
+ifneq ($(origin CONDOR_TMUX_SESSION),undefined)
+export CONDOR_TMUX_SESSION
+endif
 
 help:
-	@echo "Condor - Available Commands"
-	@echo ""
-	@echo "  make setup          - Interactive setup wizard"
-	@echo "  make pick-model     - Choose the AI model Condor thinks with"
-	@echo "  make refresh-codex  - Update the Codex ACP bridge and its bundled CLI"
-	@echo "  make install        - Setup + install all dependencies"
-	@echo "  make run            - Start Condor in the '$(SESSION)' tmux session"
-	@echo "  make run-fg         - Run in the foreground (debugging)"
-	@echo "  make logs           - Attach to the session (detach: Ctrl+B then D)"
-	@echo "  make stop           - Stop Condor"
-	@echo "  make restart        - Stop and start again"
-	@echo "  make status         - Is Condor running?"
-	@echo "  make doctor         - Verify dependencies, config, and Hummingbot API access"
-	@echo "  make test           - Run tests"
-	@echo "  make lint           - Run black + isort"
+	@printf '%s\n' \
+	  'Usage: make <command> (default: help)' \
+	  'Configuration' \
+	  '  setup           Interactive setup wizard; preserves existing configuration' \
+	  '  install         Setup, then Python and dashboard dependencies, Chrome and doctor' \
+	  '  pick-model      Choose the AI model Condor thinks with' \
+	  '  setup-chrome    Install the headless Chrome used for chart rendering' \
+	  '  refresh-codex   Update the Codex ACP bridge and its bundled CLI' \
+	  'Source' \
+	  '  check-update    Fetch Git metadata and compare this checkout with origin/main' \
+	  '  update          Fast-forward a clean main; no dependency sync, build or restart' \
+	  'Service' \
+	  '  build-frontend  Build the dashboard and swap it in place' \
+	  '  run             Build the dashboard, then start Condor in tmux session "condor"' \
+	  '  run-fg          Build the dashboard, then run Condor in the foreground' \
+	  '  stop            Stop Condor' \
+	  '  restart         Stop, then run' \
+	  '  status          Report whether Condor is running' \
+	  '  logs            Attach to the session (detach: Ctrl+B then D)' \
+	  'Maintenance' \
+	  '  doctor          Diagnose dependencies, configuration and Hummingbot API access' \
+	  '  test            Run the backend tests' \
+	  '  lint            Format with black and isort'
 
 setup:
-	@chmod +x setup-environment.sh && ./setup-environment.sh
-
+	@bash scripts/shell/setup.sh
+install:
+	@bash scripts/shell/dev.sh install
 pick-model:
-	uv run python -m condor.setup_llm
-
-refresh-codex:
-	@if ! command -v npm >/dev/null 2>&1; then \
-		export NVM_DIR="$$HOME/.nvm"; \
-		if [ -s "$$NVM_DIR/nvm.sh" ]; then \
-			. "$$NVM_DIR/nvm.sh"; \
-		fi; \
-	fi; \
-	command -v npm >/dev/null 2>&1 || { \
-		echo "npm not found. Install Node.js or configure nvm."; \
-		exit 1; \
-	}; \
-	npm install -g @agentclientprotocol/codex-acp@latest && \
-	npm list -g @agentclientprotocol/codex-acp @openai/codex --depth=1 && \
-	echo "Start a new Codex session in Condor to use the updated bridge."
-
-install: setup
-	uv sync --locked --dev
-	@bash -c ' \
-		export NVM_DIR="$$HOME/.nvm"; \
-		[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
-		cd frontend && npm ci \
-	'
-	@$(MAKE) setup-chrome
-	@-$(MAKE) doctor
-
-# Bounded, and says which way it failed. The bare `python -c` this replaces had
-# no timeout and sent stderr to /dev/null, so a stalled download sat on
-# "Setting up Chrome..." for ever with nothing to read and no way to finish the
-# install. See condor/setup_chrome.py; it always exits 0, because charts are
-# optional and an optional renderer must not fail an install.
+	@bash scripts/shell/dev.sh pick-model
 setup-chrome:
-	@echo "Setting up Chrome for chart rendering..."
-	@uv run python -m condor.setup_chrome || true
-
+	@bash scripts/shell/dev.sh setup-chrome
+refresh-codex:
+	@bash scripts/shell/dev.sh refresh-codex
 doctor:
-	@bash -c ' \
-		export NVM_DIR="$$HOME/.nvm"; \
-		[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
-		uv run python -m condor.doctor \
-	'
-
-# Builds into dist.new and swaps, exactly as the in-process updater does
-# (utils/updater.build_frontend). vite's `emptyOutDir` would otherwise empty the
-# directory in place: `run` and `restart` stop Condor first, but this target is
-# public and a Condor started any other way -- `run-fg`, a supervisor, a second
-# checkout -- is left serving an empty dist for the length of the build, and a
-# build that then fails leaves it with no dashboard at all.
-#
-# Reinstall when the lockfile moved, not merely when node_modules is absent:
-# after the first boot the directory always exists, so a pull that adds a
-# dependency would otherwise build against a stale tree and fail. npm rewrites
-# node_modules/.package-lock.json on every install, which makes it the honest
-# record of what is actually installed.
+	@bash scripts/shell/dev.sh doctor
+check-update:
+	@bash scripts/shell/source-update.sh check
+update:
+	@bash scripts/shell/source-update.sh update
 build-frontend:
-	@bash -c ' \
-		export NVM_DIR="$$HOME/.nvm"; \
-		[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
-		cd frontend || exit 1; \
-		if [ ! -f node_modules/.package-lock.json ] || \
-		   [ package-lock.json -nt node_modules/.package-lock.json ]; then \
-			npm ci || exit 1; \
-		fi; \
-		rm -rf dist.new && \
-		npm run build -- --outDir dist.new --emptyOutDir && \
-		rm -rf dist.old && \
-		{ [ -d dist ] && mv dist dist.old || true; } && \
-		mv dist.new dist \
-	'
-
-# Fails early (before the frontend build) if Condor is already up
-check-stopped:
-	@if tmux has-session -t $(SESSION) 2>/dev/null; then \
-		echo "Condor is already running in tmux session '$(SESSION)'."; \
-		echo "  make logs     - attach to it"; \
-		echo "  make restart  - stop and start again"; \
-		exit 1; \
-	fi
-
-# `remain-on-exit` keeps the pane alive after the process dies, so a startup
-# failure can be read back with capture-pane instead of scrolling away with the
-# session. Config errors (a bad ADMIN_USER_ID, a mode with no token, a local user
-# config.yml has never heard of) exit in the first second and used to leave
-# nothing behind but "run make run-fg to see the error".
-#
-# It is turned back off the moment the boot is confirmed: a crash three hours
-# later must still take the session with it, or `make status` and `check-stopped`
-# would report a dead Condor as running.
-run: check-stopped build-frontend
-	@tmux new-session -d -s $(SESSION) -c "$(CURDIR)" 'uv run python main.py'
-	@tmux set-option -t $(SESSION) remain-on-exit on >/dev/null 2>&1 \
-		|| tmux set-window-option -t $(SESSION) remain-on-exit on >/dev/null 2>&1 || true
-	@sleep 3
-	@if ! tmux has-session -t $(SESSION) 2>/dev/null; then \
-		echo "Condor exited on startup. Run 'make run-fg' to see the error."; \
-		exit 1; \
-	fi
-	@if [ "$$(tmux list-panes -t $(SESSION) -F '#{pane_dead}' 2>/dev/null | head -1)" = "1" ]; then \
-		echo "Condor exited on startup:"; \
-		echo ""; \
-		tmux capture-pane -p -t $(SESSION) 2>/dev/null | grep -v '^[[:space:]]*$$' | tail -20 | sed 's/^/    /'; \
-		echo ""; \
-		echo "  make run-fg - run in the foreground for the full output"; \
-		tmux kill-session -t $(SESSION) >/dev/null 2>&1 || true; \
-		exit 1; \
-	fi
-	@tmux set-option -t $(SESSION) remain-on-exit off >/dev/null 2>&1 \
-		|| tmux set-window-option -t $(SESSION) remain-on-exit off >/dev/null 2>&1 || true
-	@echo "Condor started in tmux session '$(SESSION)'."
-	@echo "  make logs - attach (detach: Ctrl+B then D)"
-	@echo "  make stop - stop Condor"
-
-run-fg: build-frontend
-	uv run python main.py
-
-logs:
-	@tmux attach -t $(SESSION) 2>/dev/null || echo "No '$(SESSION)' session running. Start it with 'make run'."
-
-status:
-	@if tmux has-session -t $(SESSION) 2>/dev/null; then \
-		echo "Condor is running (tmux session '$(SESSION)')."; \
-	else \
-		echo "Condor is not running."; \
-	fi
-
+	@bash scripts/shell/build-frontend.sh
+run:
+	@bash scripts/shell/service.sh run
+run-fg:
+	@bash scripts/shell/service.sh run-fg
 stop:
-	@if tmux has-session -t $(SESSION) 2>/dev/null; then \
-		tmux send-keys -t $(SESSION) C-c; \
-		for i in $$(seq 1 20); do \
-			tmux has-session -t $(SESSION) 2>/dev/null || break; \
-			sleep 0.5; \
-		done; \
-		tmux kill-session -t $(SESSION) 2>/dev/null || true; \
-		echo "Condor stopped."; \
-	else \
-		echo "Condor is not running."; \
-	fi
-
+	@bash scripts/shell/service.sh stop
 restart:
-	@$(MAKE) stop
-	@$(MAKE) run
-
+	@bash scripts/shell/service.sh restart
+status:
+	@bash scripts/shell/service.sh status
+logs:
+	@bash scripts/shell/service.sh logs
 test:
-	uv run pytest
-
+	@uv run pytest
 lint:
-	uv run black .
-	uv run isort .
+	@uv run black . && uv run isort .

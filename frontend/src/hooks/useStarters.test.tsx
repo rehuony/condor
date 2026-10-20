@@ -21,8 +21,8 @@ import type { Starter } from "@/components/chat/Starters";
 
 const getAgentStarters = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgentStarters: (...args: unknown[]) => getAgentStarters(...args),
   },
   CHAT_SLUG: "condor",

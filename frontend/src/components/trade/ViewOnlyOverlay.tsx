@@ -35,7 +35,7 @@ export function ViewOnlyOverlay({ connector }: { connector: string }) {
 
         <Link
           to="/settings?tab=keys"
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-[var(--color-primary-hover)] active:scale-[0.98]"
+          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-[var(--on-primary)] transition-all hover:bg-[var(--color-primary-hover)] active:scale-[0.98]"
         >
           Add API keys
         </Link>

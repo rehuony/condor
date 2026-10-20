@@ -2,10 +2,8 @@
 
 from itertools import chain
 
-from telegram import Update
-from telegram.ext import ContextTypes, MessageHandler, filters
-
-from condor.telegram_input import input_has_attachments
+from condor.telegram.input import InputError, input_has_attachments, message_text
+from condor.telegram.types import Context, Update
 from utils.auth import restricted
 
 _CEX_INPUT_STATES = {
@@ -27,19 +25,12 @@ _GATEWAY_INPUT_KEYS = (
 )
 
 
-def get_message_handler() -> MessageHandler:
-    """Accept new chat messages, never edits or channel/service updates."""
-    return MessageHandler(
-        filters.UpdateType.MESSAGE
-        & (filters.ChatType.PRIVATE | filters.ChatType.GROUPS)
-        & ~filters.COMMAND
-        & ~filters.StatusUpdate.ALL,
-        message_handler,
-    )
+async def message_handler(update: Update, context: Context) -> None:
+    """Ignore ordinary group chat while retaining active forms.
 
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ignore ordinary group chat while retaining active forms."""
+    Receives new private and group messages that are neither commands nor
+    service updates; :mod:`condor.telegram.app` filters those out.
+    """
     if update.message is None:
         return
     if update.effective_chat.type != "private":
@@ -50,7 +41,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 @restricted
-async def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _route_message(update: Update, context: Context) -> None:
     """Authorize before attachment reads and preserve explicit form priority."""
     message = update.message
     if context.user_data.get("bots_state") == "awaiting_config_upload":
@@ -59,7 +50,7 @@ async def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if message.document:
             await handle_config_file_upload(update, context)
         else:
-            await message.reply_text(
+            await message.answer(
                 "Send the requested configuration file, or use /cancel."
             )
         return
@@ -67,13 +58,23 @@ async def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     forms = _text_form_handlers(context.user_data)
     first = next(forms, None)
     if first is not None:
-        if not message.text or input_has_attachments(message):
-            await message.reply_text(
+        try:
+            text = "" if input_has_attachments(message) else message_text(message)
+        except InputError as exc:
+            await message.answer(exc.user_message)
+            return
+        if not text:
+            await message.answer(
                 "Please send text for the current input, or use /cancel before sending attachments."
             )
             return
+        form_update = update
+        if text != message.text:
+            # Existing form processors read Message.text. Normalize a copy so
+            # the original update remains intact for conversational fallthrough.
+            form_update = update.with_text(text)
         for handler in chain((first,), forms):
-            if await handler(update, context) is not False:
+            if await handler(form_update, context) is not False:
                 return
 
     if update.effective_chat.type == "private":

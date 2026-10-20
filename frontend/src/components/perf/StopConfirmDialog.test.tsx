@@ -18,7 +18,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StopConfirmDialog } from "./ExecutorRows";
-import { type ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 
 declare global {
   // eslint-disable-next-line no-var

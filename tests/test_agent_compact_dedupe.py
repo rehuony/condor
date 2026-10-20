@@ -13,6 +13,7 @@ import asyncio
 import pytest
 
 from handlers import agents as agents_mod
+from tests.conftest import patch_agents
 
 
 class _FakeSession:
@@ -51,7 +52,7 @@ class _UserMessage:
     def __init__(self, rendered: list[str]):
         self._rendered = rendered
 
-    async def reply_text(self, text, **kw):
+    async def answer(self, text, **kw):
         self._rendered.append(text)
         return _Placeholder(self._rendered)
 
@@ -105,12 +106,10 @@ def _patch_runtime(monkeypatch, *, session, summary="a b c", prompt_error=None):
         # Only the summarize prompt answers; the reinjection returns nothing.
         return summary if first_prompt else ""
 
-    monkeypatch.setattr(agents_mod, "get_session", fake_get_session)
-    monkeypatch.setattr(agents_mod, "destroy_session", fake_destroy)
-    monkeypatch.setattr(agents_mod, "_create_tg_session", fake_create)
-    monkeypatch.setattr(
-        agents_mod, "_tg_permission_callback", lambda bot, c, u: object()
-    )
+    patch_agents(monkeypatch, "get_session", fake_get_session)
+    patch_agents(monkeypatch, "destroy_session", fake_destroy)
+    patch_agents(monkeypatch, "_create_tg_session", fake_create)
+    patch_agents(monkeypatch, "_tg_permission_callback", lambda bot, c, u: object())
     monkeypatch.setattr(agents_mod.runtime, "prompt_once", fake_prompt_once)
     return calls
 

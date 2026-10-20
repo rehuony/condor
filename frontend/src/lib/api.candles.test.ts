@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { marketApi } from "@/lib/api/market";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -13,7 +13,7 @@ describe("candle history HTTP requests", () => {
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
-    await api.getCandles("local", "solana/raydium", "SOL-USDC", "5m", 1000, 0, 0, "pool", controller.signal);
+    await marketApi.getCandles("local", "solana/raydium", "SOL-USDC", "5m", 1000, 0, 0, "pool", controller.signal);
     const [url, options] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const params = new URL(url, "http://localhost").searchParams;
     expect(params.get("start_time")).toBe("0");
@@ -29,7 +29,7 @@ describe("candle history HTTP requests", () => {
       requestSignal = options.signal!;
       requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true });
     })));
-    const request = api.getCandles("local", "binance", "SOL-USDT");
+    const request = marketApi.getCandles("local", "binance", "SOL-USDT");
     const rejection = expect(request).rejects.toMatchObject({
       name: "TimeoutError", message: "Candle history request timed out. Please retry.",
     });
@@ -49,7 +49,7 @@ describe("candle history HTTP requests", () => {
         options.signal!.addEventListener("abort", () => reject(options.signal!.reason), { once: true });
       }),
     })));
-    const rejection = expect(api.getCandles("local", "binance", "SOL-USDT")).rejects.toMatchObject({
+    const rejection = expect(marketApi.getCandles("local", "binance", "SOL-USDT")).rejects.toMatchObject({
       name: "TimeoutError",
     });
     await vi.advanceTimersByTimeAsync(40_000);
@@ -65,7 +65,7 @@ describe("candle history HTTP requests", () => {
       requestSignal = options.signal!;
       requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true });
     })));
-    const request = api.getCandles("local", "binance", "SOL-USDT", "5m", 1000, 0, 0, undefined, controller.signal);
+    const request = marketApi.getCandles("local", "binance", "SOL-USDT", "5m", 1000, 0, 0, undefined, controller.signal);
     controller.abort();
     await expect(request).rejects.toBe(controller.signal.reason);
     expect(requestSignal.aborted).toBe(true);
@@ -78,7 +78,7 @@ describe("candle history HTTP requests", () => {
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
     controller.abort();
-    await expect(api.getCandles("local", "binance", "SOL-USDT", "5m", 1000, 0, 0, undefined, controller.signal))
+    await expect(marketApi.getCandles("local", "binance", "SOL-USDT", "5m", 1000, 0, 0, undefined, controller.signal))
       .rejects.toBe(controller.signal.reason);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
@@ -89,7 +89,7 @@ describe("candle history HTTP requests", () => {
     const fetchMock = vi.fn(async () => new Response(status === 200 ? "[]" : "{}", { status }));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
-    const request = api.getCandles("local", "binance", "SOL-USDT", "5m", 1000, 0, 0, undefined, controller.signal);
+    const request = marketApi.getCandles("local", "binance", "SOL-USDT", "5m", 1000, 0, 0, undefined, controller.signal);
     if (status === 200) await expect(request).resolves.toEqual([]);
     else await expect(request).rejects.toMatchObject({ status });
     expect(vi.getTimerCount()).toBe(0);
@@ -112,7 +112,7 @@ describe("candle history HTTP requests", () => {
       status: 429,
       headers: header === null ? {} : { "Retry-After": header },
     })));
-    await expect(api.getCandles("local", "binance", "SOL-USDT")).rejects.toMatchObject({
+    await expect(marketApi.getCandles("local", "binance", "SOL-USDT")).rejects.toMatchObject({
       message: "Rate limited", status: 429, retryAfter: expected,
     });
   });

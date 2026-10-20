@@ -25,7 +25,7 @@ import {
 import { useMemo } from "react";
 
 import type { Starter } from "@/components/chat/Starters";
-import { api, CHAT_SLUG, type StarterRow } from "@/lib/api";
+import { agentsApi, CHAT_SLUG, type StarterRow } from "@/lib/api/agents";
 
 /**
  * The glyphs a learned opener may ask for, by keyword.
@@ -96,7 +96,7 @@ export function useStarters(
   const slug = agentSlug || CHAT_SLUG;
   const { data } = useQuery({
     queryKey: ["agent-starters", slug],
-    queryFn: () => api.getAgentStarters(slug),
+    queryFn: () => agentsApi.getAgentStarters(slug),
     enabled,
     // Reflection runs on a fifteen-minute tick, so there is nothing to gain
     // from re-asking on every focus of an empty chat.

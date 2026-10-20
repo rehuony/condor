@@ -3,7 +3,7 @@ import { act, StrictMode, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CandleData } from "@/lib/api";
+import type { CandleData } from "@/lib/api/market";
 import { candleChannelKey, candleStore } from "@/lib/candle-store";
 import { intervalSeconds } from "@/lib/candle-history";
 import { useCandleHistory, type CandleHistoryOptions } from "@/hooks/useCandleHistory";
@@ -11,8 +11,12 @@ import { useCandleStore } from "@/hooks/useCandleStore";
 
 const getCandles = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api", () => ({
-  api: { getCandles },
   errorStatus: (error: { status?: number }) => error?.status,
+}));
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getCandles,
+  },
 }));
 
 const NOW = Date.parse("2026-10-16T16:20:00Z");

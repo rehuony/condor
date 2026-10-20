@@ -12,7 +12,8 @@ import { describe, expect, it } from "vitest";
 
 import { BEFORE_LEDGER, OUTSIDE } from "@/components/perf/agentFilter";
 import type { DeedIndex } from "@/lib/agent-attribution";
-import type { BotRunInfo, ControllerInfo, ExecutorInfo } from "./api";
+import type { BotRunInfo, ControllerInfo } from "./api/bots";
+import type { ExecutorInfo } from "./api/executors";
 import {
   AUTO_OPEN_KINDS,
   UNATTACHED_BOT,

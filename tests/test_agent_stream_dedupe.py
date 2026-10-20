@@ -1,95 +1,65 @@
-"""Edit-mode dedupe retained; final answers now use a separate acknowledged send."""
+"""Draft updates share one draft_id; parse failures still deliver a final."""
 
 import pytest
-from telegram.error import BadRequest
 
 from condor.runtime.events import RuntimeEvent
-from handlers.agents.stream import TelegramStreamer
+from condor.telegram.errors import bad_request
+from condor.telegram.output.renderer import RICH_MAX_LEN, TelegramStreamer
 from tests.test_telegram_layered_replies import Bot, feed
 
 
 @pytest.mark.asyncio
-async def test_long_answer_only_edits_the_chunk_that_grew():
+async def test_progress_reuses_one_draft_id():
     bot = Bot()
-    target = TelegramStreamer(bot, 42, 10, mode="edit")
-    await feed(target, "\n\n".join(f"paragraph {i} " + "x" * 200 for i in range(45)))
+    target = TelegramStreamer(bot, 42, request_id="r")
+    await feed(target, "hello")
     await target._flush()
-    opening = len(bot.edits)
-    assert len(target._continuation_ids) == 2
-    for _ in range(4):
-        await feed(target, "\n\nand a little more")
-        await target._flush()
-    assert [c["message_id"] for c in bot.edits[opening:]] == [
-        target._continuation_ids[-1]
-    ] * 4
+    await feed(target, " world")
+    await target._flush()
+    assert {c["draft_id"] for c in bot.drafts} == {target.draft_id}
+    assert bot.drafts[-1]["text"] == "hello world"
     await target.stop_edit_loop()
 
 
 @pytest.mark.asyncio
-async def test_unchanged_text_dedupes_but_markup_changes_do_not():
+async def test_native_stop_flags_disable_further_drafts():
     bot = Bot()
-    target = TelegramStreamer(bot, 42, 10, mode="edit", request_id="r")
-    await feed(target, "same")
+    target = TelegramStreamer(bot, 42, request_id="r")
+    await feed(target, "partial")
     await target._flush()
+    target.target.stopped = True
+    await feed(target, " more")
     await target._flush()
-    assert len(bot.edits) == 1
-    result = await target._io(
-        "edit", text="same", mode="HTML", message_id=10, markup=None
-    )
-    assert result.status == "confirmed"
-    assert len(bot.edits) == 2 and bot.edits[-1]["reply_markup"] is None
+    assert len(bot.drafts) == 1
     await target.stop_edit_loop()
 
 
 @pytest.mark.asyncio
-async def test_not_modified_is_cached_with_exact_requested_markup():
+async def test_parse_failure_falls_back_to_plain_final():
     bot = Bot()
-    bot.edit_failure = BadRequest("Message is not modified")
-    target = TelegramStreamer(bot, 42, 10, mode="edit")
-    await feed(target, "same")
-    await target._flush()
-    await target._flush()
-    assert len(bot.edits) == 1
-    await target.stop_edit_loop()
+    original = bot.send_rich_message
 
+    async def send_rich(**kw):
+        raise bad_request("can't parse entities")
 
-@pytest.mark.asyncio
-async def test_parse_failure_keeps_readable_preview_and_final_source_links(monkeypatch):
-    monkeypatch.setattr("utils.config.WEB_URL", "https://dashboard.example.com")
-    bot = Bot()
-    original = bot.edit_message_text
-
-    async def edit(**kw):
-        if kw.get("parse_mode"):
-            raise BadRequest("can't parse entities")
-        return await original(**kw)
-
-    bot.edit_message_text = edit
-    target = TelegramStreamer(bot, 42, 10, mode="edit")
-    await feed(target, "[查看报告](/research/topic/report.md)")
-    await target._flush()
-    assert (
-        bot.edits[-1]["text"]
-        == "查看报告 (https://dashboard.example.com/research/topic/report.md)"
-    )
+    bot.send_rich_message = send_rich
+    target = TelegramStreamer(bot, 42)
+    await feed(target, "plain enough")
     await target.process_event(RuntimeEvent.done())
-    await target.finalize()
-    assert (
-        'href="https://dashboard.example.com/research/topic/report.md"'
-        in bot.messages[-1]["text"]
-    )
+    result = await target.finalize()
+    assert result.status == "complete"
+    assert bot.messages[-1]["text"] == "plain enough"
+    assert "rich_message" not in bot.messages[-1]
 
 
 @pytest.mark.asyncio
-async def test_shorter_final_removes_all_owned_preview_continuations():
+async def test_overlong_final_is_split():
     bot = Bot()
-    target = TelegramStreamer(bot, 42, 10, mode="edit")
-    await feed(target, "x" * 9000)
-    await target._flush()
-    owned = {10, *target._continuation_ids}
-    # Exercise cleanup independently of how a provider supplies its body.
-    target._buffer = "short final"
+    target = TelegramStreamer(bot, 42)
+    await feed(target, "x" * (RICH_MAX_LEN + 50))
     await target.process_event(RuntimeEvent.done())
-    await target.finalize()
-    assert {c["message_id"] for c in bot.deleted} == owned
-    assert target.delivery.confirmed == 1
+    result = await target.finalize()
+    assert result.status == "complete"
+    assert result.confirmed == 2
+    assert bot.messages[0].get("disable_notification") is False
+    assert bot.messages[1].get("disable_notification") is True

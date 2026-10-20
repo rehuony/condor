@@ -31,10 +31,7 @@ import {
   parseExecutorsKey,
   queryClient,
 } from "./queryClient";
-import type {
-  ControllerPerformanceHistoryResponse,
-  ControllerPerformanceSnapshot,
-} from "./api";
+import type { ControllerPerformanceHistoryResponse, ControllerPerformanceSnapshot } from "./api/performance";
 import { CondorWebSocket } from "./websocket";
 
 /**

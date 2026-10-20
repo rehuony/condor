@@ -31,7 +31,7 @@ DEFAULT_TIMEOUT = 600.0
 
 # How many backtests a fan-out puts on the wire at once. hummingbot-api runs each
 # backtest in its own worker process behind a semaphore of BACKTESTING_MAX_CONCURRENT
-# (1 upstream; setup-environment.sh writes 4 into the .env it generates), so a caller
+# (1 upstream; `make setup` passes 4 to the API's own setup), so a caller
 # that submits more than this is not going faster -- it is only queueing on the
 # server, where a run's deadline is already ticking.
 DEFAULT_MAX_CONCURRENT = 4

@@ -22,11 +22,11 @@ import math
 import re
 
 from pydantic import BaseModel, Field, field_validator
-from telegram.ext import ContextTypes
 
 from condor.pool_data import lp_provider_for_dex
 from config_manager import get_client
 from handlers.dex.geckoterminal import _extract_pool_data
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +94,8 @@ def _num(v, default=0.0) -> float:
         return default
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    client = await get_client(context._chat_id, context=context)
+async def run(config: Config, context: RoutineContext) -> str:
+    client = await get_client(context.chat_id, user_data=context.user_data)
     if not client:
         return "No server available — cannot fetch CLMM pool-info."
 

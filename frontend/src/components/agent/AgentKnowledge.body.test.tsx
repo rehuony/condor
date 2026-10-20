@@ -18,7 +18,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentBrain, SkillBody } from "@/lib/api";
+import type { AgentBrain, SkillBody } from "@/lib/api/agents";
 
 const getAgentBrain = vi.fn();
 const getAgent = vi.fn();
@@ -26,15 +26,19 @@ const getDelegationHistory = vi.fn();
 const getAgentSkill = vi.fn();
 const updateAgentSkill = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgentBrain: (...a: unknown[]) => getAgentBrain(...a),
     getAgent: (...a: unknown[]) => getAgent(...a),
-    getDelegationHistory: (...a: unknown[]) => getDelegationHistory(...a),
     getAgentSkill: (...a: unknown[]) => getAgentSkill(...a),
     updateAgentSkill: (...a: unknown[]) => updateAgentSkill(...a),
   },
   CHAT_SLUG: "condor",
+}));
+vi.mock("@/lib/api/delegations", () => ({
+  delegationsApi: {
+    getDelegationHistory: (...a: unknown[]) => getDelegationHistory(...a),
+  },
 }));
 
 const { AgentKnowledge } = await import("./AgentKnowledge");

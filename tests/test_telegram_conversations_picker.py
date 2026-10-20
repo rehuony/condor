@@ -29,6 +29,7 @@ from condor.web.auth import get_current_user
 from condor.web.models import WebUser
 from handlers import agents as agents_mod
 from handlers.agents import menu as menu_mod
+from tests.conftest import patch_agents
 
 CHAT_ID = 4242
 USER_ID = 99
@@ -152,10 +153,8 @@ def _install(monkeypatch, agents=(), *, live=None):
     monkeypatch.setattr(agents_mod.runtime, "create_session", fake_create_session)
     monkeypatch.setattr(agents_mod.runtime, "get_info", fake_get_info)
     monkeypatch.setattr(agents_mod.runtime, "destroy", fake_destroy)
-    monkeypatch.setattr(agents_mod, "_is_agent_available", lambda key: True)
-    monkeypatch.setattr(
-        agents_mod, "_tg_permission_callback", lambda bot, c, u: object()
-    )
+    patch_agents(monkeypatch, "_is_agent_available", lambda key: True)
+    patch_agents(monkeypatch, "_tg_permission_callback", lambda bot, c, u: object())
     return world
 
 

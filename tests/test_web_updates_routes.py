@@ -109,20 +109,17 @@ def test_every_route_refuses_an_anonymous_caller(app, method, path, body):
 def test_status_serializes_the_engines_dataclasses(as_user, admin, monkeypatch):
     """`GET /updates` is `check()` plus `to_wire()`, and nothing else."""
     status = components_mod.ComponentStatus(
-        key="hummingbot-api",
-        name="Hummingbot API",
+        key="condor",
+        name="Condor",
         facets={
-            "image": components_mod.Facet(
-                kind="image",
-                current="sha256:4ae0104d",
-                available="sha256:62d70399",
+            "repo": components_mod.Facet(
+                kind="repo",
+                current="main @ 73e5400",
+                available="main @ 9f1c2d3",
+                behind=57,
                 up_to_date=False,
             ),
-            "repo": components_mod.Facet(
-                kind="repo", current="main @ 73e5400", behind=57, up_to_date=False
-            ),
         },
-        mode="image",
         up_to_date=False,
     )
 
@@ -134,12 +131,8 @@ def test_status_serializes_the_engines_dataclasses(as_user, admin, monkeypatch):
     body = as_user(admin).get("/api/v1/updates").json()
 
     assert body == {"components": [status.to_wire()]}
-    # Both facets survive the wire, including the mode that decides which one
-    # the panel treats as authoritative.
     component = body["components"][0]
-    assert set(component["facets"]) == {"image", "repo"}
-    assert component["mode"] == "image"
-    assert component["facets"]["image"]["available"] == "sha256:62d70399"
+    assert set(component) == {"key", "name", "facets", "up_to_date"}
     assert component["facets"]["repo"]["behind"] == 57
 
 

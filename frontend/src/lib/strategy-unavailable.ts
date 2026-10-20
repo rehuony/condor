@@ -1,4 +1,4 @@
-import type { StrategyUnavailable } from "@/lib/api";
+import type { StrategyUnavailable } from "@/lib/api/agents";
 
 /**
  * The one line that says why a loop's figures are missing (CORR-430), or

@@ -1,6 +1,4 @@
-// ── Where a scope's PnL series comes from (FEAT-087) ──
-
-import type { ControllerPerformanceSnapshot, PerformanceSnapshot } from "@/lib/api";
+import type { ControllerPerformanceSnapshot, PerformanceSnapshot } from "@/lib/api/performance";
 import type { ConvertFn } from "@/lib/rates";
 import {
   aggregatePnlSeries,

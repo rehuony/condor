@@ -1,6 +1,7 @@
 import { quoteOf } from "@/components/agent/session/positionFormat";
 import { PairLabel } from "@/components/executor/PairLabel";
-import type { PositionHeld } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
+import type { PositionHeld } from "@/lib/api/executors";
 import { pnlTextClass } from "@/lib/formatters";
 
 /** A money formatter bound to the display currency: `(value, quoteCurrency)`. */
@@ -27,7 +28,7 @@ export function SessionPositions({
   if (positions.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <Card>
       <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
         Positions Held ({positions.length})
       </h3>
@@ -75,6 +76,6 @@ export function SessionPositions({
           </tbody>
         </table>
       </div>
-    </div>
+    </Card>
   );
 }

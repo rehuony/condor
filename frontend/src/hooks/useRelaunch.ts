@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
-import { api } from "@/lib/api";
+import { serversApi } from "@/lib/api/servers";
 
 export const RELAUNCH_KEY = ["relaunch"] as const;
 
@@ -23,7 +23,7 @@ const POLL_MS = 30_000;
 export function useRelaunch() {
   return useQuery({
     queryKey: RELAUNCH_KEY,
-    queryFn: api.getRelaunch,
+    queryFn: serversApi.getRelaunch,
     refetchInterval: POLL_MS,
     // Through the relaunch the server is down; giving up would strand the
     // banner on screen with no way back.

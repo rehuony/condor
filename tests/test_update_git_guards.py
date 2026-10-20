@@ -60,9 +60,7 @@ async def test_a_detached_checkout_is_detected(repo):
 async def test_a_detached_checkout_blocks_the_update(repo, monkeypatch):
     """And it blocks before anything reads a branch name or fetches."""
     _git("checkout", "-q", "--detach", "HEAD~2", cwd=repo)
-    component = components.Component(
-        key="condor", name="Condor", repo_dir=str(repo), service=None
-    )
+    component = components.Component(key="condor", name="Condor", repo_dir=str(repo))
 
     async def _never(*a, **k):  # pragma: no cover - asserts it is not reached
         raise AssertionError("fetched despite a detached HEAD")
@@ -184,10 +182,8 @@ def test_a_genuine_transport_failure_is_not_mistaken_for_a_missing_branch():
 async def test_a_default_branch_with_a_slash_keeps_its_prefix(cloned, tmp_path):
     """`rsplit("/", 1)` on the ref silently renames `fix/x` to `x`.
 
-    Branch names contain slashes routinely. Taking the last segment made
-    `image_tracks_this_checkout` compare `fix/x != x` and skip the image with
-    a wrong reason, and put a branch that does not exist into the advice
-    `no-upstream-branch` prints.
+    Branch names contain slashes routinely. Taking the last segment put a branch
+    that does not exist into the advice `no-upstream-branch` prints.
     """
     _git("checkout", "-q", "-b", "fix/slashed", cwd=cloned)
     _git("push", "-q", "origin", "fix/slashed", cwd=cloned)

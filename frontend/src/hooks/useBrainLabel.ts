@@ -1,11 +1,6 @@
 import { useMemo } from "react";
 
-import {
-  parseCustomAgentKey,
-  type AgentBindingOption,
-  type ChatAgentOption,
-  type OpenRouterModelOption,
-} from "@/lib/api";
+import { parseCustomAgentKey, type AgentBindingOption, type ChatAgentOption, type OpenRouterModelOption } from "@/lib/api/chat";
 
 /** Stable empty, so the memo below is not rebuilt by a caller's default literal. */
 const NO_BINDINGS: AgentBindingOption[] = [];

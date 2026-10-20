@@ -15,7 +15,10 @@ import { actionsByTick, isLiveRun } from "@/components/agent/lab/runs";
 import { SessionCanvasPanel } from "@/components/agent/session/SessionCanvasPanel";
 import { SessionExecutors } from "@/components/agent/session/SessionExecutors";
 import { OutsideWindow } from "@/components/agent/workspace/OutsideWindow";
-import { api, type AgentRunRow } from "@/lib/api";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { agentsApi, type AgentRunRow } from "@/lib/api/agents";
+import { conversationsApi } from "@/lib/api/conversations";
 import { parseJournal } from "@/lib/parse-agent";
 
 /**
@@ -137,7 +140,7 @@ function delegationTask(run: AgentRunRow, agent: string): DelegationListing {
 function ConversationRun({ run }: { run: AgentRunRow }) {
   const { data, isLoading } = useQuery({
     queryKey: ["conversation-deployments", run.id],
-    queryFn: () => api.getConversationDeployments(run.id),
+    queryFn: () => conversationsApi.getConversationDeployments(run.id),
     enabled: !!run.id,
   });
 
@@ -157,7 +160,7 @@ function ConversationRun({ run }: { run: AgentRunRow }) {
 
       {isLoading ? (
         <div className="flex h-24 items-center justify-center">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+          <Spinner size="lg" />
         </div>
       ) : data?.predates_ledger ? (
         <p className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-xs text-[var(--color-text-muted)]">
@@ -206,12 +209,12 @@ function SessionTicks({
   const sessionNum = run.number;
   const { data: journalData, isLoading } = useQuery({
     queryKey: ["strategy", slug, sslug, "session", sessionNum, "journal"],
-    queryFn: () => api.getSessionJournal(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionJournal(slug, sslug, sessionNum),
     enabled: sessionNum > 0,
   });
   const { data: actionsData } = useQuery({
     queryKey: ["session-actions", slug, sslug, sessionNum],
-    queryFn: () => api.getSessionActions(slug, sslug, sessionNum),
+    queryFn: () => agentsApi.getSessionActions(slug, sslug, sessionNum),
     enabled: sessionNum > 0,
   });
 
@@ -260,7 +263,7 @@ function SessionTicks({
 
       {isLoading ? (
         <div className="flex h-24 items-center justify-center">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+          <Spinner size="lg" />
         </div>
       ) : ticks.length === 0 ? (
         <p className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-xs text-[var(--color-text-muted)]">
@@ -361,9 +364,9 @@ function RunBody({
   }
   if (!run) {
     return (
-      <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+      <EmptyState>
         This agent has no runs yet.
-      </p>
+      </EmptyState>
     );
   }
   if (run.kind === "delegation") {

@@ -15,6 +15,7 @@ import pytest
 from pydantic import BaseModel
 
 import handlers.routines as hr
+from tests.conftest import patch_routines
 
 GROUP_ID = -1001234
 OWNER_ID = 7
@@ -58,15 +59,17 @@ def _routine():
 @pytest.fixture
 def store(monkeypatch):
     s = FakeStore()
-    monkeypatch.setattr(hr, "get_routine_store", lambda: s)
+    patch_routines(monkeypatch, "get_routine_store", lambda: s)
     return s
 
 
 @pytest.fixture
 def synced(monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        hr, "_sync_instance_to_store", lambda iid, meta: calls.append((iid, meta))
+    patch_routines(
+        monkeypatch,
+        "_sync_instance_to_store",
+        lambda iid, meta: calls.append((iid, meta)),
     )
     return calls
 
@@ -80,8 +83,8 @@ def executed(monkeypatch):
         calls.append({"chat_id": chat_id, **kw})
         return "ok", 1.5, None, False
 
-    monkeypatch.setattr(hr, "_execute_routine", _execute)
-    monkeypatch.setattr(hr, "get_routine", lambda name: _routine())
+    patch_routines(monkeypatch, "_execute_routine", _execute)
+    patch_routines(monkeypatch, "get_routine", lambda name: _routine())
     return calls
 
 
@@ -97,7 +100,7 @@ def _instances():
 
 
 def _ctx(instances, *, user_id=OWNER_ID, chat_id=GROUP_ID, extra=None):
-    """A job context shaped like a group run: instance in the owner's bucket."""
+    """A job shaped like a group run: instance in the owner's bucket."""
     data = {
         "instance_id": "i1",
         "routine_name": "probe",
@@ -108,13 +111,14 @@ def _ctx(instances, *, user_id=OWNER_ID, chat_id=GROUP_ID, extra=None):
     if user_id is not None:
         data["user_id"] = user_id
     data.update(extra or {})
-    return SimpleNamespace(
-        bot=FakeBot(),
-        application=SimpleNamespace(
-            user_data={OWNER_ID: {"routine_instances": instances}}
-        ),
-        job=SimpleNamespace(data=data),
+    bot = FakeBot()
+    application = SimpleNamespace(
+        user_data={OWNER_ID: {"routine_instances": instances}}, bot=bot
     )
+    # The scheduler hands callbacks a ScheduledJob; its data carries the
+    # application the tick builds its run context from.
+    data["application"] = application
+    return SimpleNamespace(name="routine", data=data, bot=bot, application=application)
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +219,8 @@ def test_continuous_routine_uses_the_owner_bucket(monkeypatch, store):
         seen["user_data"] = context.user_data
         return "done"
 
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine",
         lambda name: SimpleNamespace(
             name="probe",
@@ -258,8 +262,8 @@ def test_continuous_routine_without_owner_falls_back_to_chat(monkeypatch, store)
         seen["user_data"] = context.user_data
         return "done"
 
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine",
         lambda name: SimpleNamespace(
             name="probe",
@@ -285,8 +289,8 @@ def test_continuous_routine_without_owner_falls_back_to_chat(monkeypatch, store)
 
 
 def test_detail_refresh_reads_the_owner_drafts(monkeypatch):
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine",
         lambda name: SimpleNamespace(
             name="probe",

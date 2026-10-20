@@ -2,7 +2,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { useServer } from "@/hooks/useServer";
-import { api } from "@/lib/api";
+import { serversApi } from "@/lib/api/servers";
+import { botsApi } from "@/lib/api/bots";
+import { executorsApi } from "@/lib/api/executors";
+import { marketApi } from "@/lib/api/market";
+import { settingsApi } from "@/lib/api/settings";
 import { credentialsQuery, executorsQuery } from "@/lib/queryClient";
 
 /**
@@ -29,12 +33,12 @@ export function usePrefetchData() {
     // Core data
     queryClient.prefetchQuery({
       queryKey: executorsQuery(server).queryKey,
-      queryFn: () => api.getExecutors(server),
+      queryFn: () => executorsApi.getExecutors(server),
     });
 
     queryClient.prefetchQuery({
       queryKey: ["bots", server],
-      queryFn: () => api.getBots(server),
+      queryFn: () => botsApi.getBots(server),
     });
 
     // Prefetch trading rules only for connected exchanges (with credentials),
@@ -42,7 +46,7 @@ export function usePrefetchData() {
     queryClient
       .fetchQuery({
         queryKey: ["connected-exchanges", server],
-        queryFn: () => api.getConnectedExchanges(server),
+        queryFn: () => marketApi.getConnectedExchanges(server),
         staleTime: 5 * 60 * 1000,
       })
       .then((connectors) => {
@@ -50,7 +54,7 @@ export function usePrefetchData() {
         for (const connector of connectors) {
           queryClient.prefetchQuery({
             queryKey: ["trading-rules", server, connector],
-            queryFn: () => api.getTradingRules(server, connector),
+            queryFn: () => marketApi.getTradingRules(server, connector),
             staleTime: 5 * 60 * 1000,
           });
         }
@@ -60,21 +64,21 @@ export function usePrefetchData() {
     // Prefetch settings data so Settings page loads instantly
     queryClient.prefetchQuery({
       queryKey: ["settings-servers"],
-      queryFn: () => api.getSettingsServers(),
+      queryFn: () => serversApi.getSettingsServers(),
       staleTime: 60 * 1000,
     });
     queryClient.prefetchQuery({
       ...credentialsQuery(server),
-      queryFn: () => api.getCredentials(server),
+      queryFn: () => settingsApi.getCredentials(server),
     });
     queryClient.prefetchQuery({
       queryKey: ["settings-connectors", server, "spot"],
-      queryFn: () => api.getAvailableConnectors(server, "spot"),
+      queryFn: () => settingsApi.getAvailableConnectors(server, "spot"),
       staleTime: 5 * 60 * 1000,
     });
     queryClient.prefetchQuery({
       queryKey: ["settings-connectors", server, "perpetual"],
-      queryFn: () => api.getAvailableConnectors(server, "perpetual"),
+      queryFn: () => settingsApi.getAvailableConnectors(server, "perpetual"),
       staleTime: 5 * 60 * 1000,
     });
   }, [server, queryClient]);

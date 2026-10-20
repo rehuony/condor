@@ -6,12 +6,8 @@ import {
   type RoutineRunContext,
 } from "@/components/routines/ReportBrowser";
 import { RoutinePicker } from "@/components/routines/RoutinePicker";
-import {
-  api,
-  type ReportSummary,
-  type RoutineInfo,
-  type RoutineInstance,
-} from "@/lib/api";
+import { reportsApi, type ReportSummary } from "@/lib/api/reports";
+import type { RoutineInfo, RoutineInstance } from "@/lib/api/routines";
 import { formatRelativeTime, toMs } from "@/lib/formatters";
 import { formatRoutineName, type RoutineScope } from "@/lib/routineUtils";
 
@@ -100,7 +96,7 @@ export function DockRoutines({
   const { data: reportData } = useQuery({
     queryKey: ["reports", "routine", agentSlug],
     queryFn: () =>
-      api.getReports({
+      reportsApi.getReports({
         source_type: "routine",
         agent: agentSlug || undefined,
         limit: 40,

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from "react-dom";
 
 import { WORKSPACE_BAR } from "@/components/chat/workspaceBar";
+import { DIALOG_BACKDROP } from "@/components/ui/dialog";
 import { useWorkspacePane, type PaneProfile } from "@/hooks/useWorkspacePane";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { SHEET_ZEN_KEY } from "@/lib/sessionState";
@@ -130,7 +131,7 @@ export function WorkspaceSheet({
     const parent = split ? pane?.host : document.body;
     host.setAttribute("class", split
       ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-      : `fixed inset-0 z-50 flex ${zen ? "" : "items-center justify-center p-4"}`);
+      : zen ? "fixed inset-0 z-50 flex" : `${DIALOG_BACKDROP} z-50`);
     if (parent && host.parentElement !== parent) parent.appendChild(host);
     for (const { node, top, left } of scrollPositions.current[zen ? "zen" : "window"] ?? []) {
       node.scrollTop = top;
@@ -292,7 +293,7 @@ export function WorkspaceSheet({
   return createPortal(
     <>
       {!split && !zen && (
-        <div key="backdrop" className="absolute inset-0 bg-black/60" onClick={onClose} />
+        <div key="backdrop" className="absolute inset-0" onClick={onClose} />
       )}
       <div
         key="sheet"

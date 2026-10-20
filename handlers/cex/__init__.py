@@ -10,19 +10,59 @@ Supports:
 """
 
 import logging
+from functools import partial
+from typing import Awaitable, Callable
 
-from telegram import Update
-from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
-
+from condor.telegram.types import (
+    Context,
+    Update,
+)
 from handlers import clear_all_input_states
+from handlers._routing import HandlerFunc, PrefixRoute, dispatch_action, noop
 from utils.auth import hummingbot_api_required, restricted
 from utils.telegram_formatters import format_error_message
+
+from .menu import cancel_cex_loading_task
+from .orders import (
+    handle_cancel_order,
+    handle_confirm_cancel_order,
+    handle_search_orders,
+)
+from .positions import (
+    handle_close_position,
+    handle_confirm_close_position,
+    handle_positions,
+    handle_trade_position,
+)
+from .trade import (
+    handle_close,
+    handle_trade,
+    handle_trade_connector_select,
+    handle_trade_execute,
+    handle_trade_get_quote,
+    handle_trade_pair_select,
+    handle_trade_refresh,
+    handle_trade_set_amount,
+    handle_trade_set_connector,
+    handle_trade_set_leverage,
+    handle_trade_set_pair,
+    handle_trade_set_price,
+    handle_trade_toggle_pos_mode,
+    handle_trade_toggle_position,
+    handle_trade_toggle_side,
+    handle_trade_toggle_type,
+    process_trade,
+    process_trade_set_amount,
+    process_trade_set_leverage,
+    process_trade_set_pair,
+    process_trade_set_price,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def _handle_switch_to_dex(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, network_id: str
+    update: Update, context: Context, network_id: str
 ) -> None:
     """Switch from CEX to DEX trading"""
     from condor.preferences import (
@@ -46,17 +86,74 @@ async def _handle_switch_to_dex(
     await dex_handle_swap(update, context)
 
 
+# ============================================
+# ROUTING TABLES
+# ============================================
+
+#: ``cex:<action>`` callbacks that take no parameter.
+SIMPLE_ACTIONS: dict[str, HandlerFunc] = {
+    "main_menu": handle_trade,
+    "trade": handle_trade,
+    "trade_refresh": handle_trade_refresh,
+    # Trade parameters
+    "trade_toggle_side": handle_trade_toggle_side,
+    "trade_toggle_type": handle_trade_toggle_type,
+    "trade_toggle_position": handle_trade_toggle_position,
+    "trade_set_connector": handle_trade_set_connector,
+    "trade_set_pair": handle_trade_set_pair,
+    "trade_set_amount": handle_trade_set_amount,
+    "trade_set_price": handle_trade_set_price,
+    "trade_get_quote": handle_trade_get_quote,
+    "trade_execute": handle_trade_execute,
+    # Leverage & position mode (perpetual)
+    "trade_set_leverage": handle_trade_set_leverage,
+    "trade_toggle_pos_mode": handle_trade_toggle_pos_mode,
+    # Orders
+    "search_orders": partial(handle_search_orders, status="ALL"),
+    "search_filled": partial(handle_search_orders, status="FILLED"),
+    "search_cancelled": partial(handle_search_orders, status="CANCELLED"),
+    # Positions
+    "positions": handle_positions,
+    # Close / separators
+    "close": handle_close,
+    "noop": noop,
+}
+
+#: ``cex:<prefix><value>`` callbacks: the text after the prefix is parsed and
+#: passed as the handler's third argument.
+PREFIX_ACTIONS: tuple[PrefixRoute, ...] = (
+    ("trade_connector_", handle_trade_connector_select, str),
+    ("trade_pair_select_", handle_trade_pair_select, str),
+    ("cancel_order:", handle_cancel_order, int),
+    ("confirm_cancel:", handle_confirm_cancel_order, int),
+    ("trade_position:", handle_trade_position, int),
+    ("close_position:", handle_close_position, int),
+    ("confirm_close:", handle_confirm_close_position, int),
+    ("switch_dex_", _handle_switch_to_dex, str),
+)
+
+#: ``cex_state`` values and the processor that consumes the typed text.
+TEXT_INPUT_HANDLERS: dict[str, Callable[[Update, Context, str], Awaitable[None]]] = {
+    "trade": process_trade,
+    "trade_set_pair": process_trade_set_pair,
+    "trade_set_amount": process_trade_set_amount,
+    "trade_set_price": process_trade_set_price,
+    "trade_set_leverage": process_trade_set_leverage,
+}
+
+#: States that are removed before processing because the input completes them.
+_COMPLETING_STATES = frozenset({"trade"})
+
+
 @restricted
 @hummingbot_api_required
-async def trade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def trade_command(update: Update, context: Context) -> None:
     """
     Handle /trade command - CEX trading interface with order books
 
     Usage:
         /trade - Show trading menu with limit/market orders
     """
-    from .trade import handle_trade
-
     # Clear all pending input states to prevent interference
     clear_all_input_states(context)
 
@@ -69,52 +166,21 @@ async def trade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     # Send "typing" status
-    await msg.reply_chat_action("typing")
+    await msg.bot.send_chat_action(chat_id=msg.chat.id, action="typing")
 
     # Show unified trade menu
     await handle_trade(update, context)
 
 
 @restricted
-async def cex_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def cex_callback_handler(update: Update, context: Context) -> None:
     """Handle inline button callbacks for CEX trading operations"""
-    from .menu import cancel_cex_loading_task
-    from .orders import (
-        handle_cancel_order,
-        handle_confirm_cancel_order,
-        handle_search_orders,
-    )
-    from .positions import (
-        handle_close_position,
-        handle_confirm_close_position,
-        handle_positions,
-        handle_trade_position,
-    )
-    from .trade import (
-        handle_close,
-        handle_trade,
-        handle_trade_connector_select,
-        handle_trade_execute,
-        handle_trade_get_quote,
-        handle_trade_pair_select,
-        handle_trade_refresh,
-        handle_trade_set_amount,
-        handle_trade_set_connector,
-        handle_trade_set_leverage,
-        handle_trade_set_pair,
-        handle_trade_set_price,
-        handle_trade_toggle_pos_mode,
-        handle_trade_toggle_position,
-        handle_trade_toggle_side,
-        handle_trade_toggle_type,
-    )
-
     query = update.callback_query
     await query.answer()
 
-    await query.message.reply_chat_action("typing")
+    await query.message.bot.send_chat_action(
+        chat_id=query.message.chat.id, action="typing"
+    )
 
     try:
         callback_parts = query.data.split(":", 1)
@@ -124,106 +190,20 @@ async def cex_callback_handler(
         if action not in ("main_menu", "trade"):
             cancel_cex_loading_task(context)
 
-        # Main menu / trade
-        if action in ("main_menu", "trade"):
-            await handle_trade(update, context)
-        elif action == "trade_refresh":
-            await handle_trade_refresh(update, context)
-
-        # Trade parameter handlers
-        elif action == "trade_toggle_side":
-            await handle_trade_toggle_side(update, context)
-        elif action == "trade_toggle_type":
-            await handle_trade_toggle_type(update, context)
-        elif action == "trade_toggle_position":
-            await handle_trade_toggle_position(update, context)
-        elif action == "trade_set_connector":
-            await handle_trade_set_connector(update, context)
-        elif action.startswith("trade_connector_"):
-            connector_name = action.replace("trade_connector_", "")
-            await handle_trade_connector_select(update, context, connector_name)
-        elif action == "trade_set_pair":
-            await handle_trade_set_pair(update, context)
-        elif action.startswith("trade_pair_select_"):
-            trading_pair = action.replace("trade_pair_select_", "")
-            await handle_trade_pair_select(update, context, trading_pair)
-        elif action == "trade_set_amount":
-            await handle_trade_set_amount(update, context)
-        elif action == "trade_set_price":
-            await handle_trade_set_price(update, context)
-        elif action == "trade_get_quote":
-            await handle_trade_get_quote(update, context)
-        elif action == "trade_execute":
-            await handle_trade_execute(update, context)
-
-        # Leverage & Position mode (perpetual)
-        elif action == "trade_set_leverage":
-            await handle_trade_set_leverage(update, context)
-        elif action == "trade_toggle_pos_mode":
-            await handle_trade_toggle_pos_mode(update, context)
-
-        # Orders
-        elif action == "search_orders":
-            await handle_search_orders(update, context, status="ALL")
-        elif action == "search_filled":
-            await handle_search_orders(update, context, status="FILLED")
-        elif action == "search_cancelled":
-            await handle_search_orders(update, context, status="CANCELLED")
-        elif action.startswith("cancel_order:"):
-            order_index = int(action.split(":")[1])
-            await handle_cancel_order(update, context, order_index)
-        elif action.startswith("confirm_cancel:"):
-            order_index = int(action.split(":")[1])
-            await handle_confirm_cancel_order(update, context, order_index)
-
-        # Positions
-        elif action == "positions":
-            await handle_positions(update, context)
-        elif action.startswith("trade_position:"):
-            position_index = int(action.split(":")[1])
-            await handle_trade_position(update, context, position_index)
-        elif action.startswith("close_position:"):
-            position_index = int(action.split(":")[1])
-            await handle_close_position(update, context, position_index)
-        elif action.startswith("confirm_close:"):
-            position_index = int(action.split(":")[1])
-            await handle_confirm_close_position(update, context, position_index)
-
-        # Close
-        elif action == "close":
-            await handle_close(update, context)
-
-        # Switch to DEX
-        elif action.startswith("switch_dex_"):
-            network_id = action.replace("switch_dex_", "")
-            await _handle_switch_to_dex(update, context, network_id)
-
-        # No-op for separator buttons
-        elif action == "noop":
-            pass
-
-        else:
-            await query.message.reply_text(f"Unknown action: {action}")
+        if not await dispatch_action(
+            update, context, action, SIMPLE_ACTIONS, PREFIX_ACTIONS
+        ):
+            await query.message.answer(f"Unknown action: {action}")
 
     except Exception as e:
         logger.error(f"Error in CEX callback handler: {e}", exc_info=True)
         error_message = format_error_message(f"Operation failed: {str(e)}")
-        await query.message.reply_text(error_message, parse_mode="MarkdownV2")
+        await query.message.answer(error_message, parse_mode="MarkdownV2")
 
 
 @restricted
-async def cex_message_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def cex_message_handler(update: Update, context: Context) -> None:
     """Handle user text input for CEX trading operations"""
-    from .trade import (
-        process_trade,
-        process_trade_set_amount,
-        process_trade_set_leverage,
-        process_trade_set_pair,
-        process_trade_set_price,
-    )
-
     cex_state = context.user_data.get("cex_state")
 
     logger.info(
@@ -239,38 +219,17 @@ async def cex_message_handler(
 
     try:
         # Only remove state for completing operations
-        if cex_state in ["trade"]:
+        if cex_state in _COMPLETING_STATES:
             context.user_data.pop("cex_state", None)
             logger.info(f"Removed cex_state for completing operation: {cex_state}")
 
-        if cex_state == "trade":
-            await process_trade(update, context, user_input)
-        elif cex_state == "trade_set_pair":
-            await process_trade_set_pair(update, context, user_input)
-        elif cex_state == "trade_set_amount":
-            await process_trade_set_amount(update, context, user_input)
-        elif cex_state == "trade_set_price":
-            await process_trade_set_price(update, context, user_input)
-        elif cex_state == "trade_set_leverage":
-            await process_trade_set_leverage(update, context, user_input)
-        else:
-            await update.message.reply_text(f"Unknown state: {cex_state}")
+        processor = TEXT_INPUT_HANDLERS.get(cex_state)
+        if processor is None:
+            await update.message.answer(f"Unknown state: {cex_state}")
+            return
+        await processor(update, context, user_input)
 
     except Exception as e:
         logger.error(f"Error processing CEX input: {e}", exc_info=True)
         error_message = format_error_message(f"Failed to process input: {str(e)}")
-        await update.message.reply_text(error_message, parse_mode="MarkdownV2")
-
-
-def get_cex_callback_handler():
-    """Get the callback query handler for CEX trading"""
-    return CallbackQueryHandler(cex_callback_handler, pattern="^cex:")
-
-
-def get_cex_message_handler():
-    """Returns the message handler for CEX trading text input.
-
-    Returns a tuple of (handler, group) where group=0 is higher priority.
-    The handler only processes messages when cex_state is set.
-    """
-    return MessageHandler(filters.TEXT & ~filters.COMMAND, cex_message_handler)
+        await update.message.answer(error_message, parse_mode="MarkdownV2")

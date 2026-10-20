@@ -16,7 +16,8 @@ import { invalidateLifecycle } from "@/components/agent/agentQueries";
 import { SelectField } from "@/components/ui/select-field";
 import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { api } from "@/lib/api";
+import { serversApi } from "@/lib/api/servers";
+import { agentsApi } from "@/lib/api/agents";
 
 // ── Start Session Dialog ──
 
@@ -60,7 +61,7 @@ export function StartSessionDialog({
 
   const { data: servers } = useQuery({
     queryKey: ["servers"],
-    queryFn: () => api.getServers(),
+    queryFn: () => serversApi.getServers(),
     enabled: open,
   });
 
@@ -82,7 +83,7 @@ export function StartSessionDialog({
           max_drawdown_pct: Number(maxDrawdown),
         },
       };
-      return api.startStrategy(slug, sslug, config, context);
+      return agentsApi.startStrategy(slug, sslug, config, context);
     },
     onSuccess: () => {
       invalidateLifecycle(queryClient, slug, sslug);
@@ -333,18 +334,18 @@ export function AgentControls({ slug, sslug, status, defaultContext, agentConfig
   const [confirmStop, setConfirmStop] = useState(false);
 
   const stopMut = useMutation({
-    mutationFn: () => api.stopStrategy(slug, sslug),
+    mutationFn: () => agentsApi.stopStrategy(slug, sslug),
     onSuccess: () => {
       invalidateLifecycle(queryClient, slug, sslug);
       setConfirmStop(false);
     },
   });
   const pauseMut = useMutation({
-    mutationFn: () => api.pauseStrategy(slug, sslug),
+    mutationFn: () => agentsApi.pauseStrategy(slug, sslug),
     onSuccess: () => invalidateLifecycle(queryClient, slug, sslug),
   });
   const resumeMut = useMutation({
-    mutationFn: () => api.resumeStrategy(slug, sslug),
+    mutationFn: () => agentsApi.resumeStrategy(slug, sslug),
     onSuccess: () => invalidateLifecycle(queryClient, slug, sslug),
   });
 

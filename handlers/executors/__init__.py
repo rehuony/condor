@@ -16,9 +16,7 @@ Commands:
 
 import logging
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
+from condor.telegram.types import Context, Update
 from handlers import clear_all_input_states
 from utils.auth import restricted
 
@@ -33,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 @restricted
-async def executors_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def executors_command(update: Update, context: Context) -> None:
     """Handle /executors command - show main menu
 
     Args:
@@ -53,9 +51,7 @@ async def executors_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 @restricted
-async def executors_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def executors_callback_handler(update: Update, context: Context) -> None:
     """Handle all executors: callback queries
 
     Routing:
@@ -197,9 +193,7 @@ async def executors_callback_handler(
 # ============================================
 
 
-async def executors_message_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> bool:
+async def executors_message_handler(update: Update, context: Context) -> bool:
     """Handle text input for executors wizard
 
     Returns:

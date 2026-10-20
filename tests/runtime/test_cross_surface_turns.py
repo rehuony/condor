@@ -89,6 +89,50 @@ def test_accepted_input_is_on_disk_before_model_runs(chat):
     assert conversations.read_transcript(7, tg.conversation_id)[-1].kind == "error"
 
 
+def test_concurrent_arrivals_of_one_request_execute_once(chat, monkeypatch):
+    """Durable acceptance runs off the loop; the second arrival must still lose.
+
+    Two deliveries of the same transport message race through ``has_request``
+    before either transcript append lands. One of them is accepted and the
+    other is a duplicate — never two model turns, never two transcript lines.
+    """
+    tg, web = chat
+    accept = conversations.Recorder.accept
+    first_in = asyncio.Event()
+    release = None
+
+    def slow_accept(self):
+        first_in.set()
+        release.wait()
+        accept(self)
+
+    monkeypatch.setattr(conversations.Recorder, "accept", slow_accept)
+
+    async def run():
+        nonlocal release
+        import threading
+
+        release = threading.Event()
+        first = asyncio.create_task(collect(tg, "same words", request_id="tg:7:5"))
+        await first_in.wait()
+        second = asyncio.create_task(collect(web, "same words", request_id="tg:7:5"))
+        await asyncio.sleep(0.05)
+        release.set()
+        results = await asyncio.gather(first, second)
+        stops = sorted(e.stop_reason for r in results for e in r if e.stop_reason)
+        assert stops == ["duplicate", "end_turn"]
+        assert tg.client.inputs + web.client.inputs == ["same words"]
+        assert not runtime._in_flight
+
+    asyncio.run(run())
+    openings = [
+        t
+        for t in conversations.read_transcript(7, tg.conversation_id)
+        if t.role == "user"
+    ]
+    assert len(openings) == 1
+
+
 def test_duplicate_message_is_not_executed_after_registry_restart_or_chat_switch(chat):
     tg, web = chat
 

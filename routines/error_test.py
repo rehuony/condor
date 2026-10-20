@@ -1,7 +1,8 @@
 """Routine that intentionally fails — for testing error display in the dashboard."""
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
+
+from routines.base import RoutineContext
 
 
 class Config(BaseModel):
@@ -14,7 +15,7 @@ class Config(BaseModel):
     delay_sec: float = Field(default=1.0, description="Seconds to wait before failing")
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     import asyncio
 
     await asyncio.sleep(config.delay_sec)

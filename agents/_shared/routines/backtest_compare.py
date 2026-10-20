@@ -11,11 +11,10 @@ from datetime import datetime, timezone
 import pandas as pd
 import plotly.graph_objects as go
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from condor.backtest_store import get_backtest_store
 from config_manager import get_config_manager
-from routines.base import RoutineResult
+from routines.base import RoutineContext, RoutineResult
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +428,7 @@ def _no_runs_message(store, requested: list[str], errors: list[str]) -> str:
     return "\n".join(lines)
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> RoutineResult:
+async def run(config: Config, context: RoutineContext) -> RoutineResult:
     store = get_backtest_store()
 
     requested, errors = _resolve_ids(store, config.task_ids)
@@ -440,7 +439,7 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> RoutineResu
 
     if not requested:
         count = max(MIN_RUNS, min(MAX_RUNS, config.latest_n))
-        chat_id = getattr(context, "_chat_id", None)
+        chat_id = context.chat_id
         server = None
         if chat_id is not None:
             try:

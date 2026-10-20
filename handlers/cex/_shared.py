@@ -8,15 +8,11 @@ Contains:
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from functools import partial
+from typing import Any, Dict, List, Optional
 
+from condor import cache as _cache
 from condor.cache import DEFAULT_CACHE_TTL
-from condor.cache import cached_call as _cached_call
-from condor.cache import clear_cache as _clear_cache
-from condor.cache import get_cached as _get_cached
-from condor.cache import invalidate_groups as _invalidate_groups
-from condor.cache import invalidates as _invalidates
-from condor.cache import set_cached as _set_cached
 
 logger = logging.getLogger(__name__)
 
@@ -27,32 +23,10 @@ logger = logging.getLogger(__name__)
 
 _NS = "_cex_cache"  # namespace for CEX cache
 
-
-def get_cached(
-    user_data: dict, key: str, ttl: int = DEFAULT_CACHE_TTL
-) -> Optional[Any]:
-    return _get_cached(user_data, key, ttl, namespace=_NS)
-
-
-def set_cached(user_data: dict, key: str, value: Any) -> None:
-    _set_cached(user_data, key, value, namespace=_NS)
-
-
-def clear_cache(user_data: dict, key: Optional[str] = None) -> None:
-    _clear_cache(user_data, key, namespace=_NS)
-
-
-async def cached_call(
-    user_data: dict,
-    key: str,
-    fetch_func: Callable,
-    ttl: int = DEFAULT_CACHE_TTL,
-    *args,
-    **kwargs,
-) -> Any:
-    return await _cached_call(
-        user_data, key, fetch_func, ttl, *args, namespace=_NS, **kwargs
-    )
+get_cached = partial(_cache.get_cached, namespace=_NS)
+set_cached = partial(_cache.set_cached, namespace=_NS)
+clear_cache = partial(_cache.clear_cache, namespace=_NS)
+cached_call = partial(_cache.cached_call, namespace=_NS)
 
 
 # ============================================
@@ -71,12 +45,12 @@ CACHE_GROUPS = {
 
 def invalidate_cache(user_data: dict, *groups: str) -> None:
     """Invalidate cache keys by group name(s)."""
-    _invalidate_groups(user_data, CACHE_GROUPS, *groups, namespace=_NS)
+    _cache.invalidate_groups(user_data, CACHE_GROUPS, *groups, namespace=_NS)
 
 
 def invalidates(*groups: str):
     """Decorator that invalidates cache groups after handler execution."""
-    return _invalidates(*groups, groups_map=CACHE_GROUPS, namespace=_NS)
+    return _cache.invalidates(*groups, groups_map=CACHE_GROUPS, namespace=_NS)
 
 
 # ============================================
@@ -327,33 +301,10 @@ def format_trading_rules_info(
 
 
 from condor.fetchers.connectors import (  # noqa: F811 — canonical source
-    fetch_available_cex_connectors,
+    get_available_cex_connectors as _get_available_cex_connectors,
 )
 
-
-async def get_available_cex_connectors(
-    user_data: dict,
-    client,
-    account_name: str = "master_account",
-    ttl: int = 300,  # 5 min cache
-    server_name: str = "default",
-) -> List[str]:
-    """Get available CEX connectors with caching.
-
-    Args:
-        user_data: context.user_data dict
-        client: API client
-        account_name: Account name to check credentials for
-        ttl: Cache TTL in seconds
-        server_name: Server name to include in cache key (prevents cross-server cache pollution)
-
-    Returns:
-        List of available CEX connector names
-    """
-    cache_key = f"available_cex_connectors_{server_name}_{account_name}"
-    return await cached_call(
-        user_data, cache_key, fetch_available_cex_connectors, ttl, client, account_name
-    )
+get_available_cex_connectors = partial(_get_available_cex_connectors, namespace=_NS)
 
 
 # ============================================

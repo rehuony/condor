@@ -14,6 +14,7 @@ import pytest
 from pydantic import BaseModel
 
 import handlers.routines as hr
+from tests.conftest import patch_routines
 from utils.telegram_formatters import escape_markdown_v2_code
 
 # Backtick (closes the fence), backslash (eats the next char), and a few chars
@@ -89,6 +90,10 @@ class FakeBot:
     async def send_message(self, chat_id=None, text="", parse_mode=None, **kwargs):
         await self._accept(text, parse_mode)
 
+    async def send_rich_message(self, chat_id=None, rich_message=None, **kwargs):
+        self.rendered.append(getattr(rich_message, "markdown", "") or "")
+        return SimpleNamespace(message_id=len(self.rendered))
+
     async def edit_message_text(self, chat_id=None, text="", parse_mode=None, **kwargs):
         await self._accept(text, parse_mode)
 
@@ -114,9 +119,9 @@ def ctx(monkeypatch):
     async def _execute(*args, **kwargs):
         return HOSTILE, 1.5, None, False
 
-    monkeypatch.setattr(hr, "_execute_routine", _execute)
-    monkeypatch.setattr(hr, "get_routine_store", lambda: SimpleNamespace())
-    monkeypatch.setattr(hr, "get_routine", lambda name: _routine())
+    patch_routines(monkeypatch, "_execute_routine", _execute)
+    patch_routines(monkeypatch, "get_routine_store", lambda: SimpleNamespace())
+    patch_routines(monkeypatch, "get_routine", lambda name: _routine())
 
     chat_id = 42
     instances = {
@@ -126,20 +131,24 @@ def ctx(monkeypatch):
             "schedule": {"type": "interval", "interval_sec": 60},
         }
     }
+    bot = FakeBot()
+    application = SimpleNamespace(
+        user_data={chat_id: {"routine_instances": instances}}, bot=bot
+    )
+    # Doubles as the ScheduledJob the callbacks take and the context
+    # _refresh_detail_msg takes.
     return SimpleNamespace(
-        bot=FakeBot(),
-        application=SimpleNamespace(
-            user_data={chat_id: {"routine_instances": instances}}
-        ),
-        job=SimpleNamespace(
-            data={
-                "instance_id": "i1",
-                "routine_name": "probe",
-                "config_dict": {},
-                "chat_id": chat_id,
-                "background": True,
-            }
-        ),
+        name="routine",
+        data={
+            "instance_id": "i1",
+            "routine_name": "probe",
+            "config_dict": {},
+            "chat_id": chat_id,
+            "background": True,
+            "application": application,
+        },
+        bot=bot,
+        application=application,
     )
 
 
@@ -188,7 +197,7 @@ def test_silent_scheduled_run_posts_nothing(ctx, monkeypatch, callback):
     async def _execute(*args, **kwargs):
         return "nothing to report", 1.5, None, True
 
-    monkeypatch.setattr(hr, "_execute_routine", _execute)
+    patch_routines(monkeypatch, "_execute_routine", _execute)
     asyncio.run(getattr(hr, callback)(ctx))
     assert ctx.bot.rendered == []
     instance = ctx.application.user_data[42]["routine_instances"]["i1"]

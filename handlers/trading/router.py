@@ -6,9 +6,7 @@ Handles trade:* callbacks for connector switching between CEX and DEX.
 
 import logging
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
+from condor.telegram.types import Context, Update
 from utils.auth import restricted
 
 from . import (
@@ -22,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 @restricted
-async def unified_trade_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def unified_trade_callback_handler(update: Update, context: Context) -> None:
     """Handle trade:* callbacks for connector switching"""
     query = update.callback_query
     await query.answer()

@@ -515,20 +515,6 @@ def test_an_answer_with_no_names_in_it_is_not_counted_as_resolved(cm, monkeypatc
     assert refresh(bot, monkeypatch)["resolved"] == 0
 
 
-def test_the_http_fallback_envelope_is_understood_too(cm, monkeypatch):
-    """`_HttpBot` returns the raw `{"ok":..., "result":{...}}` envelope; a live
-    bot returns a Chat object. Both are legitimate rungs of `resolve_bot`."""
-
-    class HttpishBot:
-        async def get_chat(self, chat_id: int):
-            return {"ok": True, "result": {"first_name": "Federico"}}
-
-    cm._data["users"][ADMIN.id].pop("first_name")
-
-    assert refresh(HttpishBot(), monkeypatch)["resolved"] == 1
-    assert people()[ADMIN.id].display_name == "Federico"
-
-
 def test_the_backfill_is_capped_so_it_cannot_stall_the_bots_event_loop(cm, monkeypatch):
     """It runs on the bot's own loop; twenty sequential round-trips would freeze
     polling for the duration, and twenty concurrent ones would flood Telegram."""

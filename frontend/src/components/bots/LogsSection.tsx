@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { BotLogEntry } from "@/lib/api";
+import type { BotLogEntry } from "@/lib/api/bots";
 
 function formatLogTime(ts?: number): string {
   if (!ts) return "";

@@ -24,12 +24,15 @@ const listConversations = vi.fn();
 const getSessionOptions = vi.fn();
 const switchSession = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    listConversations: (...args: unknown[]) => listConversations(...args),
+vi.mock("@/lib/api/chat", () => ({
+  chatApi: {
     getSessionOptions: () => getSessionOptions(),
     switchSession: (...args: unknown[]) => switchSession(...args),
-    // A resumed conversation hydrates its transcript over HTTP; empty is fine.
+  },
+}));
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    listConversations: (...args: unknown[]) => listConversations(...args),
     getConversation: () => Promise.resolve({ meta: {}, turns: [] }),
   },
 }));

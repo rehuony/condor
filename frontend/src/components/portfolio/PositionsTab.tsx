@@ -3,7 +3,8 @@ import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { feeAmount, lpStateStyle, rangeFraction, type LpPosition } from "@/components/dex/lp-position";
-import { type ConsolidatedPosition } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
+import type { ConsolidatedPosition } from "@/lib/api/portfolio";
 import { formatPnl, formatPriceSig, formatUsd, pnlColor } from "@/lib/formatters";
 
 /** The quote a hold's numbers are denominated in — its pair's, as elsewhere. */
@@ -101,7 +102,7 @@ export function PositionsTab({
 
   if (isLoading && !holds.length && !lpPositions.length) {
     return (
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+      <Card className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
@@ -109,7 +110,7 @@ export function PositionsTab({
             style={{ width: `${85 - i * 10}%` }}
           />
         ))}
-      </div>
+      </Card>
     );
   }
 

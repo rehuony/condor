@@ -1,4 +1,5 @@
-import { api } from "@/lib/api";
+import { reportsApi } from "@/lib/api/reports";
+import { routinesApi } from "@/lib/api/routines";
 
 export interface DeleteAllResult {
   deleted: number;
@@ -20,13 +21,13 @@ export async function deleteAllRoutineReports(
   let total: number | null = null;
   const skipped = new Set<string>();
   for (;;) {
-    const page = await api.getRoutineReports(source);
+    const page = await routinesApi.getRoutineReports(source);
     total ??= page.total;
     const pending = page.reports.filter((report) => !skipped.has(report.id));
     if (pending.length === 0) break;
     for (const report of pending) {
       try {
-        await api.deleteReport(report.id);
+        await reportsApi.deleteReport(report.id);
         deleted += 1;
       } catch {
         skipped.add(report.id);

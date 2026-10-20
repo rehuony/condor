@@ -8,11 +8,11 @@ import pytest
 from aiohttp import ClientConnectorError
 from fastapi import HTTPException
 from PIL import Image
-from telegram.error import NetworkError
 
 from condor import notifications
 from condor.runtime import attachments, conversations, turns
 from condor.runtime.models import SessionInfo
+from condor.telegram.errors import network_failure
 from condor.web.models import WebUser
 from condor.web.routes import agents, code
 from mcp_servers.condor.exceptions import APIError
@@ -30,16 +30,16 @@ class Bot:
         self.text_error = None
 
     async def send_photo(self, **kwargs):
-        self.photos.append({**kwargs, "photo": kwargs["photo"].read()})
+        self.photos.append({**kwargs, "photo": kwargs["photo"].data})
         if self.photo_error:
             raise self.photo_error
-        return {"ok": True, "result": {"message_id": 12}}
+        return SimpleNamespace(message_id=12)
 
     async def send_message(self, **kwargs):
         self.messages.append(kwargs)
         if self.text_error:
             raise self.text_error
-        return {"ok": True, "result": {"message_id": 13}}
+        return SimpleNamespace(message_id=13)
 
     async def get_chat_member(self, **kwargs):
         return SimpleNamespace(status="left")
@@ -219,7 +219,7 @@ def test_foreign_session_is_refused_before_read_even_for_admin(
     monkeypatch.setattr("condor.runtime.client.get_info", foreign)
     setup.cm.is_admin = lambda uid: foreign_admin
     monkeypatch.setattr(
-        "condor.telegram_media.load_photo",
+        "condor.telegram.media.load_photo",
         lambda path: pytest.fail("unauthorized read"),
     )
     with pytest.raises(HTTPException) as error:
@@ -231,7 +231,7 @@ def test_foreign_session_is_refused_before_read_even_for_admin(
 def test_image_path_requires_code_run_grant_before_read(setup, monkeypatch):
     setup.cm.get_user_preference = lambda *args: False
     monkeypatch.setattr(
-        "condor.telegram_media.load_photo",
+        "condor.telegram.media.load_photo",
         lambda path: pytest.fail("unauthorized read"),
     )
     with pytest.raises(HTTPException) as error:
@@ -242,7 +242,7 @@ def test_image_path_requires_code_run_grant_before_read(setup, monkeypatch):
 
 def test_foreign_chat_is_refused_before_file_read(setup, monkeypatch):
     monkeypatch.setattr(
-        "condor.telegram_media.load_photo",
+        "condor.telegram.media.load_photo",
         lambda path: pytest.fail("unauthorized read"),
     )
     with pytest.raises(HTTPException) as error:
@@ -261,7 +261,7 @@ def test_invalid_image_is_rejected_before_recording_or_sending(setup):
 
 
 def test_photo_failure_preserves_text_and_saved_image_without_retry(setup):
-    setup.bot.photo_error = NetworkError("upload response lost")
+    setup.bot.photo_error = network_failure("upload response lost")
     result = run(request(setup))
     assert not result["sent"] and not result["image_sent"]
     assert result["text_sent"] and result["image_recorded"]
@@ -270,7 +270,7 @@ def test_photo_failure_preserves_text_and_saved_image_without_retry(setup):
 
 
 def test_text_failure_after_image_does_not_replay_photo_through_mcp(setup, monkeypatch):
-    setup.bot.text_error = NetworkError("text response lost")
+    setup.bot.text_error = network_failure("text response lost")
 
     async def main(method, path, body, **kwargs):
         return await agents.notify_user(agents.NotifyRequest(**body), user=USER)

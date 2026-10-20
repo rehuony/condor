@@ -2,8 +2,7 @@
 Command handlers for Condor Telegram bot
 """
 
-from telegram import Update
-from telegram.ext import ContextTypes
+from condor.telegram.types import Context, Update
 
 
 def is_gateway_network(connector_name: str) -> bool:
@@ -39,7 +38,7 @@ def is_gateway_network(connector_name: str) -> bool:
     return False
 
 
-def clear_all_input_states(context: ContextTypes.DEFAULT_TYPE) -> None:
+def clear_all_input_states(context: Context) -> None:
     """
     Clear ALL input-related states from user context.
 
@@ -222,20 +221,20 @@ def clear_all_input_states(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("_portfolio_refresh", None)
 
 
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cancel_command(update: Update, context: Context) -> None:
     """Handle /cancel — abandon any in-progress input flow.
 
     Several flows arm a "your next message is the answer" mode and tell the
     user to send /cancel to back out. That only works if something actually
-    handles the command: the unified text handler is registered with
-    ``~filters.COMMAND``, so without this a typed /cancel matches no handler
-    at all and is silently dropped, leaving the user stuck in the flow.
+    handles the command: the unified text handler only sees non-command
+    messages, so without this a typed /cancel matches no handler at all and
+    is silently dropped, leaving the user stuck in the flow.
     """
     from utils.auth import restricted
 
     @restricted
-    async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _cancel(update: Update, context: Context) -> None:
         clear_all_input_states(context)
-        await update.message.reply_text("Cancelled.")
+        await update.message.answer("Cancelled.")
 
     await _cancel(update, context)

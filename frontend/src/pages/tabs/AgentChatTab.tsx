@@ -51,6 +51,7 @@ import {
 } from "@/components/chat/WorkspacePane";
 import { Starters, type Starter } from "@/components/chat/Starters";
 import { WORKSPACE_BAR } from "@/components/chat/workspaceBar";
+import { IconButton } from "@/components/ui/IconButton";
 import { useBrainSwitch } from "@/hooks/useBrainSwitch";
 import { useChat, useSessionOptions } from "@/hooks/useChat";
 import { webSessionKey } from "@/hooks/useChatSocket";
@@ -65,13 +66,9 @@ import {
   type PendingPick,
 } from "@/lib/sessionAgentKey";
 import { agentsQuery } from "@/lib/queryClient";
-import {
-  api,
-  CHAT_SLUG,
-  type AgentSummary,
-  type ConversationMeta,
-  type Delegation,
-} from "@/lib/api";
+import { CHAT_SLUG, type AgentSummary } from "@/lib/api/agents";
+import { delegationsApi, type Delegation } from "@/lib/api/delegations";
+import type { ConversationMeta } from "@/lib/api/conversations";
 
 /** Openers offered when nothing is bound, and when something is. */
 const CONDOR_STARTERS: Starter[] = [
@@ -211,7 +208,7 @@ export function AgentChatTab() {
   );
   const { data: delegationData } = useQuery({
     queryKey: ["delegations"],
-    queryFn: api.getDelegations,
+    queryFn: delegationsApi.getDelegations,
     refetchInterval: 5000,
   });
 
@@ -595,17 +592,18 @@ export function AgentChatTab() {
                 the model and the server, was the same agent said three times
                 across one row. */}
             <div className={`${WORKSPACE_BAR} gap-2 px-3`}>
-              <button
+              <IconButton
+                label={railOpen ? "Hide conversations" : "Show conversations"}
+                size="sm"
+                className="md:hidden"
                 onClick={() => setRailOpen((v) => !v)}
-                className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] md:hidden"
-                title={railOpen ? "Hide conversations" : "Show conversations"}
               >
                 {railOpen ? (
                   <PanelLeftClose className="h-4 w-4" />
                 ) : (
                   <PanelLeftOpen className="h-4 w-4" />
                 )}
-              </button>
+              </IconButton>
               {/* Every live session, including the ones answering in the
                   background — switching, and the only way to stop one. */}
               <SessionTabs

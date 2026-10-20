@@ -4,17 +4,20 @@ CEX Trading - Orders search functionality
 
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_clob_account
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 logger = logging.getLogger(__name__)
 
 
 async def handle_search_orders(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, status: str = "ALL"
+    update: Update, context: Context, status: str = "ALL"
 ) -> None:
     """Handle search orders operation
 
@@ -29,7 +32,7 @@ async def handle_search_orders(
         from config_manager import get_client
 
         chat_id = update.effective_chat.id
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         keyboard = []
 
@@ -87,7 +90,7 @@ async def handle_search_orders(
                     keyboard.append(
                         [
                             InlineKeyboardButton(
-                                button_label, callback_data=f"cex:cancel_order:{i}"
+                                text=button_label, callback_data=f"cex:cancel_order:{i}"
                             )
                         ]
                     )
@@ -129,7 +132,7 @@ async def handle_search_orders(
         def btn(label, action, current):
             prefix = "• " if current else ""
             return InlineKeyboardButton(
-                f"{prefix}{label}", callback_data=f"cex:{action}"
+                text=f"{prefix}{label}", callback_data=f"cex:{action}"
             )
 
         keyboard.append(
@@ -139,9 +142,11 @@ async def handle_search_orders(
                 btn("Cancelled", "search_cancelled", status == "CANCELLED"),
             ]
         )
-        keyboard.append([InlineKeyboardButton("« Back", callback_data="cex:trade")])
+        keyboard.append(
+            [InlineKeyboardButton(text="« Back", callback_data="cex:trade")]
+        )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             message, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -156,7 +161,7 @@ async def handle_search_orders(
 
 
 async def handle_cancel_order(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, order_index: int
+    update: Update, context: Context, order_index: int
 ) -> None:
     """Handle cancel order confirmation"""
     try:
@@ -197,13 +202,13 @@ async def handle_cancel_order(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✅ Confirm Cancel",
+                    text="✅ Confirm Cancel",
                     callback_data=f"cex:confirm_cancel:{order_index}",
                 ),
-                InlineKeyboardButton("❌ Back", callback_data="cex:search_orders"),
+                InlineKeyboardButton(text="❌ Back", callback_data="cex:search_orders"),
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             confirm_message, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -218,7 +223,7 @@ async def handle_cancel_order(
 
 
 async def handle_confirm_cancel_order(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, order_index: int
+    update: Update, context: Context, order_index: int
 ) -> None:
     """Confirm and execute order cancellation"""
     from ._shared import invalidate_cache
@@ -249,7 +254,7 @@ async def handle_confirm_cancel_order(
         from config_manager import get_client
 
         chat_id = update.effective_chat.id
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
 
         # Cancel the order
         result = await client.trading.cancel_order(
@@ -271,12 +276,12 @@ async def handle_confirm_cancel_order(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🔍 View Orders", callback_data="cex:search_orders"
+                    text="🔍 View Orders", callback_data="cex:search_orders"
                 ),
-                InlineKeyboardButton("« Back", callback_data="cex:trade"),
+                InlineKeyboardButton(text="« Back", callback_data="cex:trade"),
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await update.callback_query.message.edit_text(
             success_msg, parse_mode="MarkdownV2", reply_markup=reply_markup

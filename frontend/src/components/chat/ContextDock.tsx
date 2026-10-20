@@ -12,7 +12,8 @@ import { DockTasks } from "@/components/chat/DockTasks";
 import type { ContextPanels } from "@/components/chat/contextPanels";
 import type { RoutineRunContext } from "@/components/routines/ReportBrowser";
 import { WORKSPACE_BAR } from "@/components/chat/workspaceBar";
-import type { Delegation } from "@/lib/api";
+import { IconButton } from "@/components/ui/IconButton";
+import type { Delegation } from "@/lib/api/delegations";
 import { inScope, resolveRoutine, type RoutineScope } from "@/lib/routineUtils";
 import { DOCK_WIDTH_KEY } from "@/lib/sessionState";
 
@@ -237,13 +238,13 @@ export const ContextDock = memo(function ContextDock({
               <span className="min-w-0 flex-1 truncate text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 This conversation
               </span>
-              <button
+              <IconButton
+                label="Close"
+                size="sm"
                 onClick={closeAll}
-                className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                title="Close"
               >
                 <PanelRightClose className="h-3.5 w-3.5" />
-              </button>
+              </IconButton>
             </div>
 
             <DockSection

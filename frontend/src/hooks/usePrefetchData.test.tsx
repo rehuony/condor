@@ -42,7 +42,13 @@ const calls = {
   getConnectors: vi.fn(async () => []),
 };
 
-vi.mock("@/lib/api", () => ({ api: calls }));
+// Each domain module hands out the same counted stub, so the count below is
+// the hook's total request volume regardless of which module serves a call.
+vi.mock("@/lib/api/servers", () => ({ serversApi: calls }));
+vi.mock("@/lib/api/bots", () => ({ botsApi: calls }));
+vi.mock("@/lib/api/executors", () => ({ executorsApi: calls }));
+vi.mock("@/lib/api/market", () => ({ marketApi: calls }));
+vi.mock("@/lib/api/settings", () => ({ settingsApi: calls }));
 
 const { usePrefetchData } = await import("./usePrefetchData");
 

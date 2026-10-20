@@ -10,10 +10,13 @@ import logging
 import time
 from typing import Any, Dict, List
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
-from telegram.ext import ContextTypes
-
+from condor.telegram.errors import BadRequest, is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 from ._shared import (
@@ -40,9 +43,7 @@ logger = logging.getLogger(__name__)
 # ============================================
 
 
-async def show_executors_menu(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def show_executors_menu(update: Update, context: Context) -> None:
     """Display the main executors menu with running summary
 
     Args:
@@ -180,7 +181,7 @@ async def show_executors_menu(
 
                 row.append(
                     InlineKeyboardButton(
-                        f"{type_icon} {pair} {side_label}",
+                        text=f"{type_icon} {pair} {side_label}",
                         callback_data=f"executors:detail:{executor_id[:20]}",
                     )
                 )
@@ -195,23 +196,25 @@ async def show_executors_menu(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "📐 Create Grid", callback_data="executors:create_grid"
+                    text="📐 Create Grid", callback_data="executors:create_grid"
                 ),
                 InlineKeyboardButton(
-                    "🎯 Create Position", callback_data="executors:create_position"
+                    text="🎯 Create Position", callback_data="executors:create_position"
                 ),
             ]
         )
 
         keyboard.append(
             [
-                InlineKeyboardButton("📜 History", callback_data="executors:history"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="executors:menu"),
-                InlineKeyboardButton("❌ Close", callback_data="executors:close"),
+                InlineKeyboardButton(
+                    text="📜 History", callback_data="executors:history"
+                ),
+                InlineKeyboardButton(text="🔄 Refresh", callback_data="executors:menu"),
+                InlineKeyboardButton(text="❌ Close", callback_data="executors:close"),
             ]
         )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         message_text = "\n".join(lines)
 
         if query:
@@ -223,15 +226,15 @@ async def show_executors_menu(
                 if "no text in the message" in str(e).lower():
                     await query.message.delete()
                     await context.bot.send_message(
-                        chat_id=query.message.chat_id,
+                        chat_id=query.message.chat.id,
                         text=message_text,
                         parse_mode="MarkdownV2",
                         reply_markup=reply_markup,
                     )
-                elif "Message is not modified" not in str(e):
+                elif not is_not_modified(e):
                     raise
         else:
-            await msg.reply_text(
+            await msg.answer(
                 message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
 
@@ -241,8 +244,8 @@ async def show_executors_menu(
 
         keyboard = [
             [
-                InlineKeyboardButton("🔄 Retry", callback_data="executors:menu"),
-                InlineKeyboardButton("❌ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="🔄 Retry", callback_data="executors:menu"),
+                InlineKeyboardButton(text="❌ Close", callback_data="executors:close"),
             ]
         ]
 
@@ -251,15 +254,15 @@ async def show_executors_menu(
                 await query.message.edit_text(
                     error_message,
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
             except BadRequest:
                 pass
         else:
-            await msg.reply_text(
+            await msg.answer(
                 error_message,
                 parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             )
 
 
@@ -268,9 +271,7 @@ async def show_executors_menu(
 # ============================================
 
 
-async def show_history(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0
-) -> None:
+async def show_history(update: Update, context: Context, page: int = 0) -> None:
     """Show recent non-running (completed/stopped/failed) executors."""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -359,7 +360,7 @@ async def show_history(
 
                 row.append(
                     InlineKeyboardButton(
-                        f"{type_icon} {pair} {side_label} {pnl_label}",
+                        text=f"{type_icon} {pair} {side_label} {pnl_label}",
                         callback_data=f"executors:hist_detail:{executor_id[:20]}",
                     )
                 )
@@ -376,13 +377,13 @@ async def show_history(
             if page > 0:
                 nav_row.append(
                     InlineKeyboardButton(
-                        "◀️ Prev", callback_data=f"executors:history:{page - 1}"
+                        text="◀️ Prev", callback_data=f"executors:history:{page - 1}"
                     )
                 )
             if start + per_page < total:
                 nav_row.append(
                     InlineKeyboardButton(
-                        "Next ▶️", callback_data=f"executors:history:{page + 1}"
+                        text="Next ▶️", callback_data=f"executors:history:{page + 1}"
                     )
                 )
             if nav_row:
@@ -390,12 +391,14 @@ async def show_history(
 
         keyboard.append(
             [
-                InlineKeyboardButton("🔄 Refresh", callback_data="executors:history"),
-                InlineKeyboardButton("⬅️ Back", callback_data="executors:menu"),
+                InlineKeyboardButton(
+                    text="🔄 Refresh", callback_data="executors:history"
+                ),
+                InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu"),
             ]
         )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         message_text = "\n".join(lines)
 
         if query:
@@ -404,12 +407,12 @@ async def show_history(
                     message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
                 )
             except BadRequest as e:
-                if "Message is not modified" not in str(e):
+                if not is_not_modified(e):
                     raise
         else:
             msg = update.message or (query.message if query else None)
             if msg:
-                await msg.reply_text(
+                await msg.answer(
                     message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
                 )
 
@@ -417,8 +420,10 @@ async def show_history(
         logger.error(f"Error showing executor history: {e}", exc_info=True)
         keyboard = [
             [
-                InlineKeyboardButton("🔄 Retry", callback_data="executors:history"),
-                InlineKeyboardButton("⬅️ Back", callback_data="executors:menu"),
+                InlineKeyboardButton(
+                    text="🔄 Retry", callback_data="executors:history"
+                ),
+                InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu"),
             ]
         ]
         if query:
@@ -426,14 +431,14 @@ async def show_history(
                 await query.message.edit_text(
                     format_error_message(f"Failed to fetch history: {str(e)}"),
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
             except BadRequest:
                 pass
 
 
 async def show_history_detail(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, executor_id: str
+    update: Update, context: Context, executor_id: str
 ) -> None:
     """Show detail for a historical executor, with Back → History."""
     query = update.callback_query
@@ -479,7 +484,7 @@ async def show_history_detail(
 
 
 async def show_executor_detail(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, executor_id: str
+    update: Update, context: Context, executor_id: str
 ) -> None:
     """Show detailed view for a specific executor
 
@@ -532,12 +537,12 @@ async def show_executor_detail(
 
     except Exception as e:
         logger.error(f"Error showing executor detail: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton("Back", callback_data="executors:menu")]]
+        keyboard = [[InlineKeyboardButton(text="Back", callback_data="executors:menu")]]
         try:
             await query.message.edit_text(
                 format_error_message(f"Error: {str(e)[:100]}"),
                 parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             )
         except Exception:
             pass
@@ -545,7 +550,7 @@ async def show_executor_detail(
 
 async def _render_executor_detail(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     executor: Dict[str, Any],
     back_callback: str = "executors:menu",
 ) -> None:
@@ -754,7 +759,7 @@ async def _render_executor_detail(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "🛑 Stop", callback_data=f"executors:stop:{full_id[:20]}"
+                    text="🛑 Stop", callback_data=f"executors:stop:{full_id[:20]}"
                 ),
             ]
         )
@@ -766,12 +771,12 @@ async def _render_executor_detail(
     )
     keyboard.append(
         [
-            InlineKeyboardButton("🔄 Refresh", callback_data=refresh_callback),
-            InlineKeyboardButton("⬅️ Back", callback_data=back_callback),
+            InlineKeyboardButton(text="🔄 Refresh", callback_data=refresh_callback),
+            InlineKeyboardButton(text="⬅️ Back", callback_data=back_callback),
         ]
     )
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
     message_text = "\n".join(lines)
 
     # Handle photo messages
@@ -780,7 +785,7 @@ async def _render_executor_detail(
             await query.message.delete()
         except Exception:
             pass
-        await query.message.chat.send_message(
+        await query.message.answer(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
     else:
@@ -789,7 +794,7 @@ async def _render_executor_detail(
                 message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
         except BadRequest as e:
-            if "Message is not modified" in str(e):
+            if is_not_modified(e):
                 await query.answer("✅ Already up to date")
             else:
                 raise
@@ -801,7 +806,7 @@ async def _render_executor_detail(
 
 
 async def handle_stop_executor(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, executor_id: str
+    update: Update, context: Context, executor_id: str
 ) -> None:
     """Handle stop executor request - show confirmation
 
@@ -823,10 +828,11 @@ async def handle_stop_executor(
     keyboard = [
         [
             InlineKeyboardButton(
-                "🛑 Yes, Stop", callback_data=f"executors:confirm_stop:{executor_id}"
+                text="🛑 Yes, Stop",
+                callback_data=f"executors:confirm_stop:{executor_id}",
             ),
             InlineKeyboardButton(
-                "⬅️ Cancel", callback_data=f"executors:detail:{executor_id}"
+                text="⬅️ Cancel", callback_data=f"executors:detail:{executor_id}"
             ),
         ],
     ]
@@ -842,12 +848,12 @@ async def handle_stop_executor(
     await query.message.edit_text(
         message_text,
         parse_mode="MarkdownV2",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
 async def handle_confirm_stop_executor(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, executor_id: str
+    update: Update, context: Context, executor_id: str
 ) -> None:
     """Actually stop the executor
 
@@ -905,7 +911,11 @@ async def handle_confirm_stop_executor(
         context.user_data.pop("running_executors", None)
 
         keyboard = [
-            [InlineKeyboardButton("📋 Back to List", callback_data="executors:menu")]
+            [
+                InlineKeyboardButton(
+                    text="📋 Back to List", callback_data="executors:menu"
+                )
+            ]
         ]
         if (stop_result or {}).get("status") == "already_terminated":
             # No-op stop: the executor was already terminal. A generic "stopped"
@@ -927,7 +937,7 @@ async def handle_confirm_stop_executor(
         await query.message.edit_text(
             text,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
     except Exception as e:
@@ -939,10 +949,10 @@ async def handle_confirm_stop_executor(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "🔄 Refresh List", callback_data="executors:menu"
+                        text="🔄 Refresh List", callback_data="executors:menu"
                     ),
                     InlineKeyboardButton(
-                        "⬅️ Back", callback_data=f"executors:detail:{executor_id}"
+                        text="⬅️ Back", callback_data=f"executors:detail:{executor_id}"
                     ),
                 ]
             ]
@@ -950,7 +960,7 @@ async def handle_confirm_stop_executor(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "⬅️ Back", callback_data=f"executors:detail:{executor_id}"
+                        text="⬅️ Back", callback_data=f"executors:detail:{executor_id}"
                     )
                 ]
             ]
@@ -958,7 +968,7 @@ async def handle_confirm_stop_executor(
         await query.message.edit_text(
             format_error_message(f"Stop failed: {error_msg[:200]}"),
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
@@ -967,7 +977,7 @@ async def handle_confirm_stop_executor(
 # ============================================
 
 
-async def show_create_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_create_menu(update: Update, context: Context) -> None:
     """Show menu for creating new executors
 
     Args:
@@ -986,21 +996,21 @@ async def show_create_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     keyboard = [
         [
             InlineKeyboardButton(
-                "📐 Grid Executor", callback_data="executors:create_grid"
+                text="📐 Grid Executor", callback_data="executors:create_grid"
             )
         ],
         [
             InlineKeyboardButton(
-                "🎯 Position Executor", callback_data="executors:create_position"
+                text="🎯 Position Executor", callback_data="executors:create_position"
             )
         ],
-        [InlineKeyboardButton("⬅️ Back", callback_data="executors:menu")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu")],
     ]
 
     await query.message.edit_text(
         "\n".join(lines),
         parse_mode="MarkdownV2",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
@@ -1009,7 +1019,7 @@ async def show_create_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # ============================================
 
 
-async def handle_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_close(update: Update, context: Context) -> None:
     """Handle close button - delete message and clear state
 
     Args:

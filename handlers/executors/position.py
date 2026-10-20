@@ -12,10 +12,13 @@ stop loss, take profit, time limit, trailing stop.
 import logging
 from typing import Any, Dict, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
-from telegram.ext import ContextTypes
-
+from condor.telegram.errors import BadRequest, is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from handlers._deeds import record_telegram_deed
 from handlers.bots._shared import fetch_current_price, get_available_cex_connectors
 from handlers.cex._shared import (
@@ -229,33 +232,43 @@ def _build_step_2_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "📊 Market", callback_data="executors:pos_entry:market"
+                    text="📊 Market", callback_data="executors:pos_entry:market"
                 ),
                 InlineKeyboardButton(
-                    f"📊 Current ({current_price:,.6g})",
+                    text=f"📊 Current ({current_price:,.6g})",
                     callback_data="executors:pos_entry:current",
                 ),
             ]
         )
         keyboard.append(
             [
-                InlineKeyboardButton("-2%", callback_data="executors:pos_entry:-2"),
-                InlineKeyboardButton("-1%", callback_data="executors:pos_entry:-1"),
-                InlineKeyboardButton("+1%", callback_data="executors:pos_entry:+1"),
-                InlineKeyboardButton("+2%", callback_data="executors:pos_entry:+2"),
+                InlineKeyboardButton(
+                    text="-2%", callback_data="executors:pos_entry:-2"
+                ),
+                InlineKeyboardButton(
+                    text="-1%", callback_data="executors:pos_entry:-1"
+                ),
+                InlineKeyboardButton(
+                    text="+1%", callback_data="executors:pos_entry:+1"
+                ),
+                InlineKeyboardButton(
+                    text="+2%", callback_data="executors:pos_entry:+2"
+                ),
             ]
         )
 
     keyboard.append(
-        [InlineKeyboardButton("🚀 Deploy", callback_data="executors:pos_deploy")]
+        [InlineKeyboardButton(text="🚀 Deploy", callback_data="executors:pos_deploy")]
     )
     keyboard.append(
         [
-            InlineKeyboardButton("⬅️ Back", callback_data="executors:create_position"),
-            InlineKeyboardButton("❌ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(
+                text="⬅️ Back", callback_data="executors:create_position"
+            ),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
         ]
     )
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # ============================================
@@ -263,9 +276,7 @@ def _build_step_2_keyboard(
 # ============================================
 
 
-async def start_position_wizard(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def start_position_wizard(update: Update, context: Context) -> None:
     """Start the position executor wizard."""
     query = update.callback_query
 
@@ -275,7 +286,7 @@ async def start_position_wizard(
     context.user_data["executor_wizard_step"] = 1
     context.user_data["executor_wizard_type"] = "position"
     context.user_data["executor_wizard_data"] = {}
-    context.user_data["executor_wizard_chat_id"] = query.message.chat_id
+    context.user_data["executor_wizard_chat_id"] = query.message.chat.id
     context.user_data["executor_wizard_msg_id"] = query.message.message_id
 
     await show_step_1_connector(update, context)
@@ -286,9 +297,7 @@ async def start_position_wizard(
 # ============================================
 
 
-async def show_step_1_connector(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def show_step_1_connector(update: Update, context: Context) -> None:
     """Show step 1 - connector selection."""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -302,7 +311,7 @@ async def show_step_1_connector(
 
         if not connectors:
             keyboard = [
-                [InlineKeyboardButton("⬅️ Back", callback_data="executors:menu")]
+                [InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu")]
             ]
             await query.message.edit_text(
                 "🎯 *Position Executor \\- Step 1/2*\n"
@@ -310,7 +319,7 @@ async def show_step_1_connector(
                 "_No CEX connectors configured\\._\n\n"
                 "Add API keys via /keys first\\.",
                 parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             )
             return
 
@@ -321,7 +330,7 @@ async def show_step_1_connector(
             display = conn[:20]
             row.append(
                 InlineKeyboardButton(
-                    f"🏦 {display}", callback_data=f"executors:pos_conn:{conn}"
+                    text=f"🏦 {display}", callback_data=f"executors:pos_conn:{conn}"
                 )
             )
             if len(row) == 2:
@@ -331,7 +340,7 @@ async def show_step_1_connector(
             keyboard.append(row)
 
         keyboard.append(
-            [InlineKeyboardButton("❌ Cancel", callback_data="executors:menu")]
+            [InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu")]
         )
 
         lines = [
@@ -344,21 +353,23 @@ async def show_step_1_connector(
         await query.message.edit_text(
             "\n".join(lines),
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
     except Exception as e:
         logger.error(f"Error in position step 1: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="executors:menu")]]
+        keyboard = [
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu")]
+        ]
         await query.message.edit_text(
             format_error_message(f"Error: {str(e)[:100]}"),
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
 async def handle_connector_select(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, connector: str
+    update: Update, context: Context, connector: str
 ) -> None:
     """Handle connector selection, show pair input."""
     query = update.callback_query
@@ -393,7 +404,9 @@ async def handle_connector_select(
         row = []
         for pair in executor_pairs[:4]:
             row.append(
-                InlineKeyboardButton(pair, callback_data=f"executors:pos_pair:{pair}")
+                InlineKeyboardButton(
+                    text=pair, callback_data=f"executors:pos_pair:{pair}"
+                )
             )
             if len(row) == 2:
                 keyboard.append(row)
@@ -403,21 +416,21 @@ async def handle_connector_select(
 
     keyboard.append(
         [
-            InlineKeyboardButton("⬅️ Back", callback_data="executors:create_position"),
-            InlineKeyboardButton("❌ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(
+                text="⬅️ Back", callback_data="executors:create_position"
+            ),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
         ]
     )
 
     await query.message.edit_text(
         "\n".join(lines),
         parse_mode="MarkdownV2",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def handle_pair_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, pair: str
-) -> None:
+async def handle_pair_input(update: Update, context: Context, pair: str) -> None:
     """Handle trading pair input (from button or text)."""
     pair = pair.upper().strip()
     if "/" in pair:
@@ -492,9 +505,7 @@ async def handle_pair_input(
 # ============================================
 
 
-async def show_step_2_config(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def show_step_2_config(update: Update, context: Context) -> None:
     """Show step 2 - text config editor + deploy button."""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -594,7 +605,11 @@ async def show_step_2_config(
     except Exception as e:
         logger.error(f"Error in position step 2: {e}", exc_info=True)
         keyboard = [
-            [InlineKeyboardButton("⬅️ Back", callback_data="executors:create_position")]
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Back", callback_data="executors:create_position"
+                )
+            ]
         ]
         error_text = format_error_message(f"Error: {str(e)[:100]}")
         if query:
@@ -602,7 +617,7 @@ async def show_step_2_config(
                 await query.message.edit_text(
                     error_text,
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
             except Exception:
                 pass
@@ -615,15 +630,13 @@ async def show_step_2_config(
                         message_id=msg_id,
                         text=error_text,
                         parse_mode="MarkdownV2",
-                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                     )
                 except Exception:
                     pass
 
 
-async def _refresh_step_2(
-    context: ContextTypes.DEFAULT_TYPE, chat_id: int, msg_id: int
-) -> None:
+async def _refresh_step_2(context: Context, chat_id: int, msg_id: int) -> None:
     """Refresh step 2 after config text input."""
     config = get_executor_config(context)
 
@@ -645,7 +658,7 @@ async def _refresh_step_2(
             reply_markup=reply_markup,
         )
     except BadRequest as e:
-        if "Message is not modified" not in str(e):
+        if not is_not_modified(e):
             logger.error(f"Error refreshing position step 2: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"Error refreshing position step 2: {e}", exc_info=True)
@@ -656,9 +669,7 @@ async def _refresh_step_2(
 # ============================================
 
 
-async def handle_config_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
-) -> None:
+async def handle_config_input(update: Update, context: Context, text: str) -> None:
     """Handle key=value config input from user."""
     chat_id = update.effective_chat.id
     msg_id = context.user_data.get("executor_wizard_msg_id")
@@ -758,7 +769,7 @@ async def handle_config_input(
 
 
 async def handle_entry_price_select(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, option: str
+    update: Update, context: Context, option: str
 ) -> None:
     """Handle entry price quick-pick button."""
     config = get_executor_config(context)
@@ -789,7 +800,7 @@ async def handle_entry_price_select(
 # ============================================
 
 
-async def handle_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_deploy(update: Update, context: Context) -> None:
     """Handle deploy button - create the position executor."""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -940,9 +951,9 @@ async def handle_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "📋 View Executors", callback_data="executors:menu"
+                    text="📋 View Executors", callback_data="executors:menu"
                 ),
-                InlineKeyboardButton("❌ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="❌ Close", callback_data="executors:close"),
             ]
         ]
 
@@ -967,7 +978,7 @@ async def handle_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"🆔 `{escape_markdown_v2(str(executor_id)[:30])}`\n\n"
             f"_The executor is now running\\._",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
         clear_executors_state(context)
@@ -979,9 +990,9 @@ async def handle_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🔄 Try Again", callback_data="executors:pos_step2"
+                    text="🔄 Try Again", callback_data="executors:pos_step2"
                 ),
-                InlineKeyboardButton("❌ Cancel", callback_data="executors:menu"),
+                InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
             ]
         ]
 
@@ -991,7 +1002,7 @@ async def handle_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 message_id=loading_msg_id,
                 text=format_error_message(f"Deploy failed: {error_msg[:300]}"),
                 parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             )
         except Exception:
             pass

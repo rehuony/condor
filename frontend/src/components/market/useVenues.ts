@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
+import { marketApi } from "@/lib/api/market";
 import type { VenueTraits } from "@/lib/connector-capabilities";
 
 /**
@@ -30,7 +30,7 @@ export function venuesQueryKey(server: string | null | undefined) {
 export function useVenues(server: string | null | undefined) {
   const { data: venues = [], isPending } = useQuery<VenueTraits[]>({
     queryKey: venuesQueryKey(server),
-    queryFn: () => api.getVenues(server!),
+    queryFn: () => marketApi.getVenues(server!),
     enabled: !!server,
     staleTime: 5 * 60 * 1000,
   });

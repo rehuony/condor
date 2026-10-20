@@ -181,7 +181,7 @@ def _creator_agent_key() -> str:
     """The model the calling user is currently running, or "" if unknown.
 
     Mirrored into config.yml by handlers.agents.set_active_llm, since the live
-    value lives in the bot's PTB pickle which this subprocess can't read.
+    value lives in the bot's state pickle which this subprocess can't read.
     """
     try:
         from condor.preferences import get_active_agent_key

@@ -20,7 +20,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ControllerInfo, ControllerPerformanceSnapshot } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ControllerPerformanceSnapshot } from "@/lib/api/performance";
 import { useActiveSnapshots } from "./useActiveSnapshots";
 
 declare global {

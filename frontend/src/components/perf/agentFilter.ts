@@ -16,7 +16,7 @@
 // reachable from a test rather than only from a rendered sidebar.
 
 import type { BubbleOption } from "@/components/perf/FilterBubbles";
-import type { DeploymentRow } from "@/lib/api";
+import type { DeploymentRow } from "@/lib/api/agents";
 import {
   inNamespace,
   ownerRowLabel,

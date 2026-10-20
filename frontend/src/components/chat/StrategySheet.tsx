@@ -19,7 +19,8 @@ import {
 } from "@/components/agent/workspace/workspaceUrl";
 import type { PaneView } from "@/components/chat/paneUrl";
 import { WorkspaceSheet } from "@/components/chat/WorkspaceSheet";
-import { api } from "@/lib/api";
+import { IconButton } from "@/components/ui/IconButton";
+import { agentsApi } from "@/lib/api/agents";
 import { agentQuery } from "@/lib/queryClient";
 
 type StrategyPane = Extract<PaneView, { kind: "strategy" }>;
@@ -72,7 +73,7 @@ export function StrategySheet({
   // cache hit, and the fallback is the slug rather than a spinner in the bar.
   const { data: strategy } = useQuery({
     queryKey: ["strategy", slug, sslug],
-    queryFn: () => api.getStrategy(slug, sslug),
+    queryFn: () => agentsApi.getStrategy(slug, sslug),
     enabled: !!slug && !!sslug,
   });
   // The panel this pane replaced was reading the same key, so the name in the
@@ -171,16 +172,14 @@ export function StrategySheet({
       // as "close the panel" and does not read as "back to Brigado".
       header={
         <div className="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
+          <IconButton
+            label={arrowTitle}
+            size="sm"
             onClick={onArrow}
-            className="shrink-0 rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-            title={arrowTitle}
-            aria-label={arrowTitle}
             data-strategy-back
           >
             <ArrowLeft className="h-4 w-4" />
-          </button>
+          </IconButton>
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-[var(--color-text)]">
               {title}

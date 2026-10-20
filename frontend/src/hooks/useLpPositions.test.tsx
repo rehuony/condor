@@ -23,14 +23,18 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 
 const getExecutors = vi.fn();
 const getDexPoolsByAddress = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
     getExecutors: (...args: unknown[]) => getExecutors(...args),
+  },
+}));
+vi.mock("@/lib/api/dex", () => ({
+  dexApi: {
     getDexPoolsByAddress: (...args: unknown[]) => getDexPoolsByAddress(...args),
   },
 }));

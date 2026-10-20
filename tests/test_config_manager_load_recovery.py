@@ -92,6 +92,46 @@ def test_missing_config_still_bootstraps_defaults(cm_env):
     assert written["servers"] == {}
 
 
+def test_saving_unchanged_state_does_not_touch_the_file(cm_env, monkeypatch):
+    """A setter asked to store what is already stored writes nothing."""
+    config_path = cm_env / "config.yml"
+    _write_yaml(config_path, VALID_CONFIG)
+    cm = ConfigManager(str(config_path))
+    cm.set_user_preference(222, "dex", {"slippage": "1"})
+    before = config_path.read_text()
+    backup_before = config_path.with_suffix(".yml.bak").read_text()
+
+    import config_manager as cm_module
+
+    writes = []
+    monkeypatch.setattr(
+        cm_module, "atomic_write_text", lambda *a, **k: writes.append(a[0])
+    )
+    cm.set_user_preference(222, "dex", {"slippage": "1"})
+
+    assert writes == []
+    assert config_path.read_text() == before
+    assert config_path.with_suffix(".yml.bak").read_text() == backup_before
+
+
+def test_a_crash_while_publishing_leaves_the_previous_file_whole(cm_env, monkeypatch):
+    """The save goes through a temp file and a rename, never a truncate."""
+    config_path = cm_env / "config.yml"
+    _write_yaml(config_path, VALID_CONFIG)
+    cm = ConfigManager(str(config_path))
+    before = config_path.read_text()
+
+    def explode(src, dst):
+        raise OSError("power cut")
+
+    monkeypatch.setattr("condor.fsutil.os.replace", explode)
+    with pytest.raises(OSError):
+        cm.register_pending(555, "unlucky")
+
+    assert config_path.read_text() == before
+    assert not list(cm_env.glob(".config.yml.*.tmp"))
+
+
 def test_save_keeps_a_backup_of_the_previous_file(cm_env):
     """Each save rotates the last known-good file to .bak."""
     config_path = cm_env / "config.yml"

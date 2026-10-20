@@ -29,7 +29,7 @@ class FakeBot:
         self.documents = []
 
     async def send_document(self, chat_id, document, filename=None, caption=None):
-        self.documents.append(document.read())
+        self.documents.append(document.data)
 
 
 class FakeQuery:

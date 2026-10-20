@@ -17,7 +17,6 @@ are views over this API, which is why the dashboard costs no orchestration:
 
 from condor.updates.components import (
     CONDOR,
-    HUMMINGBOT_API,
     Block,
     Component,
     ComponentStatus,
@@ -25,7 +24,6 @@ from condor.updates.components import (
     Preflight,
     Warning,
     check,
-    hb_api_base_url,
     invalidate,
     keys,
     preflight,
@@ -50,7 +48,6 @@ from condor.updates.run import (
 
 __all__ = [
     "CONDOR",
-    "HUMMINGBOT_API",
     "Block",
     "Component",
     "ComponentStatus",
@@ -63,7 +60,6 @@ __all__ = [
     "check",
     "current",
     "finalize_pending_run",
-    "hb_api_base_url",
     "invalidate",
     "keys",
     "preflight",

@@ -12,7 +12,6 @@ from datetime import datetime
 
 import plotly.graph_objects as go
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from condor.archived_chart_series import activity_range, build_chart_series
 from condor.archived_controllers import group_by_controller
@@ -20,7 +19,7 @@ from condor.fetchers.archived_run import ArchivedRunUnavailable, fetch_archived_
 from condor.quote_conversion import QuoteRates
 from condor.reports import subjects
 from config_manager import get_client
-from routines.base import RoutineResult
+from routines.base import RoutineContext, RoutineResult
 
 logger = logging.getLogger(__name__)
 
@@ -782,7 +781,7 @@ def _report_title(config: Config) -> str:
     return title
 
 
-def _server_name(chat_id: int | None, context: ContextTypes.DEFAULT_TYPE) -> str:
+def _server_name(chat_id: int | None, context: RoutineContext) -> str:
     """The server this run belongs to — the key its report is filed under.
 
     Works from every seat: web and agent runs arrive on a ``WebRoutineContext``,
@@ -797,9 +796,7 @@ def _server_name(chat_id: int | None, context: ContextTypes.DEFAULT_TYPE) -> str
     if launched_with:
         return launched_with
 
-    user_data = getattr(context, "user_data", None)
-    if user_data is None:
-        user_data = getattr(context, "_user_data", None)
+    user_data = context.user_data
 
     try:
         name = get_effective_server(chat_id, user_data)
@@ -810,13 +807,13 @@ def _server_name(chat_id: int | None, context: ContextTypes.DEFAULT_TYPE) -> str
     return name or get_config_manager().get_default_server() or ""
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> RoutineResult:
+async def run(config: Config, context: RoutineContext) -> RoutineResult:
     if config.mode not in MODES:
         return RoutineResult(
             text=f"Unknown mode '{config.mode}'. Use one of: {', '.join(MODES)}."
         )
 
-    chat_id = getattr(context, "_chat_id", None)
+    chat_id = context.chat_id
 
     # One answer to "which server is this run": the box the archive is read from
     # and the key its report is filed under have to be the same server, or a
@@ -825,7 +822,9 @@ async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> RoutineResu
 
     # Gated by the caller's access — never a server named in the config, which
     # would reach any configured server unchecked.
-    client = await get_client(chat_id, context=context, server=server or None)
+    client = await get_client(
+        chat_id, user_data=context.user_data, server=server or None
+    )
     if not client:
         return RoutineResult(text="No server available for this run.")
 

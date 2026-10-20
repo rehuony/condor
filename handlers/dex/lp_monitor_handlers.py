@@ -12,9 +12,13 @@ Handles user interactions with LP monitor out-of-range alerts:
 import logging
 from decimal import Decimal
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.telegram_formatters import escape_markdown_v2, resolve_token_symbol
 
 logger = logging.getLogger(__name__)
@@ -116,17 +120,19 @@ def format_position_detail_view(
         if index > 0:
             nav_row.append(
                 InlineKeyboardButton(
-                    "◀️ Prev",
+                    text="◀️ Prev",
                     callback_data=f"dex:lpm_detail:{instance_id}:{index - 1}",
                 )
             )
         nav_row.append(
-            InlineKeyboardButton(f"{index + 1}/{total}", callback_data="dex:lpm_noop")
+            InlineKeyboardButton(
+                text=f"{index + 1}/{total}", callback_data="dex:lpm_noop"
+            )
         )
         if index < total - 1:
             nav_row.append(
                 InlineKeyboardButton(
-                    "Next ▶️",
+                    text="Next ▶️",
                     callback_data=f"dex:lpm_detail:{instance_id}:{index + 1}",
                 )
             )
@@ -135,25 +141,25 @@ def format_position_detail_view(
     keyboard.append(
         [
             InlineKeyboardButton(
-                "💰 Collect Fees", callback_data=f"dex:lpm_collect:{cache_key}"
+                text="💰 Collect Fees", callback_data=f"dex:lpm_collect:{cache_key}"
             ),
             InlineKeyboardButton(
-                "❌ Close", callback_data=f"dex:pos_close:{cache_key}"
+                text="❌ Close", callback_data=f"dex:pos_close:{cache_key}"
             ),
         ]
     )
     keyboard.append(
         [
             InlineKeyboardButton(
-                "🔄 Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
+                text="🔄 Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
             ),
             InlineKeyboardButton(
-                "✅ Dismiss", callback_data=f"dex:lpm_dismiss:{instance_id}"
+                text="✅ Dismiss", callback_data=f"dex:lpm_dismiss:{instance_id}"
             ),
         ]
     )
 
-    return text, InlineKeyboardMarkup(keyboard)
+    return text, InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _get_positions_for_instance(positions_cache: dict, instance_id: str) -> list[dict]:
@@ -176,7 +182,7 @@ def _get_positions_for_instance(positions_cache: dict, instance_id: str) -> list
 
 
 async def handle_lpm_navigation(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, instance_id: str, new_index: int
+    update: Update, context: Context, instance_id: str, new_index: int
 ) -> None:
     """Handle navigation in LP monitor alert message."""
     query = update.callback_query
@@ -272,19 +278,19 @@ async def handle_lpm_navigation(
         if new_index > 0:
             nav_row.append(
                 InlineKeyboardButton(
-                    "◀️ Prev",
+                    text="◀️ Prev",
                     callback_data=f"dex:lpm_nav:{instance_id}:{new_index - 1}",
                 )
             )
         nav_row.append(
             InlineKeyboardButton(
-                f"{new_index + 1}/{total}", callback_data="dex:lpm_noop"
+                text=f"{new_index + 1}/{total}", callback_data="dex:lpm_noop"
             )
         )
         if new_index < total - 1:
             nav_row.append(
                 InlineKeyboardButton(
-                    "Next ▶️",
+                    text="Next ▶️",
                     callback_data=f"dex:lpm_nav:{instance_id}:{new_index + 1}",
                 )
             )
@@ -293,26 +299,30 @@ async def handle_lpm_navigation(
     keyboard.append(
         [
             InlineKeyboardButton(
-                "❌ Close", callback_data=f"dex:pos_close:{cache_key}"
+                text="❌ Close", callback_data=f"dex:pos_close:{cache_key}"
             ),
-            InlineKeyboardButton("⏭ Skip", callback_data=f"dex:lpm_skip:{cache_key}"),
             InlineKeyboardButton(
-                "✅ Dismiss", callback_data=f"dex:lpm_dismiss:{instance_id}"
+                text="⏭ Skip", callback_data=f"dex:lpm_skip:{cache_key}"
+            ),
+            InlineKeyboardButton(
+                text="✅ Dismiss", callback_data=f"dex:lpm_dismiss:{instance_id}"
             ),
         ]
     )
 
     try:
         await query.message.edit_text(
-            text, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+            text,
+            parse_mode="MarkdownV2",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
     except Exception as e:
-        if "not modified" not in str(e).lower():
+        if not is_not_modified(e):
             logger.warning(f"Failed to update LPM navigation: {e}")
 
 
 async def handle_lpm_oor_navigation(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, instance_id: str, index: int
+    update: Update, context: Context, instance_id: str, index: int
 ) -> None:
     """Navigate only out-of-range positions."""
     query = update.callback_query
@@ -357,18 +367,18 @@ async def handle_lpm_oor_navigation(
     if index > 0:
         nav_row.append(
             InlineKeyboardButton(
-                "◀️ Prev", callback_data=f"dex:lpm_oor:{instance_id}:{index - 1}"
+                text="◀️ Prev", callback_data=f"dex:lpm_oor:{instance_id}:{index - 1}"
             )
         )
     nav_row.append(
         InlineKeyboardButton(
-            f"⚠️ {index + 1}/{len(oor_positions)}", callback_data="dex:noop"
+            text=f"⚠️ {index + 1}/{len(oor_positions)}", callback_data="dex:noop"
         )
     )
     if index < len(oor_positions) - 1:
         nav_row.append(
             InlineKeyboardButton(
-                "Next ▶️", callback_data=f"dex:lpm_oor:{instance_id}:{index + 1}"
+                text="Next ▶️", callback_data=f"dex:lpm_oor:{instance_id}:{index + 1}"
             )
         )
     if nav_row:
@@ -377,34 +387,36 @@ async def handle_lpm_oor_navigation(
     keyboard.append(
         [
             InlineKeyboardButton(
-                "💰 Collect Fees", callback_data=f"dex:lpm_collect:{cache_key}"
+                text="💰 Collect Fees", callback_data=f"dex:lpm_collect:{cache_key}"
             ),
             InlineKeyboardButton(
-                "❌ Close", callback_data=f"dex:pos_close:{cache_key}"
-            ),
-        ]
-    )
-    keyboard.append(
-        [
-            InlineKeyboardButton(
-                "🔄 Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
+                text="❌ Close", callback_data=f"dex:pos_close:{cache_key}"
             ),
         ]
     )
     keyboard.append(
         [
             InlineKeyboardButton(
-                "« Back to List", callback_data=f"dex:lpm_dismiss:{instance_id}"
+                text="🔄 Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
+            ),
+        ]
+    )
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="« Back to List", callback_data=f"dex:lpm_dismiss:{instance_id}"
             ),
         ]
     )
 
     try:
         await query.message.edit_text(
-            text, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+            text,
+            parse_mode="MarkdownV2",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
     except Exception as e:
-        if "not modified" not in str(e).lower():
+        if not is_not_modified(e):
             logger.warning(f"Failed to update OOR navigation: {e}")
 
 
@@ -414,7 +426,7 @@ async def handle_lpm_oor_navigation(
 
 
 async def handle_lpm_detail(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, instance_id: str, index: int
+    update: Update, context: Context, instance_id: str, index: int
 ) -> None:
     """Handle position detail view with actions."""
     query = update.callback_query
@@ -440,7 +452,7 @@ async def handle_lpm_detail(
             text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
     except Exception as e:
-        if "not modified" not in str(e).lower():
+        if not is_not_modified(e):
             logger.warning(f"Failed to update position detail: {e}")
 
 
@@ -450,7 +462,7 @@ async def handle_lpm_detail(
 
 
 async def handle_lpm_collect_fees(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, cache_key: str
+    update: Update, context: Context, cache_key: str
 ) -> None:
     """Collect fees for a position."""
     query = update.callback_query
@@ -467,9 +479,9 @@ async def handle_lpm_collect_fees(
     try:
         from config_manager import get_client
 
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
         if not client or not hasattr(client, "gateway_clmm"):
-            await query.message.reply_text("❌ Gateway not available")
+            await query.message.answer("❌ Gateway not available")
             return
 
         # Get position details
@@ -485,16 +497,16 @@ async def handle_lpm_collect_fees(
 
         if result:
             tx_hash = (result.get("transaction_hash", "") or "N/A")[:16]
-            await query.message.reply_text(
+            await query.message.answer(
                 f"✅ *Fees collected*\nTx: `{escape_markdown_v2(tx_hash)}...`",
                 parse_mode="MarkdownV2",
             )
         else:
-            await query.message.reply_text("❌ Failed: No response from gateway")
+            await query.message.answer("❌ Failed: No response from gateway")
 
     except Exception as e:
         logger.error(f"Failed to collect fees: {e}")
-        await query.message.reply_text(f"❌ Error: {str(e)[:100]}")
+        await query.message.answer(f"❌ Error: {str(e)[:100]}")
 
 
 # ============================================
@@ -503,7 +515,7 @@ async def handle_lpm_collect_fees(
 
 
 async def handle_lpm_rebalance(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, cache_key: str
+    update: Update, context: Context, cache_key: str
 ) -> None:
     """Start rebalance flow: show confirmation before close + reopen."""
     query = update.callback_query
@@ -539,25 +551,28 @@ async def handle_lpm_rebalance(
     keyboard = [
         [
             InlineKeyboardButton(
-                "✅ Confirm Rebalance",
+                text="✅ Confirm Rebalance",
                 callback_data=f"dex:lpm_rebalance_confirm:{cache_key}",
             ),
             InlineKeyboardButton(
-                "❌ Cancel", callback_data=f"dex:lpm_dismiss:{cache_key.split('_')[1]}"
+                text="❌ Cancel",
+                callback_data=f"dex:lpm_dismiss:{cache_key.split('_')[1]}",
             ),
         ]
     ]
 
     try:
         await query.message.edit_text(
-            text, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+            text,
+            parse_mode="MarkdownV2",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
     except Exception as e:
         logger.warning(f"Failed to show rebalance confirmation: {e}")
 
 
 async def handle_lpm_rebalance_execute(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, cache_key: str
+    update: Update, context: Context, cache_key: str
 ) -> None:
     """Execute the rebalance: close position and open new one with same range."""
     query = update.callback_query
@@ -581,7 +596,7 @@ async def handle_lpm_rebalance_execute(
     try:
         from config_manager import get_client
 
-        client = await get_client(chat_id, context=context)
+        client = await get_client(chat_id, user_data=context.user_data)
         if not client or not hasattr(client, "gateway_clmm"):
             await query.message.edit_text("❌ Gateway not available")
             return
@@ -763,9 +778,7 @@ async def handle_lpm_rebalance_execute(
 # ============================================
 
 
-async def handle_lpm_skip(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, cache_key: str
-) -> None:
+async def handle_lpm_skip(update: Update, context: Context, cache_key: str) -> None:
     """Skip a position alert (remove from cache and dismiss)."""
     query = update.callback_query
     await query.answer("Skipped")
@@ -781,9 +794,7 @@ async def handle_lpm_skip(
         pass
 
 
-async def handle_lpm_dismiss(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_lpm_dismiss(update: Update, context: Context) -> None:
     """Dismiss the LP monitor alert message."""
     query = update.callback_query
     await query.answer("Dismissed")
@@ -805,7 +816,7 @@ async def handle_lpm_dismiss(
 
 
 async def handle_lpm_cancel_countdown(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, instance_id: str, pos_id: str
+    update: Update, context: Context, instance_id: str, pos_id: str
 ) -> None:
     """Cancel an active auto-close countdown."""
     query = update.callback_query

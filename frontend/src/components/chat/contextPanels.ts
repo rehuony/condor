@@ -36,12 +36,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { conversationInstances } from "@/components/chat/DockRoutines";
 import type { RailItem } from "@/components/chat/WorkspaceRail";
-import {
-  api,
-  type Delegation,
-  type RoutineInfo,
-  type RoutineInstance,
-} from "@/lib/api";
+import type { Delegation } from "@/lib/api/delegations";
+import { routinesApi, type RoutineInfo, type RoutineInstance } from "@/lib/api/routines";
 import { DOCK_PANES_KEY } from "@/lib/sessionState";
 
 /** Where the dock stops being a column and starts overlaying (Tailwind `xl`). */
@@ -160,7 +156,7 @@ export function useContextPanels({
 
   const { data: instances = NO_INSTANCES } = useQuery({
     queryKey: ["routine-instances"],
-    queryFn: api.getRoutineInstances,
+    queryFn: routinesApi.getRoutineInstances,
     // Polled whenever anything in the dock is up, not only while the Routines
     // pane is: a closed Routines still has to be able to say "one is running".
     enabled: anyOpen,
@@ -171,7 +167,7 @@ export function useContextPanels({
   // report browser, so the pane it opens costs no second fetch.
   const { data: routines = NO_ROUTINES } = useQuery({
     queryKey: ["routines"],
-    queryFn: api.getRoutines,
+    queryFn: routinesApi.getRoutines,
     enabled: anyOpen,
   });
 

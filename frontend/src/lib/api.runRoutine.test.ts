@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./api";
+import { routinesApi } from "./api/routines";
 
 /** Record the body of the single request the call makes. */
 function serve() {
@@ -45,7 +45,7 @@ describe("runRoutine", () => {
   it("carries the conversation that asked for the run", async () => {
     const bodies = serve();
 
-    await api.runRoutine("chat-server", "backtest_chart", { pair: "SOL-USDC" }, {
+    await routinesApi.runRoutine("chat-server", "backtest_chart", { pair: "SOL-USDC" }, {
       sessionKey: "web:42:main",
       attributeTo: "scout",
     });
@@ -62,7 +62,7 @@ describe("runRoutine", () => {
   it("omits it when there is no conversation behind the run", async () => {
     const bodies = serve();
 
-    await api.runRoutine("dashboard-server", "backtest_chart");
+    await routinesApi.runRoutine("dashboard-server", "backtest_chart");
 
     // Not `session_key: ""` — the dashboard's own runs are nobody's, and the
     // route reads a present-but-empty key the same way. Sending it anyway would
@@ -77,7 +77,7 @@ describe("runRoutine", () => {
   it("omits it for a conversation the browser was opened without", async () => {
     const bodies = serve();
 
-    await api.runRoutine("dashboard-server", "backtest_chart", {}, {});
+    await routinesApi.runRoutine("dashboard-server", "backtest_chart", {}, {});
 
     expect(bodies[0]).not.toHaveProperty("session_key");
     expect(bodies[0]).not.toHaveProperty("attribute_to");

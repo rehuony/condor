@@ -29,8 +29,8 @@ const getVenues = vi.fn(async (server: string) => {
   return VENUES;
 });
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
     getVenues: (server: string) => getVenues(server),
   },
 }));

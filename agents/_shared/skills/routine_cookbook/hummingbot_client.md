@@ -35,7 +35,7 @@ the code and cannot drift; a list in this file can.
 ```python
 from config_manager import get_client
 
-client = await get_client(context._chat_id, context=context)
+client = await get_client(context.chat_id, user_data=context.user_data)
 if not client:
     return "No server available"
 ```

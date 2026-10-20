@@ -5,7 +5,21 @@ maintained for the owner's personal use. Prioritize personal workflows and
 reliability; external issues, feature requests, and pull requests are not accepted.
 `main` is the development and release baseline. `origin` points to this repository;
 development and deployment do not synchronize another Condor repository. Project
-provenance is recorded in the [README](../README.md).
+provenance is recorded in the [README](../README.md); usage is in the
+[user guide](user-guide.md).
+
+## Repository layout
+
+Product code lives in `main.py`, `config_manager.py` and the `condor/`, `handlers/`,
+`routines/`, `agents/`, `mcp_servers/`, `utils/` and `frontend/` trees. Operational
+scripts live under [`scripts/shell/`](../scripts/README.md): the Makefile only
+dispatches to them, so a target's behavior is read in one script, and the default
+target is `make help`. Files copied into a new installation live in `templates/`.
+Runtime state (`.env`, `config.yml`, `data/`, `reports/`, `.condor/`) is ignored by Git.
+
+Keep the root free of operational scripts. When moving one, update the Makefile,
+CI, tests, documentation and every message that names it in the same change, as
+[scripts/README.md](../scripts/README.md) describes.
 
 ## Development and publication
 
@@ -56,6 +70,9 @@ uv run --locked python -c 'import config_manager; import handlers; import utils'
 uv run --locked pytest --tb=short -q
 npm --prefix frontend test
 npm --prefix frontend run lint:ci
+for script in scripts/shell/*.sh scripts/shell/lib/*.sh; do bash -n "$script"; done
+shellcheck -S error -x -P scripts/shell scripts/shell/*.sh scripts/shell/lib/*.sh
+make --dry-run setup install check-update update build-frontend run stop doctor
 ```
 
 Also run the frontend production build. On a checkout that serves a dashboard,
@@ -77,10 +94,12 @@ Keep generated evidence in `.condor/research/` under the
 
 ## Deployment and updates
 
-Deploy a clean `main` checkout of `rehuony/condor`, tracking `origin/main`. The
-update interface fetches `origin` and fast-forwards the checked-out branch, so
-each deployment must use `main`. It installs dependencies, rebuilds the dashboard
-when needed, and reports when a process relaunch is required. Code on disk and a
+Deploy a clean `main` checkout of `rehuony/condor`, tracking `origin/main`. Both
+`make update` and the in-app update interface fetch `origin` and fast-forward the
+checked-out branch, so each deployment must use `main`. `make check-update` compares
+the checkout with `origin/main` and changes only Git metadata. The in-app interface
+also installs dependencies, rebuilds the dashboard when needed, and reports when a
+process relaunch is required; `make update` does none of that. Code on disk and a
 running process are separate states.
 
 Before updating, record the current and target full SHAs and back up runtime
@@ -95,12 +114,8 @@ For a manual update, inspect the incoming commits and relevant data migrations
 before applying them:
 
 ```sh
-git status --short --branch
-git remote get-url origin
-git branch --show-current
-git fetch --prune origin
-git log --oneline HEAD..origin/main
-git rev-parse HEAD origin/main
+make check-update
+git log --oneline HEAD..FETCH_HEAD
 ```
 
 After confirming a clean `main` checkout, passing CI for the target SHA, backups,
@@ -110,7 +125,7 @@ managed by this repository's tmux commands:
 
 ```sh
 make stop
-git merge --ff-only origin/main
+make update
 uv sync --locked
 make doctor
 make run

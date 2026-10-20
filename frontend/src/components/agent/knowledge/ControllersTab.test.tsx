@@ -17,7 +17,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentBrain, ControllerCard } from "@/lib/api";
+import type { AgentBrain, ControllerCard } from "@/lib/api/agents";
 
 const getAgentBrain = vi.fn();
 const getAgentControllers = vi.fn();
@@ -26,8 +26,8 @@ const uploadAgentControllerConfig = vi.fn();
 const getAgentControllerSource = vi.fn();
 const getAgentControllerSample = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgentBrain: (...a: unknown[]) => getAgentBrain(...a),
     getAgentControllers: (...a: unknown[]) => getAgentControllers(...a),
     syncAgentController: (...a: unknown[]) => syncAgentController(...a),

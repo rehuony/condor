@@ -5,7 +5,7 @@ import {
   tickCountdownLabel,
 } from "@/components/agent/workspace/fleet";
 import { useSeconds } from "@/hooks/useSeconds";
-import type { StrategySummary } from "@/lib/api";
+import type { StrategySummary } from "@/lib/api/agents";
 
 /**
  * Whether this agent is looping, said before anything else about it.

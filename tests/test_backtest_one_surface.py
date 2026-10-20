@@ -133,7 +133,10 @@ class FakeContext:
     """A Telegram chat: the server comes from the active-server preference."""
 
     def __init__(self, chat_id=42):
-        self._chat_id = chat_id
+        self.chat_id = chat_id
+        self.owner_id = chat_id
+        self.instance_id = ""
+        self.server_name = ""
         self.bot = FakeBot()
         self.user_data = {"user_preferences": {"general": {"active_server": SERVER}}}
 
@@ -307,9 +310,9 @@ def test_backtest_compare_picks_up_routine_runs(store, routine):
 
 def test_an_agent_run_is_filed_under_the_server_it_was_launched_with(store, routine):
     """No chat, no preferences — the seat a shared routine actually runs from."""
-    from condor.routine_store import WebRoutineContext
+    from routines.base import RoutineContext
 
-    context = WebRoutineContext(SERVER, bot=FakeBot(), chat_id=0)
+    context = RoutineContext.pinned(SERVER, bot=FakeBot(), chat_id=0)
     routine(_completed("task-agent"), context=context)
 
     assert store.get_result("task-agent")["server"] == SERVER
@@ -419,9 +422,9 @@ def test_chart_true_still_sends_the_photo(routine):
 
 def test_a_chat_less_run_never_sends_a_photo(routine):
     """A shared routine runs under agents, which have no chat."""
-    from condor.routine_store import WebRoutineContext
+    from routines.base import RoutineContext
 
-    context = WebRoutineContext(SERVER, bot=FakeBot(), chat_id=0)
+    context = RoutineContext.pinned(SERVER, bot=FakeBot(), chat_id=0)
     routine(_completed("task-agent"), context=context)
 
     assert context.bot.photos == 0

@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from condor import telegram_ingress
-from condor.telegram_ingress import TelegramIngress
-from condor.telegram_input import InputError
+from condor.telegram import ingress as telegram_ingress
+from condor.telegram.ingress import TelegramIngress
+from condor.telegram.input import InputError
 
 
 def update(message_id, *, chat_id=7, album=None):

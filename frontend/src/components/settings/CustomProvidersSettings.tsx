@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2, Plus, Server } from "lucide-react";
+import { Check, Plus, Server } from "lucide-react";
 import { useState } from "react";
 
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
-import { api } from "@/lib/api";
-import type { CustomProvider } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
+import { chatApi, type CustomProvider } from "@/lib/api/chat";
 
 /**
  * Manage OpenAI-compatible LLM endpoints (Venice AI, Together, Fireworks, a
@@ -22,7 +22,7 @@ export function CustomProvidersSettings() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["custom-providers"],
-    queryFn: () => api.getCustomProviders(),
+    queryFn: () => chatApi.getCustomProviders(),
   });
 
   const invalidate = () => {
@@ -34,7 +34,7 @@ export function CustomProvidersSettings() {
   };
 
   const remove = useMutation({
-    mutationFn: (name: string) => api.deleteCustomProvider(name),
+    mutationFn: (name: string) => chatApi.deleteCustomProvider(name),
     onSuccess: () => {
       setConfirmDelete(null);
       invalidate();
@@ -44,7 +44,7 @@ export function CustomProvidersSettings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -170,7 +170,7 @@ function AddProviderForm({
   // means the URL, the key and the response shape are all good.
   const add = useMutation({
     mutationFn: () =>
-      api.addCustomProvider({
+      chatApi.addCustomProvider({
         base_url: baseUrl,
         api_key: apiKey || undefined,
         name: name || undefined,
@@ -191,7 +191,7 @@ function AddProviderForm({
         </p>
         <button
           onClick={onDone}
-          className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
+          className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-[var(--on-primary)] transition-opacity hover:opacity-90"
         >
           Done
         </button>
@@ -250,11 +250,11 @@ function AddProviderForm({
         <button
           onClick={() => add.mutate()}
           disabled={!baseUrl.trim() || add.isPending}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--on-primary)] transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {add.isPending ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner />
               Checking endpoint
             </>
           ) : (

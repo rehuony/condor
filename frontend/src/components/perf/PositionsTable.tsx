@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { DENSE_TD, DENSE_TH, DENSE_TH_NUM } from "@/components/ui/table";
 import { formatCurrencyPnl, formatCurrencyVolume, pnlColor } from "@/lib/formatters";
 import {
   formatAmount,
@@ -49,21 +50,21 @@ export function PositionsTable({
         <table className="w-full text-[11px]">
           <thead>
             <tr className="border-y border-[var(--color-border)]/60 bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-              {showController && <th className="px-3 py-1.5 text-left font-medium">Controller</th>}
-              <th className="px-3 py-1.5 text-left font-medium">Connector</th>
-              <th className="px-3 py-1.5 text-left font-medium">Pair</th>
-              <th className="px-3 py-1.5 text-left font-medium">Side</th>
-              <th className="px-3 py-1.5 text-right font-medium">Amount</th>
-              <th className="px-3 py-1.5 text-right font-medium">Breakeven</th>
-              <th className="px-3 py-1.5 text-right font-medium" title="Amount x breakeven price">
+              {showController && <th className={DENSE_TH}>Controller</th>}
+              <th className={DENSE_TH}>Connector</th>
+              <th className={DENSE_TH}>Pair</th>
+              <th className={DENSE_TH}>Side</th>
+              <th className={DENSE_TH_NUM}>Amount</th>
+              <th className={DENSE_TH_NUM}>Breakeven</th>
+              <th className={DENSE_TH_NUM} title="Amount x breakeven price">
                 Notional
               </th>
               {extraColumns.map((k) => (
-                <th key={k} className="px-3 py-1.5 text-right font-medium">{k}</th>
+                <th key={k} className={DENSE_TH_NUM}>{k}</th>
               ))}
-              <th className="px-3 py-1.5 text-right font-medium">Realized</th>
-              <th className="px-3 py-1.5 text-right font-medium">Unrealized</th>
-              <th className="px-3 py-1.5 text-right font-medium">Volume</th>
+              <th className={DENSE_TH_NUM}>Realized</th>
+              <th className={DENSE_TH_NUM}>Unrealized</th>
+              <th className={DENSE_TH_NUM}>Volume</th>
             </tr>
           </thead>
           <tbody>
@@ -78,7 +79,7 @@ export function PositionsTable({
                   )}
                   <td className="px-3 py-1.5 text-[var(--color-text-muted)]">{row.connector || "—"}</td>
                   <td className="px-3 py-1.5 font-medium">{row.pair || "—"}</td>
-                  <td className="px-3 py-1.5"><SideTag side={row.side} /></td>
+                  <td className={DENSE_TD}><SideTag side={row.side} /></td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatAmount(row.amount)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatAmount(row.breakeven)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">

@@ -21,10 +21,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RoutineInfo } from "@/lib/api";
+import type { RoutineInfo } from "@/lib/api/routines";
 import { WorkspacePaneOutlet, WorkspacePaneProvider } from "./WorkspacePane";
 
-vi.mock("@/lib/api", () => ({ api: {} }));
+vi.mock("@/lib/api/reports", () => ({ reportsApi: {} }));
 
 /** The pane itself is tested in ReportBrowser.hosted.test.tsx. */
 vi.mock("@/components/routines/ReportBrowser", () => ({

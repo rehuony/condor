@@ -10,12 +10,12 @@ import {
   CornerDownLeft,
   CornerDownRight,
   FileText,
-  Loader2,
   RotateCw,
   ShieldAlert,
   Square,
   Zap,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/Spinner";
 import type {
   ChatAttachment,
   ChatMessage as ChatMessageType,
@@ -541,7 +541,7 @@ export const ChatMessageView = memo(function ChatMessageView({
               turn that ended up empty just stays quiet. */}
           {live ? (
             <>
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
               <span className="text-xs">Working...</span>
             </>
           ) : (

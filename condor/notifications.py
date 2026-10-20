@@ -36,6 +36,7 @@ from typing import Any, Awaitable, Callable, NamedTuple
 
 from condor import paths
 from condor.fsutil import atomic_write_json
+from condor.telegram.errors import describe
 
 log = logging.getLogger(__name__)
 
@@ -277,9 +278,8 @@ def user_for_chat(chat_id: Any) -> int | None:
 class NotifyBot:
     """A bot-shaped object that records notifications instead of sending them.
 
-    The four methods are the ones the codebase's bot surface actually uses —
-    the same set ``_HttpBot`` implements (``condor/routine_store.py``). Sitting
-    at the bottom of ``resolve_bot()``'s ladder, this is what makes a routine's
+    The bot methods are the ones the codebase's bot surface actually uses.
+    Sitting at the bottom of ``resolve_bot()``'s ladder, this is what makes a routine's
     ``context.bot.send_message(...)`` land on the dashboard in an install with
     no Telegram token, with no routine and no call-site changes.
 
@@ -321,6 +321,14 @@ class NotifyBot:
     async def send_message(self, *a, **kw):
         chat_id = self._arg(a, kw, "chat_id", 0)
         text = self._arg(a, kw, "text", 1) or ""
+        return await self._record(chat_id, text)
+
+    async def send_rich_message(self, *a, **kw):
+        chat_id = self._arg(a, kw, "chat_id", 0)
+        rich = kw.get("rich_message")
+        if rich is None and len(a) > 1:
+            rich = a[1]
+        text = getattr(rich, "markdown", None) or ""
         return await self._record(chat_id, text)
 
     async def send_photo(self, *a, **kw):
@@ -365,22 +373,6 @@ class Delivery(NamedTuple):
     error: str | None = None
     image_sent: bool = False
     text_sent: bool = False
-
-
-def _reached_telegram(result: Any) -> bool:
-    """Did a ``send_message`` on the resolved bot actually deliver?
-
-    The ladder returns three different things: a live python-telegram-bot
-    raises on failure and returns a ``Message``, ``_HttpBot`` never raises and
-    hands back Telegram's raw envelope (or ``None`` when it has no token), and
-    :class:`NotifyBot` hands back the :class:`Notification` it filed — which is
-    a delivery to the bell, never to Telegram.
-    """
-    if result is None or isinstance(result, Notification):
-        return False
-    if isinstance(result, dict):
-        return bool(result.get("ok"))
-    return True
 
 
 async def announce(
@@ -459,17 +451,17 @@ async def announce(
                     )
             else:
                 if photo is not None:
-                    from condor.telegram_media import send_photo
+                    from condor.telegram.media import send_photo
 
                     try:
                         await send_photo(target, chat_id, *photo)
                         image_sent = True
                     except Exception as exc:
-                        error = str(exc)
+                        error = describe(exc)
                         log.warning(
                             "Could not deliver notification image", exc_info=True
                         )
-                from condor.telegram_text import send_text
+                from condor.telegram.transport import reached_telegram, send_text
 
                 if text:
                     results = await send_text(
@@ -478,14 +470,17 @@ async def announce(
                         body,
                         parse_mode=parse_mode,
                     )
+                    # NotifyBot hands back the notification it filed: a delivery
+                    # to the bell, never to Telegram.
                     text_sent = bool(results) and all(
-                        _reached_telegram(r) for r in results
+                        not isinstance(r, Notification) and reached_telegram(r)
+                        for r in results
                     )
                 sent = (image_sent if photo is not None else True) and (
                     text_sent if text else True
                 )
         except Exception as exc:
-            error = "; ".join(part for part in (error, str(exc)) if part)
+            error = "; ".join(part for part in (error, describe(exc)) if part)
             log.warning(
                 "Could not deliver complete notification to chat %s",
                 chat_id,

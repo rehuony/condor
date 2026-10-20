@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Code2, FileText, Loader2, Upload, X } from "lucide-react";
+import { AlertTriangle, Code2, FileText, Upload, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import yaml from "js-yaml";
 
 import { CodeEditor } from "@/components/editor/CodeEditor";
+import { Spinner } from "@/components/ui/Spinner";
 import { SelectField } from "@/components/ui/select-field";
 import { DIALOG_BACKDROP, DIALOG_PANEL } from "@/components/ui/dialog";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { api, type ControllerConfigSummary } from "@/lib/api";
+import { botsApi, type ControllerConfigSummary } from "@/lib/api/bots";
 import { configToYaml, parseYamlMapping, validateYamlMapping } from "@/lib/configYaml";
 
 // ── Delete Confirm Dialog ──
@@ -29,9 +30,9 @@ export function DeleteConfirmDialog({
   const deleteMutation = useMutation({
     mutationFn: () => {
       if (target.kind === "config") {
-        return api.deleteControllerConfig(server, target.configId);
+        return botsApi.deleteControllerConfig(server, target.configId);
       }
-      return api.deleteController(server, target.controllerType, target.controllerName);
+      return botsApi.deleteController(server, target.controllerType, target.controllerName);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["available-configs", server] });
@@ -75,7 +76,7 @@ export function DeleteConfirmDialog({
             className="flex items-center gap-1.5 rounded-md bg-[var(--color-red)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
           >
             {deleteMutation.isPending && (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
             )}
             Delete
           </button>
@@ -221,9 +222,9 @@ export function UploadDialog({
       if (mode === "config") {
         const parsed = yaml.load(content) as Record<string, unknown>;
         const configId = String(parsed.id);
-        await api.createControllerConfig(server, configId, parsed);
+        await botsApi.createControllerConfig(server, configId, parsed);
       } else {
-        await api.updateControllerSource(server, controllerType, controllerName, content);
+        await botsApi.updateControllerSource(server, controllerType, controllerName, content);
       }
     },
     onSuccess: () => {
@@ -363,10 +364,10 @@ export function UploadDialog({
           <button
             onClick={() => uploadMutation.mutate()}
             disabled={!canUpload}
-            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-[var(--on-primary)] disabled:opacity-40"
           >
             {uploadMutation.isPending && (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
             )}
             Upload
           </button>
@@ -395,7 +396,7 @@ export function CloneConfigDialog({
 
   const { data, isLoading } = useQuery({
     queryKey: ["config-detail", server, sourceConfig.id],
-    queryFn: () => api.getConfigDetail(server, sourceConfig.id),
+    queryFn: () => botsApi.getConfigDetail(server, sourceConfig.id),
   });
 
   useMemo(() => {
@@ -411,7 +412,7 @@ export function CloneConfigDialog({
   const createMutation = useMutation({
     mutationFn: () => {
       const parsed = yaml.load(yamlContent) as Record<string, unknown>;
-      return api.createControllerConfig(server, newId, parsed);
+      return botsApi.createControllerConfig(server, newId, parsed);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["available-configs", server] });
@@ -454,7 +455,7 @@ export function CloneConfigDialog({
 
           {isLoading ? (
             <div className="flex items-center gap-2 py-8 justify-center text-sm text-[var(--color-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner />
               Loading config...
             </div>
           ) : (
@@ -491,10 +492,10 @@ export function CloneConfigDialog({
           <button
             onClick={() => createMutation.mutate()}
             disabled={!newId.trim() || !!yamlError || createMutation.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-[var(--on-primary)] disabled:opacity-40"
           >
             {createMutation.isPending && (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
             )}
             Clone
           </button>
@@ -543,7 +544,7 @@ export function NewConfigDialog({
 
   const { data: template, isLoading } = useQuery({
     queryKey: ["controller-template", server, selectedType, selectedName],
-    queryFn: () => api.getControllerConfigTemplate(server, selectedType, selectedName),
+    queryFn: () => botsApi.getControllerConfigTemplate(server, selectedType, selectedName),
     enabled: !!selectedType && !!selectedName,
   });
 
@@ -555,7 +556,7 @@ export function NewConfigDialog({
         controller_name: selectedName,
         controller_type: selectedType,
       };
-      return api.createControllerConfig(server, configId, config);
+      return botsApi.createControllerConfig(server, configId, config);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["available-configs", server] });
@@ -678,7 +679,7 @@ export function NewConfigDialog({
 
           {isLoading ? (
             <div className="flex items-center gap-2 py-8 justify-center text-sm text-[var(--color-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner />
               Loading template...
             </div>
           ) : visibleFields.length === 0 ? (
@@ -750,10 +751,10 @@ export function NewConfigDialog({
           <button
             onClick={() => createMutation.mutate()}
             disabled={!configId.trim() || !selectedName || createMutation.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-white transition-all disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-[var(--on-primary)] transition-all disabled:opacity-40"
           >
             {createMutation.isPending && (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
             )}
             Create Config
           </button>

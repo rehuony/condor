@@ -3,12 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useChatSocket } from "@/hooks/useChatSocket";
 import { useConversationParam } from "@/hooks/useConversationParam";
-import {
-  api,
-  type AgentBindingOption,
-  type ChatAgentOption,
-  type CustomProvider,
-} from "@/lib/api";
+import { chatApi, type AgentBindingOption, type ChatAgentOption, type CustomProvider } from "@/lib/api/chat";
 
 /**
  * One chat, however many surfaces are looking at it.
@@ -80,7 +75,7 @@ const FALLBACK: SessionOptions = {
 export function useSessionOptions(enabled = true): SessionOptions {
   const { data } = useQuery({
     queryKey: ["session-options"],
-    queryFn: api.getSessionOptions,
+    queryFn: chatApi.getSessionOptions,
     enabled,
   });
 

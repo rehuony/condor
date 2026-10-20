@@ -25,7 +25,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ScopeTree } from "./ScopeTree";
-import type { ControllerInfo, ExecutorInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import { buildTree, leafFromController, leafFromExecutor } from "@/lib/perf-tree";
 
 declare global {

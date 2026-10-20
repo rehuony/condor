@@ -22,8 +22,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listConversations = vi.fn<(...a: unknown[]) => Promise<unknown[]>>();
 
-vi.mock("@/lib/api", () => ({
-  api: { listConversations: (...a: unknown[]) => listConversations(...a) },
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    listConversations: (...a: unknown[]) => listConversations(...a),
+  },
 }));
 
 const { useConversationParam } = await import("./useConversationParam");

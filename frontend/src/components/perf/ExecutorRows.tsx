@@ -16,7 +16,7 @@ import {
   DIALOG_PANEL,
 } from "@/components/ui/dialog";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { type ExecutorInfo } from "@/lib/api";
+import type { ExecutorInfo } from "@/lib/api/executors";
 import { stopKeepCopy } from "@/lib/executorStopCopy";
 import { isExecutorActive } from "@/lib/formatters";
 

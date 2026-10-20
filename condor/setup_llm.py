@@ -65,7 +65,7 @@ def read_env(path: Path = ENV_PATH) -> dict[str, str]:
     """Parse ``KEY=VALUE`` from a .env, skipping comments and malformed lines.
 
     Surrounding quotes are stripped: the file may already carry a quoted
-    ``TELEGRAM_TOKEN`` written by ``setup-environment.sh``.
+    ``TELEGRAM_TOKEN`` written by ``make setup``.
     """
     out: dict[str, str] = {}
     try:

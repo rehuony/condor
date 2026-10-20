@@ -1,16 +1,11 @@
 """What can be updated, how it is versioned, and what stands in the way.
 
-Two components, described as data rather than as branches in a handler: Condor
-itself, which is a git checkout, and hummingbot-api, which is a git checkout
-*and* a container image. Those two facets answer different questions -- the repo
-governs the compose file and the bind-mounted ``bots/``, the image governs the
-API's own code -- and conflating them is why ``/update`` used to report a
-version that had no relationship to what was running.
-
-The apply mode is not a setting. ``docker compose config`` already knows how
-this install produces the container: a ``build:`` key means source, no
-``build:`` key means a published image. Asking it costs one command; a toggle
-would be a second place to get it wrong.
+Components are described as data rather than as branches in a handler. There is
+one: Condor itself, a git checkout. hummingbot-api is not one of them -- it is
+built from source and deployed on its own host with its own ``make check-update``
+/ ``make update`` / ``make deploy``, and the dashboard only reports what it runs
+(Settings → Hummingbot API). An updater here would pull an image the API no
+longer publishes and recreate containers its ``make deploy`` is meant to build.
 
 Nothing here talks to Telegram or to the dashboard. It shells out through
 :mod:`utils.updater` and returns dataclasses with ``to_wire()``, so a surface
@@ -34,13 +29,9 @@ log = logging.getLogger(__name__)
 
 # Component keys. Public: a surface addresses a component by these.
 CONDOR = "condor"
-HUMMINGBOT_API = "hummingbot-api"
-
-# The compose service that *is* the API, as opposed to its database and broker.
-HB_SERVICE = "hummingbot-api"
 
 # How long a status check is reused. The hourly notice and an admin refreshing
-# the screen twice must not each cost a registry round-trip.
+# the screen twice must not each cost a fetch.
 CHECK_TTL = 60.0
 
 # Commit subjects shown before collapsing into "and N more".
@@ -54,21 +45,13 @@ _DETAIL_LINES = 5
 class Facet:
     """One answer to "what version is this", for one way of being versioned."""
 
-    kind: str  # "repo" | "image"
+    kind: str  # "repo"
     current: str
     available: str | None = None
     behind: int = 0
     up_to_date: bool = True
     detail: list[str] = field(default_factory=list)
     error: str | None = None
-    error_code: str = ""
-    """Which failure this is, for a surface that has to act on it.
-
-    Set beside every ``error``. The alternative was matching on the message
-    text, which read ``"compose" in image.error`` and quietly filed everything
-    else -- an image that was never pulled, a service with no image at all --
-    under ``registry-unreachable``, naming a cause that had not happened.
-    """
 
     def to_wire(self) -> dict[str, Any]:
         return asdict(self)
@@ -81,7 +64,6 @@ class ComponentStatus:
     key: str
     name: str
     facets: dict[str, Facet]
-    mode: str | None = None  # "image" | "source", hummingbot-api only
     up_to_date: bool = True
 
     def to_wire(self) -> dict[str, Any]:
@@ -89,7 +71,6 @@ class ComponentStatus:
             "key": self.key,
             "name": self.name,
             "facets": {k: v.to_wire() for k, v in self.facets.items()},
-            "mode": self.mode,
             "up_to_date": self.up_to_date,
         }
 
@@ -153,20 +134,11 @@ class Component:
     key: str
     name: str
     repo_dir: str
-    service: str | None = None  # a compose service means it also has an image
 
 
 def _table() -> dict[str, Component]:
     """The component table, read at call time so the env can still move it."""
-    return {
-        CONDOR: Component(CONDOR, "Condor", updater.CONDOR_DIR),
-        HUMMINGBOT_API: Component(
-            HUMMINGBOT_API,
-            "Hummingbot API",
-            updater.HUMMINGBOT_API_DIR,
-            service=HB_SERVICE,
-        ),
-    }
+    return {CONDOR: Component(CONDOR, "Condor", updater.CONDOR_DIR)}
 
 
 def get(key: str) -> Component | None:
@@ -174,23 +146,11 @@ def get(key: str) -> Component | None:
 
 
 def keys() -> list[str]:
-    """Component keys that exist on this install, in apply order.
-
-    hummingbot-api first, Condor last: Condor's last step ends the process.
-    """
-    order = [HUMMINGBOT_API, CONDOR]
-    return [k for k in order if os.path.isdir(_table()[k].repo_dir)]
+    """Component keys that exist on this install, in apply order."""
+    return [k for k, c in _table().items() if os.path.isdir(c.repo_dir)]
 
 
 # ── Facets ──
-
-
-def _short_digest(digest: str | None) -> str:
-    """``sha256:4ae0104dd377…`` → ``sha256:4ae0104d``. Enough to compare by eye."""
-    if not digest:
-        return ""
-    algo, _, hexdigest = digest.partition(":")
-    return f"{algo}:{hexdigest[:8]}" if hexdigest else digest
 
 
 async def _repo_facet(repo_dir: str) -> Facet:
@@ -233,309 +193,15 @@ async def _repo_facet(repo_dir: str) -> Facet:
     )
 
 
-async def _image_facet(repo_dir: str, service: str) -> tuple[Facet, str]:
-    """The digest running locally versus the one the tag resolves to upstream.
-
-    Returns the facet and the detected apply mode, because both come out of the
-    same ``compose config`` call and asking twice would double the cost.
-    """
-    definition = await updater.compose_service(repo_dir, service)
-    if definition is None:
-        return (
-            Facet(
-                kind="image",
-                current="unknown",
-                up_to_date=False,
-                error_code="docker-unavailable",
-                error=(
-                    "Could not read the compose file — is Docker running? "
-                    "(docker compose config failed)"
-                ),
-            ),
-            "unknown",
-        )
-
-    # A ``build:`` key would mean the image is produced here, but no shipped
-    # compose file has one and hummingbot-api is deployed from the published
-    # image, so "source" is a mode the product cannot enter. An operator who
-    # hand-adds a build key is running their own image, which is exactly what
-    # the checkout gate and the locally-built check below already cover.
-    mode = "image"
-    image_ref = str(definition.get("image") or "")
-
-    if not image_ref:
-        return (
-            Facet(
-                kind="image",
-                current="unknown",
-                up_to_date=False,
-                error_code="no-image-declared",
-                error=f"The {service} service declares neither an image nor a build.",
-            ),
-            mode,
-        )
-
-    (local_id, local), remote = await asyncio.gather(
-        updater.local_image_identity(image_ref),
-        updater.registry_image_digest(image_ref),
-    )
-
-    if local_id is None:
-        # "inspect failed" is two answers, and only one of them is about the
-        # image. `docker image inspect` is the sole probe here that needs the
-        # daemon -- `compose config` parses locally and `imagetools inspect`
-        # asks the registry -- so a daemon that is down or restarting reaches
-        # exactly this branch with everything else looking fine. Reported as a
-        # missing image, that reads as "you have never deployed", about a
-        # container that is running.
-        if not await updater.docker_running():
-            return (
-                Facet(
-                    kind="image",
-                    current="unknown",
-                    available=_short_digest(remote),
-                    up_to_date=False,
-                    error_code="docker-unavailable",
-                    error=(
-                        "Docker is not answering, so the running image cannot "
-                        "be read. Start Docker (or wait for it to finish "
-                        "restarting) and check again — nothing is wrong with "
-                        "the image."
-                    ),
-                ),
-                mode,
-            )
-        return (
-            Facet(
-                kind="image",
-                current="unknown",
-                available=_short_digest(remote),
-                up_to_date=False,
-                error_code="image-absent",
-                error=(
-                    f"No local copy of {image_ref} — it has never been pulled "
-                    "or built here, so there is nothing to compare."
-                ),
-            ),
-            mode,
-        )
-
-    if local is None:
-        # Present, but carrying no registry digest. Under the classic image
-        # store -- still the default on Docker Engine -- that is exactly what
-        # `make build` leaves behind, and the check below that would have
-        # caught it (`registry_has_digest`) never runs, because it needs a
-        # digest to ask about. Reported as the operator's own image, the same
-        # answer the containerd store reaches by the other route, rather than
-        # as an error that blocks the whole update.
-        return (
-            Facet(
-                kind="image",
-                current=_short_digest(local_id),
-                behind=0,
-                detail=[
-                    "Built here, or loaded from a tarball: it carries no "
-                    "registry digest, so it is not comparable to the published "
-                    "tag. Rebuild it yourself to pick up changes."
-                ],
-            ),
-            mode,
-        )
-    if remote is None:
-        return (
-            Facet(
-                kind="image",
-                current=_short_digest(local),
-                up_to_date=False,
-                error_code="registry-unreachable",
-                error=(
-                    f"Could not reach the registry for {image_ref}; "
-                    "the running version is known, the available one is not."
-                ),
-            ),
-            mode,
-        )
-
-    same = local == remote
-    if same:
-        return (
-            Facet(kind="image", current=_short_digest(local), behind=0),
-            mode,
-        )
-
-    # Different digests are not yet evidence of being behind. `make build` in
-    # hummingbot-api tags `hummingbot/hummingbot-api:latest` -- the *same* tag
-    # the registry publishes -- so the operator's own build lands here looking
-    # exactly like an out-of-date pull, and Condor would offer to overwrite it
-    # with the registry's. Neither the tag nor the presence of a RepoDigest can
-    # tell the two apart (a build gets a RepoDigest too, from the containerd
-    # image store). Asking the registry whether it holds *this* digest can.
-    published = await updater.registry_has_digest(image_ref, local)
-    if published is None:
-        # Neither answer, and the two it sits between are not symmetric. Call it
-        # a pull and we offer to overwrite what may be an operator's `make
-        # build` -- work that only exists on this host. Call it a build and we
-        # hide a real update behind a silent "up to date". So it is neither:
-        # the probe failed, that is a fact about the probe, and it blocks with
-        # the reason rather than guessing. `registry_has_digest` is deliberate
-        # about this -- None is "could not ask", reached when the registry
-        # answered something other than "not found", typically a rate limit or
-        # an auth error. Retrying is the remedy, and a block says so where an
-        # offer would not.
-        return (
-            Facet(
-                kind="image",
-                current=_short_digest(local),
-                available=_short_digest(remote),
-                up_to_date=False,
-                error_code="image-origin-unknown",
-                error=(
-                    f"{image_ref} is running a digest the published tag does "
-                    "not resolve to, and the registry would not say whether it "
-                    "published that digest — so this is either an out-of-date "
-                    "pull or an image built here, and the two want opposite "
-                    "things. Check again in a moment; if it persists, the "
-                    "registry is rate-limiting or refusing the lookup."
-                ),
-            ),
-            mode,
-        )
-    if published is False:
-        return (
-            Facet(
-                kind="image",
-                current=_short_digest(local),
-                behind=0,
-                detail=[
-                    "Built locally; not comparable to the published tag. "
-                    "Rebuild it yourself to pick up changes."
-                ],
-            ),
-            mode,
-        )
-
-    return (
-        Facet(
-            kind="image",
-            current=_short_digest(local),
-            available=_short_digest(remote),
-            # An image is behind or it is not; there is no commit count to give.
-            behind=1,
-            up_to_date=False,
-            detail=["A newer image is published under this tag."],
-        ),
-        mode,
-    )
-
-
-# hummingbot-api's CI publishes only on merges to the default branch, and only
-# the `latest` and version tags (verified against the registry: `latest`,
-# `1.0.1`, and one stale one-off). There is no per-branch tag, so on any other
-# checkout the published image has nothing to do with the code on disk --
-# offering to pull it means silently replacing the container with the default
-# branch's code. PRs merge straight to the default branch, so there is no second
-# mapping to make: either the checkout is the one the tag is built from, or the
-# operator owns the image.
-_CANONICAL_REMOTES = ("github.com/hummingbot/hummingbot-api",)
-
-
-def _is_canonical_remote(url: str) -> bool:
-    """Whether ``url`` is the repository whose merges publish the tag.
-
-    A fork has a default branch too, usually with the same name, so the branch
-    name alone would claim the published image matches code it has never seen.
-    Normalized loosely on purpose -- ssh, https, with or without ``.git`` -- and
-    conservative: anything unrecognized is treated as not canonical, which
-    skips the image rather than overwriting it.
-    """
-    cleaned = url.strip().removesuffix(".git").replace(":", "/").lower()
-    return any(cleaned.endswith(r) or f"/{r}" in cleaned for r in _CANONICAL_REMOTES)
-
-
-async def image_tracks_this_checkout(repo_dir: str) -> tuple[bool, str]:
-    """Whether the published tag can correspond to this checkout, and why not.
-
-    Four conditions, each of which is a way the branch *name* alone gets it
-    wrong:
-
-    * the remote must be the canonical repository -- a fork's ``main`` is not
-      the ``main`` the tag is built from;
-    * ``HEAD`` must not be detached -- ``--abbrev-ref`` answers the literal
-      string ``HEAD``, which would otherwise read as an ordinary branch name;
-    * the branch must be the remote's default -- read, not hardcoded;
-    * the checkout must not be ahead -- unpushed commits mean the branch is the
-      default one and the code is not.
-
-    Returns ``(True, "")`` when an image update is meaningful, otherwise
-    ``(False, reason)`` with the reason in words an operator can act on.
-    """
-    rc, url = await updater._run_git("remote", "get-url", "origin", repo_dir=repo_dir)
-    if rc != 0 or not url:
-        return False, "this checkout has no origin remote"
-    if not _is_canonical_remote(url):
-        return (
-            False,
-            f"origin is {url.strip()}, not the repository the image is built from",
-        )
-
-    if await updater.is_detached(repo_dir):
-        return False, "HEAD is detached, so it is not on any branch"
-
-    default = await updater.remote_default_branch(repo_dir)
-    branch = await updater.get_current_branch(repo_dir)
-    if default is None:
-        return False, "the remote's default branch could not be determined"
-    if branch != default:
-        return False, f"this checkout is on `{branch}`, not `{default}`"
-
-    if await updater.ahead_count(repo_dir, branch) > 0:
-        return False, f"this checkout has commits that are not on `{default}`"
-    return True, ""
-
-
 async def status(key: str) -> ComponentStatus:
-    """Every facet of one component, fetched concurrently."""
+    """Every facet of one component."""
     component = _table()[key]
-
-    if component.service is None:
-        repo = await _repo_facet(component.repo_dir)
-        return ComponentStatus(
-            key=component.key,
-            name=component.name,
-            facets={"repo": repo},
-            up_to_date=repo.up_to_date,
-        )
-
-    repo, (image, mode), (tracks, why_not) = await asyncio.gather(
-        _repo_facet(component.repo_dir),
-        _image_facet(component.repo_dir, component.service),
-        image_tracks_this_checkout(component.repo_dir),
-    )
-
-    if not tracks:
-        # The comparison is still *correct* -- it is just meaningless here, and
-        # acting on it would replace the operator's container with the default
-        # branch's code. Keep the running digest visible, drop the offer, and
-        # say why. Stated rather than silently skipped: a silent skip is the
-        # same class of defect as the silent pull it replaces.
-        image = Facet(
-            kind="image",
-            current=image.current,
-            behind=0,
-            detail=[
-                f"The container runs the published image, which is built only "
-                f"from the default branch — and {why_not}. Left alone; you own "
-                f"this image."
-            ],
-            error=image.error,
-        )
-
+    repo = await _repo_facet(component.repo_dir)
     return ComponentStatus(
         key=component.key,
         name=component.name,
-        facets={"image": image, "repo": repo},
-        mode=mode,
-        up_to_date=repo.up_to_date and image.up_to_date,
+        facets={"repo": repo},
+        up_to_date=repo.up_to_date,
     )
 
 
@@ -565,52 +231,6 @@ def invalidate() -> None:
     _cache = None
 
 
-# ── What the rest of Condor knows ──
-
-
-def hb_api_base_url() -> str:
-    """Where the API this install talks to is served, or "".
-
-    Read from the configured servers rather than from an env var of its own:
-    the address the update probes must be the address Condor actually uses, or
-    a healthy answer proves nothing.
-    """
-    try:
-        from config_manager import get_config_manager
-
-        cm = get_config_manager()
-        name = cm.get_default_server() or next(iter(cm.list_servers()), "")
-        server = cm.get_server(name) if name else None
-    except Exception:  # noqa: BLE001 - no config is "no URL", not a crash
-        log.debug("Could not resolve the API server", exc_info=True)
-        return ""
-
-    if not server or not server.get("host"):
-        return ""
-    return f"http://{server['host']}:{server['port']}"
-
-
-def hb_api_health_url() -> str:
-    """The endpoint a restarted API answers first. Empty when unconfigured."""
-    base = hb_api_base_url()
-    return f"{base}/openapi.json" if base else ""
-
-
-async def running_executor_count() -> int | None:
-    """How many executors would be reaped by restarting the API, or None.
-
-    One request: the summary endpoint already buckets by status, so this costs
-    no pagination. None means the question could not be answered — which the
-    caller must not read as zero.
-    """
-    from config_manager import get_config_manager
-
-    client = await get_config_manager().get_client()
-    summary = await client.executors.get_summary()
-    by_status = (summary or {}).get("by_status") or {}
-    return int(by_status.get("RUNNING", 0) or 0)
-
-
 # ── Preflight ──
 
 
@@ -619,8 +239,8 @@ def is_forkable(component_key: str, rel_path: str) -> bool:
 
     Only Condor's shipped agent library. ``agents/<slug>/...`` has a local
     counterpart that reads shadow per item, so moving an edit there is exactly
-    what the product would have done with it. Anything else -- ``main.py``, a
-    compose file, anything in hummingbot-api -- has no such layer, and "keeping"
+    what the product would have done with it. Anything else -- ``main.py``, the
+    Makefile -- has no such layer, and "keeping"
     it by moving it somewhere nothing reads would be a quieter way of losing it
     than discarding.
     """
@@ -667,8 +287,7 @@ async def repo_blocks(component: Component) -> list[Block]:
     """What would stop ``git merge --ff-only`` in this checkout.
 
     Not "is the tree dirty" — that question blocks forever on a checkout which
-    is also a runtime working directory, and ``hummingbot-api/bots`` is exactly
-    that (it is bind-mounted into the container). The question is whether the
+    is also a runtime working directory, as Condor's is. The question is whether the
     incoming commits would clobber something local, which is the intersection
     of the two sets and is almost always empty.
     """
@@ -805,66 +424,27 @@ async def repo_blocks(component: Component) -> list[Block]:
     return blocks
 
 
-def _steps_for(component_key: str, status_: ComponentStatus) -> list[str]:
-    """The plan for one component, in the order it will run."""
-    steps: list[str] = []
-    if component_key == HUMMINGBOT_API:
-        repo = status_.facets.get("repo")
-        image = status_.facets.get("image")
-        if repo is not None and not repo.up_to_date and repo.error is None:
-            # Worth saying what this is *for*: the checkout supplies the shared
-            # files the container reads, so it is fast-forwarded even when the
-            # image is left alone.
-            steps.append("Fast-forward the hummingbot-api checkout (shared files)")
-        if image is not None and image.up_to_date:
-            # Either already current, or an image this checkout does not track.
-            # Nothing to pull, and nothing to restart for.
-            return steps
-        steps.append("Pull the published hummingbot-api image")
-        steps.append("Recreate the containers")
-        steps.append("Wait for the API to answer")
-    else:
-        # Must stay in step with ``run._plan``: the confirm screen and the
-        # progress screen are meant to be the same list.
-        steps.append("Fast-forward the Condor checkout")
-        steps.append("Restore any work stashed to clear the way")
-        steps.append("Sync dependencies")
-        steps.append("Rebuild the dashboard if the update touched it")
-        steps.append("Check the install over")
-        steps.append("Relaunch Condor to apply it")
-    return steps
+def _steps_for(component_key: str) -> list[str]:
+    """The plan for one component, in the order it will run.
 
-
-async def _executor_warning() -> Warning | None:
-    """Restarting the API reaps running executors. Say so, with a count.
-
-    Best effort by design: if the count cannot be read the warning still goes
-    out without a number, because the consequence is real either way.
+    Must stay in step with ``run._plan``: the confirm screen and the progress
+    screen are meant to be the same list.
     """
-    count: int | None = None
-    try:
-        count = await running_executor_count()
-    except Exception:  # noqa: BLE001 - a warning must never break the preflight
-        log.debug("Could not count running executors", exc_info=True)
-
-    if count is None:
-        detail = "Any running executors will be reaped."
-    elif count == 0:
-        return None
-    else:
-        detail = f"{count} running executor{'s' if count != 1 else ''} will be reaped."
-    return Warning(
-        component=HUMMINGBOT_API,
-        code="executors-will-be-reaped",
-        message=f"Restarting the API container stops its executors. {detail}",
-    )
+    return [
+        "Fast-forward the Condor checkout",
+        "Restore any work stashed to clear the way",
+        "Sync dependencies",
+        "Rebuild the dashboard if the update touched it",
+        "Check the install over",
+        "Relaunch Condor to apply it",
+    ]
 
 
 _STALE_FORK_CAP = 8
 
 
-# An update can write a rebuilt venv, a fresh node_modules, a new bundle and a
-# pulled image. Running out part-way is the worst input to everything else here,
+# An update can write a rebuilt venv, a fresh node_modules and a new bundle.
+# Running out part-way is the worst input to everything else here,
 # and nothing checked: shutil.disk_usage appeared nowhere in the update path.
 _DISK_FLOOR_GB = 3.0
 
@@ -1062,44 +642,8 @@ async def preflight(component_keys: list[str]) -> Preflight:
             blocks.extend(await repo_blocks(component))
 
         if current is not None:
-            image = current.facets.get("image")
-            if image is not None and image.error:
-                blocks.append(
-                    Block(
-                        component=key,
-                        code=image.error_code or "registry-unreachable",
-                        message=image.error,
-                        resolutions=["cancel"],
-                    )
-                )
-            steps.extend(_steps_for(key, current))
+            steps.extend(_steps_for(key))
 
-    if HUMMINGBOT_API in selected:
-        hb = known[HUMMINGBOT_API]
-        owner = await updater.compose_stack_owner(hb.repo_dir, HB_SERVICE)
-        if owner is not None:
-            # Recreating from here would adopt another checkout's containers
-            # and its postgres volume, which Compose does without complaint --
-            # it matches on the fixed `container_name:` and reports `Recreate`.
-            # Condor points at a *directory*; Compose acts on a *project*, and
-            # they are not the same thing when two checkouts share a basename.
-            blocks.append(
-                Block(
-                    component=HUMMINGBOT_API,
-                    code="foreign-stack",
-                    message=(
-                        f"The {HB_SERVICE} containers on this host were "
-                        f"deployed from {owner}, not from {hb.repo_dir}. "
-                        "Recreating them from here would take that stack over, "
-                        "along with its database. Point HUMMINGBOT_API_DIR at "
-                        "the checkout that owns them, or stop that stack first."
-                    ),
-                    resolutions=["cancel"],
-                )
-            )
-        executor_warning = await _executor_warning()
-        if executor_warning is not None:
-            warnings.append(executor_warning)
     if CONDOR in selected:
         condor_status = statuses.get(CONDOR)
         repo = condor_status.facets.get("repo") if condor_status else None

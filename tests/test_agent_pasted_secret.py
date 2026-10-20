@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from handlers.agents import _SECRET_SEEN_KEY, _handle_pasted_secrets
+from tests.conftest import patch_agents
 
 SEED = "legal winner thank year wave sausage worth useful legal winner thank yellow"
 TX_HASH = "0x" + "9f" * 32
@@ -41,8 +42,22 @@ def _context(**user_data):
         sent.append(SimpleNamespace(text=text, markup=kwargs.get("reply_markup")))
         return SimpleNamespace(message_id=100 + len(sent))
 
+    async def send_rich_message(**kwargs):
+        text = getattr(kwargs.get("rich_message"), "markdown", None) or kwargs.get(
+            "text", ""
+        )
+        sent.append(SimpleNamespace(text=text, markup=kwargs.get("reply_markup")))
+        return SimpleNamespace(message_id=100 + len(sent))
+
+    async def send_rich_message_draft(**kwargs):
+        return True
+
     return SimpleNamespace(
-        bot=SimpleNamespace(send_message=send_message),
+        bot=SimpleNamespace(
+            send_message=send_message,
+            send_rich_message=send_rich_message,
+            send_rich_message_draft=send_rich_message_draft,
+        ),
         user_data=dict(user_data),
         chat_data={},
         sent=sent,
@@ -187,7 +202,7 @@ def _voice_update():
 
     status_msg = SimpleNamespace(message_id=99, edit_text=edit_text)
 
-    async def reply_text(text, **kwargs):
+    async def answer(text, **kwargs):
         update.replies.append(text)
         return status_msg
 
@@ -196,7 +211,7 @@ def _voice_update():
 
     update.message = SimpleNamespace(
         message_id=10,
-        chat_id=4242,
+        chat=SimpleNamespace(id=4242),
         text=None,
         caption=None,
         photo=(),
@@ -207,7 +222,7 @@ def _voice_update():
         reply_to_message=None,
         external_reply=None,
         voice=SimpleNamespace(file_id="voice", file_unique_id="voice", file_size=3),
-        reply_text=reply_text,
+        answer=answer,
         delete=delete,
     )
     return update
@@ -226,7 +241,7 @@ def _approved(monkeypatch):
 
 def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
     """Drive actual intake and streaming, replacing attachment I/O and the model."""
-    import condor.telegram_input as telegram_input
+    import condor.telegram.input as telegram_input
     import handlers.agents as agents
     from condor.runtime.events import EventType, RuntimeEvent
 
@@ -235,7 +250,7 @@ def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
     async def get_session(chat_id):
         return SimpleNamespace(alive=True)
 
-    monkeypatch.setattr(agents, "get_session", get_session)
+    patch_agents(monkeypatch, "get_session", get_session)
 
     async def resolve(incoming, **kwargs):
         assert len(incoming.media) == 1
@@ -264,22 +279,16 @@ def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
     drafts = []
     deleted_statuses = []
 
-    async def edit_message_text(chat_id, message_id, text, **kwargs):
-        edited.append(text)
+    async def send_rich_message_draft(**kwargs):
+        drafts.append(getattr(kwargs.get("rich_message"), "markdown", ""))
         progress_seen.set()
         return True
 
-    async def send_message_draft(chat_id, draft_id, text, **kwargs):
-        drafts.append(text)
-        progress_seen.set()
+    async def delete_message(**kwargs):
+        deleted_statuses.append(kwargs["message_id"])
         return True
 
-    async def delete_message(chat_id, message_id):
-        deleted_statuses.append(message_id)
-        return True
-
-    context.bot.edit_message_text = edit_message_text
-    context.bot.send_message_draft = send_message_draft
+    context.bot.send_rich_message_draft = send_rich_message_draft
     context.bot.delete_message = delete_message
     asyncio.run(agents.agent_message_handler(update, context))
     return SimpleNamespace(
@@ -294,8 +303,7 @@ def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
 
 def test_a_spoken_phrase_is_redacted_before_it_is_shown(monkeypatch):
     out = _run_streamed_answer(monkeypatch, SEED)
-    assert not out.drafts, "quiet mode must not use native token drafts"
-    assert out.edited, "progress must remain visible while the model runs"
+    assert out.drafts, "progress uses a native rich-message draft"
     assert "[redacted: mnemonic]" in out.context.sent[-1].text
     displayed = (
         out.drafts
@@ -324,6 +332,6 @@ def test_an_ordinary_transcription_stays_at_the_head_of_the_answer(monkeypatch):
         assert text.startswith("🎙 how is SOL-USDC doing?")
         assert "All set." in text
         assert "redacted" not in text
-    assert out.edited == ["Processing…"]
+    assert out.drafts[-1] == "All set."
     assert out.deleted_statuses == [99]
     assert not out.update.deleted

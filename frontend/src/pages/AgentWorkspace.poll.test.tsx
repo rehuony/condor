@@ -27,22 +27,26 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDetail } from "@/lib/api";
+import type { AgentDetail } from "@/lib/api/agents";
 
 const getAgent = vi.fn(async () => DETAIL);
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getAgent: () => getAgent(),
     getAgentRuns: () => Promise.resolve([]),
     getStrategy: () => Promise.resolve(null),
-    getConversationDeployments: () => Promise.resolve([]),
     getSessionJournal: () => Promise.resolve({ content: "" }),
     getSessionActions: () => Promise.resolve({ actions: [] }),
     getSessionReport: () => Promise.resolve({ report: null }),
     getStrategySessionExecutors: () => Promise.resolve({ executors: [] }),
   },
   CHAT_SLUG: "condor",
+}));
+vi.mock("@/lib/api/conversations", () => ({
+  conversationsApi: {
+    getConversationDeployments: () => Promise.resolve([]),
+  },
 }));
 
 // The disclosure bodies each fetch their own world and none of them is what is

@@ -14,8 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adjacentTicks } from "@/components/agent/lab/runs";
 import { TickOverlay } from "./TickOverlay";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getSessionJournal: vi.fn(async () => ({ content: JOURNAL })),
     getSnapshot: vi.fn(async () => ({ content: "" })),
   },

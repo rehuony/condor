@@ -464,17 +464,8 @@ async def set_code_run_grant(
 
 
 def _chat_identity(result) -> dict:
-    """Pull names out of whatever ``get_chat`` returned.
-
-    A live python-telegram-bot returns a ``Chat`` object; ``_HttpBot`` returns
-    the raw ``{"ok": ..., "result": {...}}`` envelope. Both rungs of
-    ``resolve_bot`` are legitimate here, so the difference is absorbed once.
-    """
-    if isinstance(result, dict):
-        result = result.get("result") or {}
-        get = result.get
-    else:
-        get = lambda key: getattr(result, key, None)  # noqa: E731
+    """Pull names out of the ``Chat`` that ``get_chat`` returned."""
+    get = lambda key: getattr(result, key, None)  # noqa: E731
 
     return {
         "username": get("username") or "",

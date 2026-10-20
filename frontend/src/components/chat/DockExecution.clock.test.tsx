@@ -22,25 +22,38 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ControllerInfo, ExecutorInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
+import type { ExecutorInfo } from "@/lib/api/executors";
 
 const getBots = vi.fn();
 const getExecutors = vi.fn();
 const getFleetMap = vi.fn();
 const getAgents = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/bots", () => ({
+  botsApi: {
     getBots: (...a: unknown[]) => getBots(...a),
+    stopControllers: () => Promise.resolve({}),
+    startControllers: () => Promise.resolve({}),
+  },
+}));
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
     getExecutorsPage: async (...a: unknown[]) => ({
       executors: await getExecutors(...a),
       next_cursor: null,
     }),
+  },
+}));
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getRates: () => Promise.resolve({ rates: {} }),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getFleetMap: () => getFleetMap(),
     getAgents: () => getAgents(),
-    stopControllers: () => Promise.resolve({}),
-    startControllers: () => Promise.resolve({}),
-    getRates: () => Promise.resolve({ rates: {} }),
   },
 }));
 

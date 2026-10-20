@@ -19,7 +19,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Ticker, TradingRule } from "@/lib/api";
+import type { Ticker, TradingRule } from "@/lib/api/market";
 import { MarketBrowser } from "./MarketBrowser";
 import { useTradingRules } from "./useTradingRules";
 
@@ -38,8 +38,8 @@ const HOOK_PAIR = "SOL-USDC";
 /** What a second, component-local rules query would have reported instead. */
 const OWN_QUERY_PAIR = "OWN-USDT";
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
     getTickers: vi.fn(async () => ({
       connector: "binance",
       tickers: TICKERS,

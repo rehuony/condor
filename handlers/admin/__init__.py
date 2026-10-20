@@ -6,9 +6,12 @@ Only accessible by admin users.
 import logging
 from datetime import datetime
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from config_manager import ServerPermission, UserRole, get_config_manager
 from utils.auth import admin_required
 from utils.telegram_formatters import escape_markdown_v2
@@ -20,21 +23,23 @@ def _get_admin_menu_keyboard() -> InlineKeyboardMarkup:
     """Build the admin menu keyboard."""
     keyboard = [
         [
-            InlineKeyboardButton("👥 Pending Requests", callback_data="admin:pending"),
-            InlineKeyboardButton("📋 All Users", callback_data="admin:users"),
+            InlineKeyboardButton(
+                text="👥 Pending Requests", callback_data="admin:pending"
+            ),
+            InlineKeyboardButton(text="📋 All Users", callback_data="admin:users"),
         ],
         [
-            InlineKeyboardButton("📜 Audit Log", callback_data="admin:audit"),
-            InlineKeyboardButton("📊 Stats", callback_data="admin:stats"),
+            InlineKeyboardButton(text="📜 Audit Log", callback_data="admin:audit"),
+            InlineKeyboardButton(text="📊 Stats", callback_data="admin:stats"),
         ],
         [
-            InlineKeyboardButton("Update", callback_data="admin:update_check"),
+            InlineKeyboardButton(text="Update", callback_data="admin:update_check"),
         ],
         [
-            InlineKeyboardButton("« Close", callback_data="config_close"),
+            InlineKeyboardButton(text="« Close", callback_data="config_close"),
         ],
     ]
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def _format_user_role_badge(role: str) -> str:
@@ -57,7 +62,7 @@ def _format_timestamp(ts: float) -> str:
 
 
 @admin_required
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def admin_command(update: Update, context: Context) -> None:
     """Handle /admin command - show admin panel."""
     from handlers import clear_all_input_states
 
@@ -74,15 +79,13 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Select an option below:"
     )
 
-    await update.message.reply_text(
+    await update.message.answer(
         message, parse_mode="MarkdownV2", reply_markup=_get_admin_menu_keyboard()
     )
 
 
 @admin_required
-async def admin_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def admin_callback_handler(update: Update, context: Context) -> None:
     """Handle admin panel callbacks."""
     query = update.callback_query
 
@@ -135,7 +138,7 @@ async def admin_callback_handler(
         await _show_user_details(query, context, user_id)
 
 
-async def _show_admin_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _show_admin_menu(query, context: Context) -> None:
     """Show main admin menu."""
     cm = get_config_manager()
     pending_count = len(cm.get_pending_users())
@@ -148,23 +151,23 @@ async def _show_admin_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Select an option below:"
     )
 
-    await query.edit_message_text(
+    await query.message.edit_text(
         message, parse_mode="MarkdownV2", reply_markup=_get_admin_menu_keyboard()
     )
 
 
-async def _show_pending_users(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _show_pending_users(query, context: Context) -> None:
     """Show pending user approval list."""
     cm = get_config_manager()
     pending = cm.get_pending_users()
 
     if not pending:
         message = "👥 *Pending Requests*\n\n" "No pending access requests\\."
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="admin:back")]]
-        await query.edit_message_text(
+        keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+        await query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
         return
 
@@ -182,33 +185,36 @@ async def _show_pending_users(query, context: ContextTypes.DEFAULT_TYPE) -> None
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    f"✓ Approve {user_id}", callback_data=f"admin:approve_{user_id}"
+                    text=f"✓ Approve {user_id}",
+                    callback_data=f"admin:approve_{user_id}",
                 ),
                 InlineKeyboardButton(
-                    f"✕ Reject", callback_data=f"admin:reject_{user_id}"
+                    text=f"✕ Reject", callback_data=f"admin:reject_{user_id}"
                 ),
             ]
         )
 
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="admin:back")])
+    keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")])
 
-    await query.edit_message_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def _show_all_users(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _show_all_users(query, context: Context) -> None:
     """Show all users list."""
     cm = get_config_manager()
     users = cm.get_all_users()
 
     if not users:
         message = "📋 *All Users*\n\nNo users registered\\."
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="admin:back")]]
-        await query.edit_message_text(
+        keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+        await query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
         return
 
@@ -245,7 +251,7 @@ async def _show_all_users(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        f"{badge} {user_id} (@{username[:10]})",
+                        text=f"{badge} {user_id} (@{username[:10]})",
                         callback_data=f"admin:user_{user_id}",
                     )
                 ]
@@ -256,16 +262,16 @@ async def _show_all_users(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         message += "\n"
 
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="admin:back")])
+    keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")])
 
-    await query.edit_message_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def _show_user_details(
-    query, context: ContextTypes.DEFAULT_TYPE, user_id: int
-) -> None:
+async def _show_user_details(query, context: Context, user_id: int) -> None:
     """Show details for a specific user."""
     cm = get_config_manager()
     user = cm.get_user(user_id)
@@ -322,10 +328,10 @@ async def _show_user_details(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "✓ Approve", callback_data=f"admin:approve_{user_id}"
+                    text="✓ Approve", callback_data=f"admin:approve_{user_id}"
                 ),
                 InlineKeyboardButton(
-                    "✕ Reject", callback_data=f"admin:reject_{user_id}"
+                    text="✕ Reject", callback_data=f"admin:reject_{user_id}"
                 ),
             ]
         )
@@ -333,7 +339,7 @@ async def _show_user_details(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "🔓 Unblock", callback_data=f"admin:unblock_{user_id}"
+                    text="🔓 Unblock", callback_data=f"admin:unblock_{user_id}"
                 ),
             ]
         )
@@ -341,23 +347,23 @@ async def _show_user_details(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "🚫 Block", callback_data=f"admin:block_{user_id}"
+                    text="🚫 Block", callback_data=f"admin:block_{user_id}"
                 ),
             ]
         )
 
     keyboard.append(
-        [InlineKeyboardButton("🔙 Back to Users", callback_data="admin:users")]
+        [InlineKeyboardButton(text="🔙 Back to Users", callback_data="admin:users")]
     )
 
-    await query.edit_message_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def _approve_user(
-    query, context: ContextTypes.DEFAULT_TYPE, user_id: int
-) -> None:
+async def _approve_user(query, context: Context, user_id: int) -> None:
     """Approve a pending user."""
     cm = get_config_manager()
     admin_id = query.from_user.id
@@ -386,9 +392,7 @@ async def _approve_user(
         await _show_pending_users(query, context)
 
 
-async def _show_grant_servers(
-    query, context: ContextTypes.DEFAULT_TYPE, user_id: int
-) -> None:
+async def _show_grant_servers(query, context: Context, user_id: int) -> None:
     """Show server access toggles for a freshly-approved user."""
     cm = get_config_manager()
     user = cm.get_user(user_id)
@@ -414,23 +418,29 @@ async def _show_grant_servers(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        f"{mark} {name}",
+                        text=f"{mark} {name}",
                         callback_data=f"admin:grant_{user_id}_{idx}",
                     )
                 ]
             )
 
     keyboard.append(
-        [InlineKeyboardButton("✅ Done", callback_data=f"admin:grantdone_{user_id}")]
+        [
+            InlineKeyboardButton(
+                text="✅ Done", callback_data=f"admin:grantdone_{user_id}"
+            )
+        ]
     )
 
-    await query.edit_message_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
 async def _toggle_grant_server(
-    query, context: ContextTypes.DEFAULT_TYPE, user_id: int, index: int
+    query, context: Context, user_id: int, index: int
 ) -> None:
     """Toggle a single server's access for a user, then re-render."""
     cm = get_config_manager()
@@ -460,9 +470,7 @@ async def _toggle_grant_server(
     await _show_grant_servers(query, context, user_id)
 
 
-async def _show_grant_servers_done(
-    query, context: ContextTypes.DEFAULT_TYPE, user_id: int
-) -> None:
+async def _show_grant_servers_done(query, context: Context, user_id: int) -> None:
     """Finish the grant flow: notify the user of their server access and return."""
     cm = get_config_manager()
     accessible = cm.get_shared_servers(user_id)
@@ -485,7 +493,7 @@ async def _show_grant_servers_done(
     await _show_pending_users(query, context)
 
 
-async def _reject_user(query, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
+async def _reject_user(query, context: Context, user_id: int) -> None:
     """Reject a pending user."""
     cm = get_config_manager()
     admin_id = query.from_user.id
@@ -499,7 +507,7 @@ async def _reject_user(query, context: ContextTypes.DEFAULT_TYPE, user_id: int) 
     await _show_pending_users(query, context)
 
 
-async def _block_user(query, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
+async def _block_user(query, context: Context, user_id: int) -> None:
     """Block a user."""
     cm = get_config_manager()
     admin_id = query.from_user.id
@@ -513,9 +521,7 @@ async def _block_user(query, context: ContextTypes.DEFAULT_TYPE, user_id: int) -
     await _show_user_details(query, context, user_id)
 
 
-async def _unblock_user(
-    query, context: ContextTypes.DEFAULT_TYPE, user_id: int
-) -> None:
+async def _unblock_user(query, context: Context, user_id: int) -> None:
     """Unblock a user."""
     cm = get_config_manager()
     admin_id = query.from_user.id
@@ -529,18 +535,18 @@ async def _unblock_user(
     await _show_user_details(query, context, user_id)
 
 
-async def _show_audit_log(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _show_audit_log(query, context: Context) -> None:
     """Show recent audit log entries."""
     cm = get_config_manager()
     entries = cm.get_audit_log(limit=10)
 
     if not entries:
         message = "📜 *Audit Log*\n\nNo entries yet\\."
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="admin:back")]]
-        await query.edit_message_text(
+        keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+        await query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
         return
 
@@ -560,14 +566,16 @@ async def _show_audit_log(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         message += f"  {escape_markdown_v2(action_display)}\n"
         message += f"  By: `{actor}` \\| {escape_markdown_v2(target_type)}: `{escape_markdown_v2(str(target_id))}`\n\n"
 
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="admin:back")]]
+    keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
 
-    await query.edit_message_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def _show_stats(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _show_stats(query, context: Context) -> None:
     """Show system statistics."""
     cm = get_config_manager()
 
@@ -601,10 +609,12 @@ async def _show_stats(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"  Entries: {len(cm.cm.get('audit_log', []))}\n"
     )
 
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="admin:back")]]
+    keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
 
-    await query.edit_message_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 

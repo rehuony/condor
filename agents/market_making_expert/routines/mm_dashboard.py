@@ -19,9 +19,9 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from config_manager import get_client
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +151,8 @@ async def _fetch_portfolio(client, connector_name: str, min_value_usd: float):
     return inv_rows, total_val, None, summary_lines
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
-    client = await get_client(context._chat_id, context=context)
+async def run(config: Config, context: RoutineContext) -> str:
+    client = await get_client(context.chat_id, user_data=context.user_data)
     if not client:
         return "No server available"
 

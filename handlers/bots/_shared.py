@@ -11,12 +11,10 @@ Controller-specific code (defaults, fields, charts) is in handlers/bots/controll
 """
 
 import logging
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 
-from condor.cache import DEFAULT_CACHE_TTL
-from condor.cache import cached_call as _cached_call
-from condor.cache import get_cached as _get_cached
-from condor.cache import set_cached as _set_cached
+from condor import cache as _cache
 
 logger = logging.getLogger(__name__)
 
@@ -332,23 +330,9 @@ def format_config_field_value(field_name: str, value: Any) -> str:
 
 _NS = "_bots_cache"
 
-
-def get_cached(
-    user_data: dict, key: str, ttl: int = DEFAULT_CACHE_TTL
-) -> Optional[Any]:
-    return _get_cached(user_data, key, ttl, namespace=_NS)
-
-
-def set_cached(user_data: dict, key: str, value: Any) -> None:
-    _set_cached(user_data, key, value, namespace=_NS)
-
-
-async def cached_call(
-    user_data: dict, key: str, fetch_func, ttl: int = DEFAULT_CACHE_TTL, *args, **kwargs
-) -> Any:
-    return await _cached_call(
-        user_data, key, fetch_func, ttl, *args, namespace=_NS, **kwargs
-    )
+get_cached = partial(_cache.get_cached, namespace=_NS)
+set_cached = partial(_cache.set_cached, namespace=_NS)
+cached_call = partial(_cache.cached_call, namespace=_NS)
 
 
 # ============================================
@@ -357,34 +341,11 @@ async def cached_call(
 
 
 from condor.fetchers.connectors import (  # noqa: F811
-    fetch_available_cex_connectors,
-    is_cex_connector,
+    get_available_cex_connectors as _get_available_cex_connectors,
 )
+from condor.fetchers.connectors import is_cex_connector  # noqa: F811
 
-
-async def get_available_cex_connectors(
-    user_data: dict,
-    client,
-    account_name: str = "master_account",
-    ttl: int = 300,
-    server_name: str = "default",
-) -> List[str]:
-    """Get available CEX connectors with caching.
-
-    Args:
-        user_data: context.user_data dict
-        client: API client instance
-        account_name: Account name to check credentials for
-        ttl: Cache time-to-live in seconds
-        server_name: Server name to include in cache key (prevents cross-server cache pollution)
-
-    Returns:
-        List of available CEX connector names
-    """
-    cache_key = f"available_cex_connectors_{server_name}_{account_name}"
-    return await cached_call(
-        user_data, cache_key, fetch_available_cex_connectors, ttl, client, account_name
-    )
+get_available_cex_connectors = partial(_get_available_cex_connectors, namespace=_NS)
 
 
 # ============================================

@@ -2,19 +2,19 @@
 Gateway deployment, lifecycle, and logs management
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-
 from condor.preferences import get_active_server
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import Context, InlineKeyboardButton, InlineKeyboardMarkup
+from utils.telegram_helpers import MockQuery, message_handle
 
 from ..server_context import build_config_message_header
 from ._shared import escape_markdown_v2, logger
 
 
-async def start_deploy_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_deploy_gateway(query, context: Context) -> None:
     """Show Docker image selection for Gateway deployment"""
     try:
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         header, server_online, _ = await build_config_message_header(
             "🚀 Deploy Gateway",
             include_gateway=False,
@@ -25,7 +25,7 @@ async def start_deploy_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not server_online:
             message_text = header + "⚠️ _Server is offline\\. Cannot deploy Gateway\\._"
             keyboard = [
-                [InlineKeyboardButton("« Back", callback_data="config_gateway")]
+                [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
             ]
         else:
             message_text = (
@@ -37,25 +37,25 @@ async def start_deploy_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> Non
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "hummingbot/gateway:development (recommended)",
+                        text="hummingbot/gateway:development (recommended)",
                         callback_data="gateway_deploy_image_development",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "hummingbot/gateway:latest",
+                        text="hummingbot/gateway:latest",
                         callback_data="gateway_deploy_image_latest",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "✏️ Custom Image", callback_data="gateway_deploy_custom"
+                        text="✏️ Custom Image", callback_data="gateway_deploy_custom"
                     )
                 ],
-                [InlineKeyboardButton("« Back", callback_data="config_gateway")],
+                [InlineKeyboardButton(text="« Back", callback_data="config_gateway")],
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -67,7 +67,7 @@ async def start_deploy_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def deploy_gateway_with_image(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def deploy_gateway_with_image(query, context: Context) -> None:
     """Deploy Gateway directly with the selected image.
 
     The Hummingbot API always runs the Gateway secured (TLS + mTLS) and manages the
@@ -80,7 +80,7 @@ async def deploy_gateway_with_image(query, context: ContextTypes.DEFAULT_TYPE) -
         docker_image = f"hummingbot/gateway:{image_tag}"
 
         await execute_gateway_deploy(
-            context, query.message.chat_id, query.message.message_id, docker_image
+            context, query.message.chat.id, query.message.message_id, docker_image
         )
 
     except Exception as e:
@@ -89,7 +89,7 @@ async def deploy_gateway_with_image(query, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def execute_gateway_deploy(
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     chat_id: int,
     message_id: int,
     docker_image: str,
@@ -146,37 +146,18 @@ async def execute_gateway_deploy(
 
         await asyncio.sleep(1)
 
-        # Create a mock query object for show_gateway_menu
-        class MockQuery:
-            def __init__(self, message):
-                self.message = message
-
-            async def answer(self, *args, **kwargs):
-                pass
-
-        class MockMessage:
-            def __init__(self, chat_id, message_id, bot):
-                self.chat_id = chat_id
-                self.message_id = message_id
-                self._bot = bot
-
-            async def edit_text(self, text, **kwargs):
-                await self._bot.edit_message_text(
-                    chat_id=self.chat_id,
-                    message_id=self.message_id,
-                    text=text,
-                    **kwargs,
-                )
-
-        mock_message = MockMessage(chat_id, message_id, context.bot)
-        mock_query = MockQuery(mock_message)
-        await show_gateway_menu(mock_query, context)
+        await show_gateway_menu(
+            MockQuery(message_handle(context.bot, chat_id, message_id), None),
+            context,
+        )
 
     except Exception as e:
         logger.error(f"Error deploying gateway: {e}", exc_info=True)
         error_text = f"❌ *Deployment Failed*\n\n`{escape_markdown_v2(str(e))}`"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="config_gateway")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
@@ -186,10 +167,10 @@ async def execute_gateway_deploy(
         )
 
 
-async def prompt_custom_image(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def prompt_custom_image(query, context: Context) -> None:
     """Prompt user to enter custom Docker image"""
     try:
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         header, server_online, _ = await build_config_message_header(
             "✏️ Custom Gateway Image",
             include_gateway=False,
@@ -199,7 +180,7 @@ async def prompt_custom_image(query, context: ContextTypes.DEFAULT_TYPE) -> None
 
         context.user_data["awaiting_gateway_input"] = "custom_image"
         context.user_data["gateway_message_id"] = query.message.message_id
-        context.user_data["gateway_chat_id"] = query.message.chat_id
+        context.user_data["gateway_chat_id"] = query.message.chat.id
 
         message_text = (
             header + "*Enter Custom Docker Image:*\n\n"
@@ -209,8 +190,10 @@ async def prompt_custom_image(query, context: ContextTypes.DEFAULT_TYPE) -> None
             "`myregistry\\.io/gateway:custom`"
         )
 
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="gateway_deploy")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="gateway_deploy")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -222,7 +205,7 @@ async def prompt_custom_image(query, context: ContextTypes.DEFAULT_TYPE) -> None
         await query.answer(f"❌ Error: {str(e)[:100]}")
 
 
-async def stop_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def stop_gateway(query, context: Context) -> None:
     """Stop Gateway container on the current server"""
     try:
         from config_manager import get_config_manager
@@ -231,7 +214,7 @@ async def stop_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await query.answer("⏹ Stopping Gateway...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -253,7 +236,7 @@ async def stop_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await show_gateway_menu(query, context)
 
 
-async def restart_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def restart_gateway(query, context: Context) -> None:
     """Restart Gateway container on the current server"""
     try:
         import asyncio
@@ -262,7 +245,7 @@ async def restart_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         from .menu import show_gateway_menu
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
 
         # Answer the callback query first
         await query.answer("🔄 Restarting Gateway...")
@@ -329,14 +312,14 @@ async def restart_gateway(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass  # Best effort to show menu
 
 
-async def show_gateway_logs(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_gateway_logs(query, context: Context) -> None:
     """Show Gateway container logs"""
     try:
         from config_manager import get_config_manager
 
         await query.answer("📋 Loading logs...")
 
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         client = await get_config_manager().get_client_for_chat(
             chat_id, preferred_server=get_active_server(context.user_data)
         )
@@ -356,11 +339,11 @@ async def show_gateway_logs(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
         keyboard = [
-            [InlineKeyboardButton("🔄 Refresh", callback_data="gateway_logs")],
-            [InlineKeyboardButton("« Back", callback_data="config_gateway")],
+            [InlineKeyboardButton(text="🔄 Refresh", callback_data="gateway_logs")],
+            [InlineKeyboardButton(text="« Back", callback_data="config_gateway")],
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         try:
             await query.message.edit_text(
@@ -368,7 +351,7 @@ async def show_gateway_logs(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception as e:
             error_str = str(e)
-            if "Message is not modified" in error_str:
+            if is_not_modified(e):
                 # Try to answer the query, but don't raise if it fails
                 try:
                     await query.answer("✅ Already up to date")
@@ -383,8 +366,10 @@ async def show_gateway_logs(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error(f"Error showing gateway logs: {e}", exc_info=True)
         error_text = f"❌ Error loading logs: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Back", callback_data="config_gateway")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="config_gateway")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
@@ -416,7 +401,7 @@ async def handle_deployment_input(update, context) -> None:
                 pass
 
             if not custom_image:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text="❌ Image name cannot be empty",

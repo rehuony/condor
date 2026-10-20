@@ -887,7 +887,7 @@ async def _notify_secret_shapes(
         )
 
 
-def _resolve_attachments(
+async def _resolve_attachments(
     user_id: int, conv_id: str, attachment_ids: list[str]
 ) -> list[PromptImage]:
     """Ids off the wire to the bytes behind them, or refuse the whole turn.
@@ -898,7 +898,7 @@ def _resolve_attachments(
     """
     images = []
     for att_id in attachment_ids:
-        data, mime = attachments.load(user_id, conv_id, att_id)
+        data, mime = await asyncio.to_thread(attachments.load, user_id, conv_id, att_id)
         images.append(PromptImage(data=data, mime=mime, id=att_id))
     return images
 
@@ -1050,7 +1050,7 @@ async def _handle_send_message(
         # nothing under the caller's own tree: the ownership check is the lookup
         # itself, not a rule beside it.
         try:
-            images = _resolve_attachments(
+            images = await _resolve_attachments(
                 user_id, info.conversation_id or slot_id, attachment_ids
             )
         except attachments.NotFoundError:

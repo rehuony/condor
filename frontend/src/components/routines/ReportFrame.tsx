@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import { useTheme } from "@/hooks/useTheme";
-import { api } from "@/lib/api";
+import { reportsApi } from "@/lib/api/reports";
 
 /** Measure inside the opaque-origin sandbox without granting same-origin access. */
 function withContentHeight(html: string): string {
@@ -77,7 +77,7 @@ export function ReportFrame({
 
   const { data: html, isLoading, isError, error } = useQuery({
     queryKey: ["report-html", reportId],
-    queryFn: () => api.getReportHtml(reportId),
+    queryFn: () => reportsApi.getReportHtml(reportId),
   });
 
   const [measured, setMeasured] = useState<{ html: string; height: number } | null>(null);
@@ -111,7 +111,7 @@ export function ReportFrame({
       <div
         className={`flex h-full w-full items-center justify-center ${className}`}
       >
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]" />
+        <Spinner size="lg" tone="muted" />
       </div>
     );
   }

@@ -2,7 +2,7 @@ import { Check, ChevronDown, Search, Star, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
-import type { DexChain, DexVenue } from "@/lib/api";
+import type { DexChain, DexVenue } from "@/lib/api/dex";
 
 import {
   GATEWAY_TAB_CHAIN,
@@ -199,7 +199,7 @@ function DexFilter({
                 <span
                   className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
                     active
-                      ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
+                      ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--on-primary)]"
                       : "border-[var(--color-border)]"
                   }`}
                 >

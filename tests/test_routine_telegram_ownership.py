@@ -24,6 +24,7 @@ import condor.web.routes.routines as routes_routines
 import handlers.routines as tg_routines
 from condor.web.auth import get_current_user
 from condor.web.models import WebUser
+from tests.conftest import patch_routines
 
 STARTER = WebUser(id=111, username="starter", first_name="S", role="user")
 STRANGER = WebUser(id=222, username="stranger", first_name="X", role="user")
@@ -57,30 +58,9 @@ class FakeStore:
         return self._instances.pop(instance_id, None) is not None
 
 
-class FakeJobQueue:
-    def __init__(self):
-        self.jobs = []
-
-    def _record(self, **kwargs):
-        self.jobs.append(kwargs)
-
-    def run_once(self, callback, **kwargs):
-        self._record(kind="once", **kwargs)
-
-    def run_repeating(self, callback, **kwargs):
-        self._record(kind="repeating", **kwargs)
-
-    def run_daily(self, callback, **kwargs):
-        self._record(kind="daily", **kwargs)
-
-    def get_jobs_by_name(self, name):
-        return []
-
-
 class FakeContext:
     def __init__(self):
         self.user_data = {}
-        self.job_queue = FakeJobQueue()
         self.application = None
 
 
@@ -97,10 +77,20 @@ class FakeConfigManager:
         return user_id == ADMIN.id
 
 
+@pytest.fixture(autouse=True)
+def scheduler(monkeypatch):
+    """A fresh scheduler per test; never started, so nothing fires."""
+    from condor import scheduler as scheduler_mod
+
+    sched = scheduler_mod.Scheduler()
+    monkeypatch.setattr(scheduler_mod, "_scheduler", sched)
+    return sched
+
+
 @pytest.fixture
 def store(monkeypatch):
     fake = FakeStore()
-    monkeypatch.setattr(tg_routines, "get_routine_store", lambda: fake)
+    patch_routines(monkeypatch, "get_routine_store", lambda: fake)
     monkeypatch.setattr(routes_routines, "get_routine_store", lambda: fake)
     monkeypatch.setattr(routes_routines, "get_config_manager", FakeConfigManager)
     return fake
@@ -151,7 +141,7 @@ def test_continuous_instance_records_the_starting_user(store, monkeypatch):
     async def fake_runner(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(tg_routines, "_run_continuous_routine", fake_runner)
+    patch_routines(monkeypatch, "_run_continuous_routine", fake_runner)
 
     async def scenario():
         context = FakeContext()
@@ -237,14 +227,13 @@ def test_sync_can_still_adopt_an_instance_that_had_no_owner(store):
 class FakeApplication:
     def __init__(self, user_data):
         self.user_data = user_data
-        self.job_queue = FakeJobQueue()
 
 
 def test_restore_adopts_ownerless_instances_from_their_user_data_bucket(
     store, monkeypatch
 ):
     """PTB keys ``user_data`` by user id, so the bucket names the real starter."""
-    monkeypatch.setattr(tg_routines, "get_routine", lambda name: object())
+    patch_routines(monkeypatch, "get_routine", lambda name: object())
     legacy = {
         "routine_name": "probe",
         "config": {},

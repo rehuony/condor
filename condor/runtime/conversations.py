@@ -50,7 +50,12 @@ from condor.acp.client import (
 from condor.acp.usage import TokenUsage
 from condor.fsutil import atomic_write_bytes
 from condor.runtime.events import EventType
-from condor.runtime.registry_file import read_status, write_status
+from condor.runtime.registry_file import (
+    _merge_lock,
+    read_status,
+    status_path,
+    write_status,
+)
 
 log = logging.getLogger(__name__)
 
@@ -166,6 +171,15 @@ _REDACT_MAX_DEPTH = 6
 # ``finally``; this set is the shutdown backstop for one that never gets
 # collected in time.
 _live_recorders: set["Recorder"] = set()
+
+# Append-only, per-owner list of every transport request id ever written to a
+# transcript, one id per line. ``has_request`` used to answer by parsing every
+# transcript and archive this owner has, on the event loop, once per incoming
+# Telegram message (PERF-A1). The index answers from memory instead; the file
+# exists so the answer survives a restart, and is rebuilt from the transcripts
+# the first time it is found missing.
+REQUEST_INDEX_FILENAME = "request_ids.txt"
+_request_index: dict[Path, set[str]] = {}
 
 
 class ConversationIdError(ValueError):
@@ -654,13 +668,48 @@ def append_turn(
     Accepted inputs use ``durable=True`` and fail closed on a write error.
     Output recording is best effort so it cannot take down a live prompt.
     """
+    _append_turns(user_id, conv_id, [entry], durable=durable)
+
+
+def _append_turns(
+    user_id: int, conv_id: str, entries: list[TurnEntry], *, durable: bool = False
+) -> None:
+    """Append several turns in one write and update the meta once.
+
+    What ``append_turn`` does for one entry, for a batch: one open, one
+    append, one trim and one ``write_status`` — the recorder's flush writes
+    two or three entries per turn and used to pay the meta read-modify-write
+    for each of them.
+    """
+    if not entries:
+        return
     conv_dir = _conv_dir(user_id, conv_id)
+    payload = "".join(
+        json.dumps(entry.model_dump(mode="json"), ensure_ascii=False) + "\n"
+        for entry in entries
+    )
+    # One writer per conversation across the append *and* the meta update.
+    # Accepts run in worker threads (PERF-A2) while flushes run on the loop,
+    # and ``turn_count`` is a read-modify-write: without this, two accepts
+    # landing together each read the same count and one increment is lost.
+    # The registry's own per-file lock, so ``write_status`` nests inside it.
+    with _merge_lock(status_path(conv_dir, META_FILENAME)):
+        _write_turns(user_id, conv_id, conv_dir, payload, entries, durable=durable)
+
+
+def _write_turns(
+    user_id: int,
+    conv_id: str,
+    conv_dir: Path,
+    payload: str,
+    entries: list[TurnEntry],
+    *,
+    durable: bool,
+) -> None:
     try:
         conv_dir.mkdir(parents=True, exist_ok=True)
         with (conv_dir / TRANSCRIPT_FILENAME).open("a", encoding="utf-8") as fh:
-            fh.write(
-                json.dumps(entry.model_dump(mode="json"), ensure_ascii=False) + "\n"
-            )
+            fh.write(payload)
             if durable:
                 fh.flush()
                 os.fsync(fh.fileno())
@@ -670,6 +719,11 @@ def append_turn(
         log.warning("Could not append turn to %s", conv_dir, exc_info=True)
         return
 
+    # The lines are on disk, so the ids are now something ``has_request`` must
+    # answer for, whichever role wrote them.
+    for entry in entries:
+        _remember_request(user_id, entry.request_id)
+
     try:
         _trim_transcript(conv_dir)
     except Exception:  # noqa: BLE001 - retention must not break a live prompt
@@ -677,22 +731,27 @@ def append_turn(
 
     meta = get_conversation(user_id, conv_id)
     if meta is None:
-        # The turn is on disk either way; without a meta there is nothing
+        # The turns are on disk either way; without a meta there is nothing
         # coherent to merge into, and inventing one would fabricate an owner.
         log.debug("Appended a turn to %s/%s with no meta", user_id, conv_id)
         return
 
-    fields: dict = {"turn_count": meta.turn_count + 1}
-    if entry.role == "user" and not meta.title and entry.text:
-        fields["title"] = _truncate(entry.text, TITLE_MAX_CHARS)
-    if entry.role == "assistant" and entry.text:
-        fields["last_snippet"] = _truncate(entry.text, SNIPPET_MAX_CHARS)
-    if entry.usage:
-        # Beside ``turn_count`` and on exactly its terms: one read-modify-write
-        # per turn, merged under ``write_status``'s lock.
-        fields["usage"] = (
-            TokenUsage.from_dict(meta.usage) + TokenUsage.from_dict(entry.usage)
-        ).to_dict()
+    fields: dict = {"turn_count": meta.turn_count + len(entries)}
+    usage = TokenUsage.from_dict(meta.usage)
+    spent = False
+    for entry in entries:
+        if entry.role == "user" and not meta.title and "title" not in fields:
+            if entry.text:
+                fields["title"] = _truncate(entry.text, TITLE_MAX_CHARS)
+        if entry.role == "assistant" and entry.text:
+            fields["last_snippet"] = _truncate(entry.text, SNIPPET_MAX_CHARS)
+        if entry.usage:
+            # Beside ``turn_count`` and on exactly its terms: one
+            # read-modify-write per batch, merged under ``write_status``'s lock.
+            usage = usage + TokenUsage.from_dict(entry.usage)
+            spent = True
+    if spent:
+        fields["usage"] = usage.to_dict()
     write_status(conv_dir, META_FILENAME, **fields)
 
 
@@ -954,22 +1013,105 @@ def replay_context(
 # ── Recorder ──
 
 
+def _scan_request_ids(base: Path) -> set[str]:
+    """Every request id in this owner's transcripts and archives.
+
+    A byte-level prefilter keeps the rebuild cheap: a line is only JSON-parsed
+    when it mentions the key at all, and no ``TurnEntry`` is constructed.
+    """
+    found: set[str] = set()
+    needle = b'"request_id"'
+    try:
+        with os.scandir(base) as entries:
+            names = [entry.name for entry in entries if entry.is_dir()]
+    except OSError:
+        return found
+    for name in names:
+        for filename in (TRANSCRIPT_FILENAME, TRANSCRIPT_ARCHIVE_FILENAME):
+            path = base / name / filename
+            try:
+                if not path.is_file():
+                    continue
+                with path.open("rb") as fh:
+                    for line in fh:
+                        if needle not in line:
+                            continue
+                        try:
+                            data = json.loads(line.decode("utf-8"))
+                        except (ValueError, UnicodeDecodeError):
+                            continue
+                        request_id = (
+                            data.get("request_id") if isinstance(data, dict) else None
+                        )
+                        if isinstance(request_id, str) and request_id:
+                            found.add(request_id)
+            except OSError:
+                log.debug("Unreadable transcript at %s", path, exc_info=True)
+    return found
+
+
+def _request_ids(user_id: int | str) -> set[str]:
+    """This owner's request-id set, loading or rebuilding the index on first use.
+
+    Keyed by the index path rather than the owner id so a relocated data
+    directory (tests move it per case) never answers from another root's set.
+    """
+    base = _user_dir(user_id)
+    path = base / REQUEST_INDEX_FILENAME
+    cached = _request_index.get(path)
+    if cached is not None:
+        return cached
+    ids: set[str] = set()
+    try:
+        if path.is_file():
+            with path.open(encoding="utf-8") as fh:
+                ids = {line.strip() for line in fh if line.strip()}
+        elif base.is_dir():
+            ids = _scan_request_ids(base)
+            atomic_write_bytes(
+                path, "".join(f"{rid}\n" for rid in sorted(ids)).encode("utf-8")
+            )
+    except OSError:
+        log.warning("Could not load request index at %s", path, exc_info=True)
+    _request_index[path] = ids
+    return ids
+
+
+def _remember_request(user_id: int | str, request_id: str) -> None:
+    """Record that ``request_id`` has reached this owner's transcript.
+
+    The transcript line is the record; the index only has to catch up with it.
+    An index write that fails is logged, and the rebuild on the next start
+    recovers the id from the transcript, so it never fails the turn.
+    """
+    if not request_id:
+        return
+    ids = _request_ids(user_id)
+    if request_id in ids:
+        return
+    ids.add(request_id)
+    path = _user_dir(user_id) / REQUEST_INDEX_FILENAME
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(request_id + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError:
+        log.warning("Could not append to request index at %s", path, exc_info=True)
+
+
 def has_request(user_id: int, request_id: str) -> bool:
     """An accepted transport message is never executed again, even after restart.
 
-    Search this owner's retained transcripts, including archived turns and
-    conversations other than the one currently selected in Telegram.
+    Answers from the per-owner request index, which spans archived turns and
+    conversations other than the one currently selected in Telegram. A deleted
+    conversation does not remove its ids: a request that was accepted once must
+    never replay, whatever became of the transcript it was recorded in.
     """
-    for directory in paths.conversations_dir(user_id).glob("*"):
-        if not directory.is_dir():
-            continue
-        for name in (TRANSCRIPT_FILENAME, TRANSCRIPT_ARCHIVE_FILENAME):
-            if any(
-                t.request_id == request_id
-                for t in _iter_turns_reverse(directory / name)
-            ):
-                return True
-    return False
+    if not request_id:
+        return False
+    return request_id in _request_ids(user_id)
 
 
 class Recorder:
@@ -1275,9 +1417,8 @@ class Recorder:
                         )
                     )
                 entries[-1].usage = self._usage.to_dict()
-            for entry in entries:
-                append_turn(self.user_id, self.conv_id, entry)
-                self.written_turns += 1
+            _append_turns(self.user_id, self.conv_id, entries)
+            self.written_turns += len(entries)
         except Exception:  # noqa: BLE001 - recording must not break a prompt
             log.warning("Could not record turn for %s", self.conv_id, exc_info=True)
 

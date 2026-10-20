@@ -66,18 +66,17 @@ def test_the_lock_is_rewritten_rather_than_appended():
 def test_a_failure_before_the_task_exists_releases_the_lock():
     """`_execute`'s finally is the only release, and there is no `_execute` yet.
 
-    `check()` shells out to git and docker, so it can raise for reasons that
-    have nothing to do with this checkout — and the lock was then held by a
-    process that was not updating, locking out every other process on the
-    checkout until it exited.
+    Anything that raises while the run is being laid out (here, listing the
+    components) used to leave the lock held by a process that was not updating,
+    locking out every other process on the checkout until it exited.
     """
     import asyncio
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import Mock, patch
 
     from condor.updates import run as run_module
 
     with patch.object(
-        run_module.components, "check", AsyncMock(side_effect=OSError("no git"))
+        run_module.components, "keys", Mock(side_effect=OSError("no checkout"))
     ):
         with pytest.raises(OSError):
             asyncio.run(run_module.start(["condor"]))

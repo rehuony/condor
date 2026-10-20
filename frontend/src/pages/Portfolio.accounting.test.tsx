@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { api, type PortfolioHistoryResponse, type PortfolioResponse } from "@/lib/api";
+import { portfolioApi, type PortfolioHistoryResponse, type PortfolioResponse } from "@/lib/api/portfolio";
 import { Portfolio } from "@/pages/Portfolio";
 
 vi.mock("@/hooks/useServer", () => ({ useServer: () => ({ server: "test" }) }));
@@ -15,15 +15,29 @@ vi.mock("@/hooks/useRates", () => {
   const convert = (value: number) => ({ value, converted: true });
   return { useRates: () => ({ convert, formatValueDetailed: String, formatPnlValue: String, resolvedSymbol: "$" }) };
 });
-vi.mock("@/lib/api", () => ({ api: {
-  getPortfolio: vi.fn(),
-  getPortfolioHistory: vi.fn(),
-  getBots: vi.fn(async () => ({ bots: [], controllers: [] })),
-  getExecutors: vi.fn(async () => []),
-  getExecutorsSummary: vi.fn(async () => ({ count: 0, pnl: 0, volume: 0, converted: true })),
-  getAgents: vi.fn(async () => []),
-  getConsolidatedPositions: vi.fn(async () => ({ executor_positions: [], bot_positions: [] })),
-} }));
+vi.mock("@/lib/api/portfolio", () => ({
+  portfolioApi: {
+    getPortfolio: vi.fn(),
+    getPortfolioHistory: vi.fn(),
+    getConsolidatedPositions: vi.fn(async () => ({ executor_positions: [], bot_positions: [] })),
+  },
+}));
+vi.mock("@/lib/api/bots", () => ({
+  botsApi: {
+    getBots: vi.fn(async () => ({ bots: [], controllers: [] })),
+  },
+}));
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
+    getExecutors: vi.fn(async () => []),
+    getExecutorsSummary: vi.fn(async () => ({ count: 0, pnl: 0, volume: 0, converted: true })),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
+    getAgents: vi.fn(async () => []),
+  },
+}));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -41,7 +55,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  vi.mocked(api.getPortfolioHistory).mockResolvedValue(history);
+  vi.mocked(portfolioApi.getPortfolioHistory).mockResolvedValue(history);
 });
 
 afterEach(() => {
@@ -64,7 +78,7 @@ async function render(overrides: Partial<PortfolioResponse> = {}, failRefresh = 
       balances: [{ token: "USDT", total: 1000, available: 600, usd_value: 1000 }] }],
     ...overrides,
   };
-  vi.mocked(api.getPortfolio).mockImplementation(async (_server, refresh) => {
+  vi.mocked(portfolioApi.getPortfolio).mockImplementation(async (_server, refresh) => {
     if (refresh && failRefresh) throw new Error("exchange unavailable");
     return response;
   });
@@ -145,13 +159,13 @@ it("keeps the last account value on refresh failure and clears the notice when o
     await client.invalidateQueries({ queryKey: ["portfolio", "test"], exact: true });
   });
   await settleQueries();
-  expect(api.getPortfolio).toHaveBeenLastCalledWith("test");
+  expect(portfolioApi.getPortfolio).toHaveBeenLastCalledWith("test");
   expect(container.textContent).not.toContain("Could not refresh balances.");
   expect(container.textContent).toContain("$800");
 });
 
 it("shows a single snapshot as a visible value and timestamp without inventing a balance change", async () => {
-  vi.mocked(api.getPortfolioHistory).mockResolvedValue({
+  vi.mocked(portfolioApi.getPortfolioHistory).mockResolvedValue({
     ...history,
     points: [{ timestamp: new Date(2026, 9, 16, 10, 15).getTime() / 1000, total_usd: 128.45 }],
   });
@@ -173,8 +187,29 @@ it("shows a single snapshot as a visible value and timestamp without inventing a
   expect(balanceCell.textContent).not.toContain("+$0.00");
 });
 
+it("ignores history points without a finite value in the change and the chart", async () => {
+  vi.mocked(portfolioApi.getPortfolioHistory).mockResolvedValue({
+    ...history,
+    points: [
+      { timestamp: 1000, total_usd: 1000 },
+      { timestamp: 1100, total_usd: Number.NaN },
+      { timestamp: 1200, total_usd: null as unknown as number },
+      { timestamp: 1300, total_usd: 1500 },
+    ],
+  });
+  await render({ equity_usd: null, unrealized_pnl_usd: null });
+
+  const balanceCell = [...container.querySelectorAll("span")]
+    .find((label) => label.textContent === "Portfolio balance")!.parentElement!;
+  expect(balanceCell.textContent).toContain("+$500.00");
+  const chart = historyChart();
+  expect(chart!.textContent).not.toContain("NaN");
+  const yLabels = [...chart!.querySelectorAll("text")].map((label) => label.textContent ?? "");
+  expect(yLabels.some((label) => /\$0(\.00)?$/.test(label))).toBe(false);
+});
+
 it("distinguishes an empty history from a failed request", async () => {
-  vi.mocked(api.getPortfolioHistory).mockResolvedValue({ ...history, points: [] });
+  vi.mocked(portfolioApi.getPortfolioHistory).mockResolvedValue({ ...history, points: [] });
   await render();
 
   expect(evolutionCard().textContent).toContain("No snapshots in this period yet.");
@@ -183,14 +218,14 @@ it("distinguishes an empty history from a failed request", async () => {
 });
 
 it("offers a retry after the initial history request fails and renders the recovered history", async () => {
-  vi.mocked(api.getPortfolioHistory).mockRejectedValue(new Error("history unavailable"));
+  vi.mocked(portfolioApi.getPortfolioHistory).mockRejectedValue(new Error("history unavailable"));
   await render();
 
   expect(evolutionCard().textContent).toContain("Could not load portfolio history.");
   expect(evolutionCard().textContent).not.toContain("No snapshots in this period yet.");
   expect(historyChart()).toBeNull();
 
-  vi.mocked(api.getPortfolioHistory).mockResolvedValue(history);
+  vi.mocked(portfolioApi.getPortfolioHistory).mockResolvedValue(history);
   await retryHistory();
 
   expect(evolutionCard().textContent).not.toContain("Could not load portfolio history.");
@@ -200,7 +235,7 @@ it("offers a retry after the initial history request fails and renders the recov
 it("preserves the balance line while asset breakdown loads or fails, then retries the breakdown", async () => {
   let rejectBreakdown!: (error: Error) => void;
   const pendingBreakdown = new Promise<PortfolioHistoryResponse>((_resolve, reject) => { rejectBreakdown = reject; });
-  vi.mocked(api.getPortfolioHistory).mockImplementation(async (_server, _range, breakdown) =>
+  vi.mocked(portfolioApi.getPortfolioHistory).mockImplementation(async (_server, _range, breakdown) =>
     breakdown ? pendingBreakdown : history,
   );
   await render();
@@ -217,7 +252,7 @@ it("preserves the balance line while asset breakdown loads or fails, then retrie
   expect(evolutionCard().textContent).toContain("Could not load asset breakdown. Showing the balance line.");
   expect(balanceLine()).toBe(originalLine);
 
-  vi.mocked(api.getPortfolioHistory).mockImplementation(async (_server, _range, breakdown) =>
+  vi.mocked(portfolioApi.getPortfolioHistory).mockImplementation(async (_server, _range, breakdown) =>
     breakdown ? {
       ...history,
       top_tokens: ["USDT"],
@@ -236,7 +271,7 @@ it("keeps the last history visible when a background refresh fails and clears th
   const originalLine = balanceLine();
   expect(originalLine).toBeTruthy();
 
-  vi.mocked(api.getPortfolioHistory).mockRejectedValue(new Error("history unavailable"));
+  vi.mocked(portfolioApi.getPortfolioHistory).mockRejectedValue(new Error("history unavailable"));
   await act(async () => {
     await client.invalidateQueries({ queryKey: ["portfolio-history", "test", "1W"], exact: true });
   });
@@ -244,7 +279,7 @@ it("keeps the last history visible when a background refresh fails and clears th
   expect(evolutionCard().textContent).toContain("Could not refresh history. Showing the last available snapshot.");
   expect(balanceLine()).toBe(originalLine);
 
-  vi.mocked(api.getPortfolioHistory).mockResolvedValue(history);
+  vi.mocked(portfolioApi.getPortfolioHistory).mockResolvedValue(history);
   await retryHistory();
   expect(evolutionCard().textContent).not.toContain("Could not refresh history.");
   expect(balanceLine()).toBe(originalLine);

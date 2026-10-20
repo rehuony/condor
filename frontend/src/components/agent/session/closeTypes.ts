@@ -1,4 +1,4 @@
-import type { AgentPerformance } from "@/lib/api";
+import type { AgentPerformance } from "@/lib/api/agents";
 
 /** "CloseType.EARLY_STOP" → "early stop" */
 export function prettyCloseType(raw: string): string {

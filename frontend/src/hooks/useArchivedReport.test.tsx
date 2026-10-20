@@ -29,9 +29,13 @@ const getArchivedReport = vi.fn<(...a: Args) => Promise<StoredReport>>();
 const getRoutineInstance = vi.fn<(...a: Args) => Promise<unknown>>();
 const runRoutine = vi.fn<(...a: Args) => Promise<{ instance_id: string }>>();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/archived", () => ({
+  archivedApi: {
     getArchivedReport: (...a: Args) => getArchivedReport(...a),
+  },
+}));
+vi.mock("@/lib/api/routines", () => ({
+  routinesApi: {
     getRoutineInstance: (...a: Args) => getRoutineInstance(...a),
     runRoutine: (...a: Args) => runRoutine(...a),
   },

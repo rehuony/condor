@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type { SlotInfo } from "@/hooks/useChatSocket";
-import { api } from "@/lib/api";
+import { conversationsApi } from "@/lib/api/conversations";
 
 /**
  * `?conversation=<id>` — a link that opens one conversation (FEAT-111).
@@ -40,7 +40,7 @@ export function useConversationParam(
 
   const { data, status } = useQuery({
     queryKey: ["conversations"],
-    queryFn: () => api.listConversations(),
+    queryFn: () => conversationsApi.listConversations(),
     enabled: !!wanted,
   });
 

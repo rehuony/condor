@@ -7,9 +7,9 @@ import logging
 from itertools import combinations
 
 from pydantic import BaseModel, Field
-from telegram.ext import ContextTypes
 
 from config_manager import get_client
+from routines.base import RoutineContext
 
 logger = logging.getLogger(__name__)
 
@@ -443,10 +443,10 @@ def _build_ob_chart(exchange_data: list[tuple[str, list, list]], pair: str):
     return fig
 
 
-async def run(config: Config, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def run(config: Config, context: RoutineContext) -> str:
     """Compare order books across multiple CEX exchanges."""
-    chat_id = context._chat_id if hasattr(context, "_chat_id") else None
-    client = await get_client(chat_id, context=context)
+    chat_id = context.chat_id
+    client = await get_client(chat_id, user_data=context.user_data)
 
     if not client:
         return "No server available. Configure servers in /config."

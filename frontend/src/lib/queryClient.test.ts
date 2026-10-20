@@ -17,7 +17,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { venuesQueryKey } from "@/components/market/useVenues";
-import { api, type AgentDetail } from "@/lib/api";
+import { agentsApi, type AgentDetail } from "@/lib/api/agents";
 import {
   AGENT_REFETCH_MS,
   AGENT_STALE_MS,
@@ -515,7 +515,7 @@ describe("agentsQuery", () => {
   });
 
   it("two observers share one request", async () => {
-    const getAgents = vi.spyOn(api, "getAgents").mockResolvedValue([]);
+    const getAgents = vi.spyOn(agentsApi, "getAgents").mockResolvedValue([]);
     observe();
     observe();
     await vi.waitFor(() =>
@@ -525,7 +525,7 @@ describe("agentsQuery", () => {
   });
 
   it("a disabled observer never fetches", async () => {
-    const getAgents = vi.spyOn(api, "getAgents").mockResolvedValue([]);
+    const getAgents = vi.spyOn(agentsApi, "getAgents").mockResolvedValue([]);
     observe({ enabled: false });
     await new Promise((r) => setTimeout(r, 20));
     expect(getAgents).not.toHaveBeenCalled();

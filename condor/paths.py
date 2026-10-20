@@ -20,7 +20,7 @@ apart) and the line between them is *who writes and when*:
     └── state/{namespace}/
 
     <repo>/data/                       # or $CONDOR_DATA_DIR
-    ├── condor_bot_data.pickle         # the operational store: what the *bot*
+    ├── condor_state.pickle            # the operational store: what the *bot*
     ├── notifications.json             # accumulated while it ran, readable and
     ├── routine_hooks.json             # editable by an operator
     ├── backtests/

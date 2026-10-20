@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Edit2,
-  Loader2,
   Plus,
   Star,
 } from "lucide-react";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { EmptyState } from "@/components/ui/EmptyState";
+import { INPUT_CLASS, Label } from "@/components/ui/Field";
+import { IconButton } from "@/components/ui/IconButton";
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
+import { Spinner } from "@/components/ui/Spinner";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { useServer } from "@/hooks/useServer";
-import { type ServerInfo, api } from "@/lib/api";
+import { serversApi, type ServerInfo } from "@/lib/api/servers";
 
 interface ServerForm {
   name: string;
@@ -38,7 +41,7 @@ const EMPTY_FORM: ServerForm = { name: "", host: "", port: 8000, username: "", p
  * it back.
  */
 function buildServerUpdate({ host, port, username, password }: ServerForm) {
-  const patch: Parameters<typeof api.updateServer>[1] = { host, port };
+  const patch: Parameters<typeof serversApi.updateServer>[1] = { host, port };
   if (username) patch.username = username;
   if (password) patch.password = password;
   return patch;
@@ -54,7 +57,7 @@ export function ServersSettings() {
 
   const { data: servers = [], isLoading } = useQuery({
     queryKey: ["settings-servers"],
-    queryFn: api.getSettingsServers,
+    queryFn: serversApi.getSettingsServers,
   });
 
   const invalidate = () => {
@@ -63,17 +66,17 @@ export function ServersSettings() {
   };
 
   const addMut = useMutation({
-    mutationFn: (data: ServerForm) => api.addServer(data),
+    mutationFn: (data: ServerForm) => serversApi.addServer(data),
     onSuccess: () => { invalidate(); setAdding(false); setForm(EMPTY_FORM); },
   });
 
   const updateMut = useMutation({
-    mutationFn: (data: ServerForm) => api.updateServer(data.name, buildServerUpdate(data)),
+    mutationFn: (data: ServerForm) => serversApi.updateServer(data.name, buildServerUpdate(data)),
     onSuccess: () => { invalidate(); setEditing(null); setForm(EMPTY_FORM); },
   });
 
   const deleteMut = useMutation({
-    mutationFn: (name: string) => api.deleteServer(name),
+    mutationFn: (name: string) => serversApi.deleteServer(name),
     onSuccess: () => { invalidate(); setConfirmDelete(null); },
   });
 
@@ -82,7 +85,7 @@ export function ServersSettings() {
   // browser at that server. Without the second half the click had no visible
   // effect at all — the star was never filled and the header never moved.
   const defaultMut = useMutation({
-    mutationFn: (name: string) => api.setDefaultServer(name),
+    mutationFn: (name: string) => serversApi.setDefaultServer(name),
     onSuccess: (_data, name) => {
       if (name !== activeServer) setServer(name);
       invalidate();
@@ -112,7 +115,7 @@ export function ServersSettings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-[var(--color-text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -126,7 +129,7 @@ export function ServersSettings() {
         {!adding && (
           <button
             onClick={() => { setAdding(true); setEditing(null); setForm(EMPTY_FORM); }}
-            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80"
+            className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80"
           >
             <Plus className="h-3.5 w-3.5" /> Add Server
           </button>
@@ -145,49 +148,49 @@ export function ServersSettings() {
           <div className="grid grid-cols-2 gap-3">
             {!editing && (
               <div className="col-span-2">
-                <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Name</label>
+                <Label>Name</Label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                  className={INPUT_CLASS}
                   placeholder="my-server"
                 />
               </div>
             )}
             <div>
-              <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Host</label>
+              <Label>Host</Label>
               <input
                 value={form.host}
                 onChange={(e) => setForm({ ...form, host: e.target.value })}
-                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                className={INPUT_CLASS}
                 placeholder="192.168.1.100"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Port</label>
+              <Label>Port</Label>
               <input
                 type="number"
                 value={form.port}
                 onChange={(e) => setForm({ ...form, port: parseInt(e.target.value) || 0 })}
-                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                className={INPUT_CLASS}
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Username</label>
+              <Label>Username</Label>
               <input
                 value={form.username}
                 onChange={(e) => setForm({ ...form, username: e.target.value })}
-                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                className={INPUT_CLASS}
                 placeholder={editing ? "(unchanged)" : "admin"}
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Password</label>
+              <Label>Password</Label>
               <input
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                className={INPUT_CLASS}
                 placeholder={editing ? "(unchanged)" : ""}
               />
             </div>
@@ -196,9 +199,9 @@ export function ServersSettings() {
             <button
               type="submit"
               disabled={addMut.isPending || updateMut.isPending || (!editing && !form.name)}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
             >
-              {(addMut.isPending || updateMut.isPending) && <Loader2 className="h-3 w-3 animate-spin" />}
+              {(addMut.isPending || updateMut.isPending) && <Spinner size="xs" />}
               {editing ? "Save" : "Add"}
             </button>
             <button
@@ -292,20 +295,20 @@ export function ServersSettings() {
                 aria-label={s.is_default ? "Default server" : `Set ${s.name} as default`}
               >
                 {defaultMut.isPending && defaultMut.variables === s.name ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner size="sm" />
                 ) : (
                   <Star className={`h-3.5 w-3.5 ${s.is_default ? "fill-current" : ""}`} />
                 )}
               </button>
               {isOwner(s) && (
                 <>
-                  <button
+                  <IconButton
+                    label="Edit"
+                    tone="primary"
                     onClick={() => startEdit(s)}
-                    className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-primary)]"
-                    title="Edit"
                   >
                     <Edit2 className="h-3.5 w-3.5" />
-                  </button>
+                  </IconButton>
                   <InlineConfirm
                     confirming={confirmDelete === s.name}
                     onRequest={() => setConfirmDelete(s.name)}
@@ -321,9 +324,9 @@ export function ServersSettings() {
         ))}
 
         {servers.length === 0 && (
-          <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+          <EmptyState>
             No servers configured. Add one to get started.
-          </p>
+          </EmptyState>
         )}
 
         {(deleteMut.error || defaultMut.error) && (

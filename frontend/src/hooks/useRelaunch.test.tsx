@@ -5,10 +5,14 @@ import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RelaunchResponse } from "@/lib/api";
+import type { RelaunchResponse } from "@/lib/api/servers";
 
 const getRelaunch = vi.fn<() => Promise<RelaunchResponse>>();
-vi.mock("@/lib/api", () => ({ api: { getRelaunch: () => getRelaunch() } }));
+vi.mock("@/lib/api/servers", () => ({
+  serversApi: {
+    getRelaunch: () => getRelaunch(),
+  },
+}));
 
 import { RELAUNCH_KEY, useReloadAfterRelaunch } from "./useRelaunch";
 

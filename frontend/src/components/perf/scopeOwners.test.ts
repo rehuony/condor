@@ -14,7 +14,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ownerNoun, scopeOwners } from "@/components/perf/scopeOwners";
-import type { ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
 import {
   buildTree,
   type ConvertQuote,

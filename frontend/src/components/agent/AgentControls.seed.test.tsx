@@ -19,10 +19,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const startStrategy = vi.fn(async (...args: unknown[]) => ({ args }));
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    getAgent: () => Promise.resolve({}),
+vi.mock("@/lib/api/servers", () => ({
+  serversApi: {
     getServers: () => Promise.resolve([{ name: "brigado_2", online: true }]),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
+    getAgent: () => Promise.resolve({}),
     resumeStrategy: () => Promise.resolve({}),
     pauseStrategy: () => Promise.resolve({}),
     stopStrategy: () => Promise.resolve({}),

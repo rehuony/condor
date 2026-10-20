@@ -15,8 +15,7 @@ from contextlib import asynccontextmanager
 from copy import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-
-from telegram import Bot
+from typing import Any, Protocol
 
 from condor.acp import ACPClient, Heartbeat, PermissionCallback, PromptDone
 from condor.acp.client import ToolCallEvent, ToolCallUpdate, fold_tool_call_event
@@ -115,7 +114,15 @@ async def _creation_lock(name: str):
 
 # Health monitor state
 _health_task: asyncio.Task | None = None
-_health_bot: Bot | None = None
+
+
+class MessageSender(Protocol):
+    """The one thing the health monitor needs from a chat transport."""
+
+    async def send_message(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+_health_bot: MessageSender | None = None
 
 
 def _utcnow() -> datetime:
@@ -1144,7 +1151,7 @@ async def destroy_all_sessions() -> None:
 # --- Background health monitor ---
 
 
-async def start_health_monitor(bot: Bot) -> None:
+async def start_health_monitor(bot: MessageSender) -> None:
     """Start periodic background check for dead sessions."""
     global _health_task, _health_bot
     _health_bot = bot

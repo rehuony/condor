@@ -67,7 +67,8 @@ def test_six_hour_analysis_uses_only_recent_candles(
 
     result = asyncio.run(
         analysis.run(
-            analysis.Config(lookback="6h", send_chart=False), SimpleNamespace()
+            analysis.Config(lookback="6h", send_chart=False),
+            SimpleNamespace(chat_id=0, user_data={}, bot=None),
         )
     )
 
@@ -96,7 +97,8 @@ def test_sparse_recent_history_does_not_backfill_outside_the_requested_horizon(
 
     result = asyncio.run(
         analysis.run(
-            analysis.Config(lookback="6h", send_chart=False), SimpleNamespace()
+            analysis.Config(lookback="6h", send_chart=False),
+            SimpleNamespace(chat_id=0, user_data={}, bot=None),
         )
     )
 

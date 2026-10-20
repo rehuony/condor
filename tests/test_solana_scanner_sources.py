@@ -58,7 +58,9 @@ def runtime(monkeypatch):
 
     monkeypatch.setattr(ReportBuilder, "save", save)
     return SimpleNamespace(
-        context=SimpleNamespace(_chat_id=1, bot=None), lookup=lookup, reports=reports
+        context=SimpleNamespace(chat_id=1, user_data={}, bot=None),
+        lookup=lookup,
+        reports=reports,
     )
 
 

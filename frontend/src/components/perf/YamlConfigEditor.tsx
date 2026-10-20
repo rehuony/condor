@@ -1,10 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
-import { ChevronRight, Loader2, RotateCcw, Save } from "lucide-react";
+import { ChevronRight, RotateCcw, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import yamlLib from "js-yaml";
 
 import { CodeEditor } from "@/components/editor/CodeEditor";
-import { api } from "@/lib/api";
+import { IconButton } from "@/components/ui/IconButton";
+import { Spinner } from "@/components/ui/Spinner";
+import { botsApi } from "@/lib/api/bots";
 import { configToYaml, CONTROLLER_HIDDEN_KEYS, validateYamlMapping } from "@/lib/configYaml";
 
 /**
@@ -66,7 +68,7 @@ export function YamlConfigEditor({
       if (!parsed || typeof parsed !== "object") {
         throw new Error("YAML must be a mapping");
       }
-      return api.updateBotControllerConfig(server, botName, configId, parsed);
+      return botsApi.updateBotControllerConfig(server, botName, configId, parsed);
     },
     onSuccess: () => {
       onSaved();
@@ -78,13 +80,13 @@ export function YamlConfigEditor({
       {/* Header with save */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border)]/50">
         <div className="flex items-center gap-2 min-w-0">
-          <button
+          <IconButton
+            label="Hide config"
+            size="xs"
             onClick={onCollapse}
-            className="rounded p-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-            title="Hide config"
           >
             <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+          </IconButton>
           <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Config
           </h3>
@@ -105,10 +107,10 @@ export function YamlConfigEditor({
           <button
             onClick={() => saveMutation.mutate()}
             disabled={!isDirty || !!parseError || saveMutation.isPending}
-            className="flex items-center gap-1 rounded px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-30 bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary)]/80 disabled:hover:bg-[var(--color-primary)]"
+            className="flex items-center gap-1 rounded px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-30 bg-[var(--color-primary)] text-[var(--on-primary)] hover:bg-[var(--color-primary)]/80 disabled:hover:bg-[var(--color-primary)]"
           >
             {saveMutation.isPending ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner size="xs" />
             ) : (
               <Save className="h-3 w-3" />
             )}

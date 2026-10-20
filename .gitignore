@@ -171,9 +171,10 @@ condor_bot_data.pickle.bak
 # Claude Code local settings (user-specific overrides)
 .claude/settings.local.json
 
-# Local config and data
+# Local config and data. The setup template is source, not runtime state.
 config.yml
 config.yml.bak
+!templates/config.yml
 audit_log.yml
 data/
 

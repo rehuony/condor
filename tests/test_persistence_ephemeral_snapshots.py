@@ -1,8 +1,7 @@
 """PERF-241: transient API snapshots never reach the pickle on disk.
 
-``SafePicklePersistence`` re-serializes the whole store and fsyncs it —
-synchronously, on the bot's event loop — every time PTB flushes a touched
-user. ``EPHEMERAL_KEYS`` existed to keep rebuildable data out of that write,
+``UserStateStore`` re-serializes the whole store and fsyncs it on every flush.
+``EPHEMERAL_KEYS`` existed to keep rebuildable data out of that write,
 but it only covered the cache namespaces and the ``portfolio_*`` snapshots.
 The per-render API snapshots the bots/executors/LP handlers stash in
 ``user_data`` (an ``active_bots_data`` alone measured 108 KB in the live file)
@@ -15,7 +14,7 @@ from __future__ import annotations
 
 import pickle
 
-from condor.persistence import EPHEMERAL_KEYS, SafePicklePersistence
+from condor.telegram.state import EPHEMERAL_KEYS, strip_ephemeral
 
 # The per-render snapshots added by PERF-241 — each written by a handler and
 # re-fetched from the backend by the next render that needs it.
@@ -56,7 +55,7 @@ def test_every_transient_snapshot_key_is_ephemeral():
 
 
 def test_strip_drops_snapshots_and_keeps_durable_state():
-    cleaned = SafePicklePersistence._strip_ephemeral(_user_data_with_snapshots())
+    cleaned = strip_ephemeral(_user_data_with_snapshots())
 
     written = cleaned[42]
     for key in TRANSIENT_SNAPSHOT_KEYS:
@@ -70,7 +69,7 @@ def test_strip_does_not_mutate_the_live_session_data():
     live = user_data[42]
     before = dict(live)
 
-    SafePicklePersistence._strip_ephemeral(user_data)
+    strip_ephemeral(user_data)
 
     assert live == before
     for key in TRANSIENT_SNAPSHOT_KEYS:
@@ -94,7 +93,7 @@ def test_pickle_shrinks_by_an_order_of_magnitude():
     full = len(pickle.dumps(user_data, protocol=pickle.HIGHEST_PROTOCOL))
     stripped = len(
         pickle.dumps(
-            SafePicklePersistence._strip_ephemeral(user_data),
+            strip_ephemeral(user_data),
             protocol=pickle.HIGHEST_PROTOCOL,
         )
     )
@@ -106,7 +105,7 @@ def test_users_without_snapshots_are_passed_through_untouched():
     """No needless copy for the common idle user."""
     user_data = {1: dict(DURABLE_KEYS), 2: "not-a-dict"}
 
-    cleaned = SafePicklePersistence._strip_ephemeral(user_data)
+    cleaned = strip_ephemeral(user_data)
 
     assert cleaned[1] is user_data[1]
     assert cleaned[2] == "not-a-dict"

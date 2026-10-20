@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CandleData } from "@/lib/api";
+import type { CandleData } from "@/lib/api/market";
 import { candleChannelKey, CandleStore } from "@/lib/candle-store";
 import { historyPage, intervalSeconds, missingHistoryRange, mergeHistoryRanges } from "@/lib/candle-history";
 import type { CondorWebSocket } from "@/lib/websocket";

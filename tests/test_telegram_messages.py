@@ -1,61 +1,22 @@
-"""Exercise the real PTB dispatcher and registered Telegram content router."""
+"""Exercise the real aiogram dispatcher and registered Telegram content router."""
 
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
-from telegram import Message, Update
-from telegram.ext import Application, MessageHandler
-from telegram.request import BaseRequest
+from aiogram.types import Message
 
 import main
 import utils.auth as auth
 from config_manager import UserRole
 from handlers import agents, bots
-
-
-class OfflineRequest(BaseRequest):
-    """Initialize a real PTB Application without contacting Telegram."""
-
-    @property
-    def read_timeout(self):
-        return 1
-
-    async def initialize(self):
-        pass
-
-    async def shutdown(self):
-        pass
-
-    async def do_request(self, url, method, request_data=None, **kwargs):
-        assert url.endswith("/getMe"), "tests must never call Telegram"
-        return (
-            200,
-            json.dumps(
-                {
-                    "ok": True,
-                    "result": {
-                        "id": 123,
-                        "is_bot": True,
-                        "first_name": "Condor",
-                        "username": "condor_test",
-                    },
-                }
-            ).encode(),
-        )
+from tests.conftest import patch_agents
+from tests.telegram_offline import message_update, offline_app, update_from
 
 
 def _update(app, content=None, *, kind="message", chat_type="private"):
-    data = {
-        "message_id": 11,
-        "date": 1,
-        "chat": {"id": 7, "type": chat_type},
-        "from": {"id": 7, "is_bot": False, "first_name": "Tester"},
-        **(content or {}),
-    }
-    return Update.de_json({"update_id": 20, kind: data}, app.bot)
+    return message_update(app.bot, content, kind=kind, chat_type=chat_type)
 
 
 def _photo(**kwargs):
@@ -95,14 +56,23 @@ def _reply_image():
     }
 
 
+def _rich(text):
+    return {"rich_message": {"blocks": [{"type": "paragraph", "text": text}]}}
+
+
+def _rich_photo_block():
+    return {"type": "photo", "photo": _photo()["photo"]}
+
+
 @pytest_asyncio.fixture
-async def dispatch(monkeypatch):
+async def dispatch(monkeypatch, tmp_path):
     state = SimpleNamespace(
         role=UserRole.USER,
         ai=AsyncMock(),
         reply=AsyncMock(return_value=SimpleNamespace(message_id=99)),
         upload=AsyncMock(),
         errors=[],
+        process_input=agents.agent_message_handler,
     )
     cm = SimpleNamespace(
         get_user_role=lambda _uid: state.role,
@@ -112,40 +82,180 @@ async def dispatch(monkeypatch):
     monkeypatch.setattr(auth, "_capture_identity", Mock())
     monkeypatch.setattr(auth, "_refresh_active_server", Mock())
     monkeypatch.setattr(auth, "_notify_admin_new_user", AsyncMock())
-    monkeypatch.setattr(Message, "reply_text", state.reply)
-    monkeypatch.setattr(agents, "agent_message_handler", state.ai)
+    monkeypatch.setattr(Message, "answer", state.reply)
+    patch_agents(monkeypatch, "agent_message_handler", state.ai)
     monkeypatch.setattr(bots, "handle_config_file_upload", state.upload)
-    state.app = (
-        Application.builder()
-        .token("123:offline-test")
-        .request(OfflineRequest())
-        .get_updates_request(OfflineRequest())
-        .build()
-    )
+    state.app = offline_app(tmp_path)
     main.register_handlers(state.app)
 
     async def error_handler(update, context):
         state.errors.append(context.error)
 
-    state.app.add_error_handler(error_handler)
+    state.app.error_handler = error_handler
     await state.app.initialize()
 
     async def send(content=None, **kwargs):
         update = _update(state.app, content, **kwargs)
-        await state.app.process_update(update)
+        await state.app.feed(update)
         assert not state.errors
         return update
 
     state.send = send
     state.cm = cm
-    state.user_data = state.app.user_data[7]
+    state.user_data = state.app.store.get(7)
     yield state
-    await state.app.shutdown()
+    await state.app.close()
+
+
+@pytest.fixture
+def prompt_dispatch(dispatch, monkeypatch):
+    patch_agents(monkeypatch, "agent_message_handler", dispatch.process_input)
+    monkeypatch.setattr("config_manager.get_config_manager", lambda: dispatch.cm)
+    patch_agents(
+        monkeypatch,
+        "_ensure_chat_session",
+        AsyncMock(return_value=SimpleNamespace(conversation_id="test-conversation")),
+    )
+    dispatch.turn = AsyncMock(return_value=False)
+    dispatch.secrets = AsyncMock()
+    patch_agents(monkeypatch, "_stream_agent_turn", dispatch.turn)
+    patch_agents(monkeypatch, "_handle_pasted_secrets", dispatch.secrets)
+    return dispatch
+
+
+@pytest.mark.asyncio
+async def test_rich_message_dispatch_builds_prompt_request(prompt_dispatch):
+    await prompt_dispatch.send(
+        _rich(["Compare ", {"type": "bold", "text": "BTC"}, "\nwith ETH"])
+    )
+    prompt_dispatch.turn.assert_awaited_once()
+    request = prompt_dispatch.turn.await_args.args[3]
+    assert request.text == "Compare BTC\nwith ETH"
+    assert request.request_id == "telegram:7:11"
+    assert not request.images
+
+
+@pytest.mark.asyncio
+async def test_rich_secrets_are_scanned_before_prompting(prompt_dispatch):
+    secret = (
+        "legal winner thank year wave sausage worth useful legal winner thank yellow"
+    )
+    update = await prompt_dispatch.send(_rich({"type": "bold", "text": secret}))
+    prompt_dispatch.secrets.assert_awaited_once()
+    assert prompt_dispatch.secrets.await_args.args[2] == secret
+    assert prompt_dispatch.secrets.await_args.kwargs["messages"] == (update.message,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rich_is_quote", [False, True])
+async def test_rejected_rich_content_does_not_skip_readable_secret_scan(
+    prompt_dispatch, rich_is_quote
+):
+    secret = (
+        "legal winner thank year wave sausage worth useful legal winner thank yellow"
+    )
+    rich = {"rich_message": {"blocks": [_rich_photo_block()]}}
+    await prompt_dispatch.send(
+        {
+            **({"text": secret} if rich_is_quote else rich),
+            "reply_to_message": {
+                "message_id": 10,
+                "date": 1,
+                "chat": {"id": 7, "type": "private"},
+                **(rich if rich_is_quote else {"text": secret}),
+            },
+        }
+    )
+    prompt_dispatch.secrets.assert_awaited_once()
+    assert prompt_dispatch.secrets.await_args.args[2] == secret
+    prompt_dispatch.turn.assert_not_awaited()
+    prompt_dispatch.reply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external", [False, True])
+async def test_rich_reply_dispatch_preserves_quoted_text(prompt_dispatch, external):
+    content = {"text": "Explain"}
+    if external:
+        content["external_reply"] = {
+            "origin": {"type": "hidden_user", "date": 1, "sender_user_name": "Tester"},
+            **_rich("Original question"),
+        }
+    else:
+        content["reply_to_message"] = {
+            "message_id": 10,
+            "date": 1,
+            "chat": {"id": 7, "type": "private"},
+            **_rich("Original question"),
+        }
+    await prompt_dispatch.send(content)
+    assert (
+        prompt_dispatch.turn.await_args.args[3].text
+        == "Explain\n\nReplied-to message:\nOriginal question"
+    )
+    assert prompt_dispatch.secrets.await_args.args[2] == "Explain\n\nOriginal question"
+
+
+@pytest.mark.asyncio
+async def test_rich_reset_uses_own_text_even_when_reply_contains_media(
+    prompt_dispatch, monkeypatch
+):
+    patch_agents(monkeypatch, "get_session", AsyncMock(return_value=object()))
+    destroy = AsyncMock()
+    patch_agents(monkeypatch, "destroy_session", destroy)
+    content = _reply_image()
+    del content["text"]
+    content.update(_rich("-"))
+    await prompt_dispatch.send(content)
+    destroy.assert_awaited_once_with(7)
+    prompt_dispatch.turn.assert_not_awaited()
+    assert "Session reset" in prompt_dispatch.reply.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_caption_dash_does_not_become_a_reset(prompt_dispatch, monkeypatch):
+    destroy = AsyncMock()
+    patch_agents(monkeypatch, "destroy_session", destroy)
+    # A caption alone is enough to expose accidental control parsing without
+    # involving a download in this dispatcher regression test.
+    await prompt_dispatch.send({"caption": "-"})
+    destroy.assert_not_awaited()
+    assert prompt_dispatch.turn.await_args.args[3].text == "-"
+
+
+@pytest.mark.asyncio
+async def test_rich_armed_agent_input_receives_flattened_text(
+    prompt_dispatch, monkeypatch
+):
+    compact = AsyncMock()
+    patch_agents(monkeypatch, "_do_compact_from_message", compact)
+    prompt_dispatch.user_data["agent_compact_custom"] = True
+    await prompt_dispatch.send(_rich("Keep the decisions"))
+    compact.assert_awaited_once()
+    assert compact.await_args.args[2] == "Keep the decisions"
+    prompt_dispatch.turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"rich_message": {"blocks": [_rich_photo_block()]}},
+        _rich("x" * 32769),
+    ],
+)
+async def test_invalid_rich_message_is_refused_before_prompting(
+    prompt_dispatch, content
+):
+    await prompt_dispatch.send(content)
+    prompt_dispatch.turn.assert_not_awaited()
+    prompt_dispatch.reply.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_obsolete_native_stop_is_not_treated_as_chat_input(dispatch, monkeypatch):
-    incoming = Update.de_json(
+    incoming = update_from(
+        dispatch.app.bot,
         {
             "update_id": 21,
             "stopped_message_generation": {
@@ -153,9 +263,8 @@ async def test_obsolete_native_stop_is_not_treated_as_chat_input(dispatch, monke
                 "draft_id": 10,
             },
         },
-        dispatch.app.bot,
     )
-    await dispatch.app.process_update(incoming)
+    await dispatch.app.feed(incoming)
     assert not dispatch.errors
     dispatch.ai.assert_not_awaited()
     dispatch.reply.assert_not_awaited()
@@ -214,13 +323,10 @@ async def test_obsolete_native_stop_is_not_treated_as_chat_input(dispatch, monke
 async def test_all_ordinary_content_reaches_one_agent_input_boundary(dispatch, content):
     update = await dispatch.send(content)
     dispatch.ai.assert_awaited_once()
-    assert dispatch.ai.await_args.args[0] is update
+    assert dispatch.ai.await_args.args[0].raw is update
     assert dispatch.user_data["_user_id"] == 7
     dispatch.reply.assert_not_called()
-    assert (
-        sum(isinstance(handler, MessageHandler) for handler in dispatch.app.handlers[0])
-        == 1
-    )
+    assert len(dispatch.app.dispatcher.message.handlers) == 1
 
 
 @pytest.mark.asyncio
@@ -265,7 +371,7 @@ async def test_commands_keep_their_own_dispatch_and_never_reach_ai(
     dispatch, monkeypatch
 ):
     stop = AsyncMock()
-    monkeypatch.setattr(agents, "stop_command", stop)
+    patch_agents(monkeypatch, "stop_command", stop)
     main.register_handlers(dispatch.app)
     await dispatch.send(
         {
@@ -313,14 +419,19 @@ async def test_commands_keep_their_own_dispatch_and_never_reach_ai(
     ],
 )
 @pytest.mark.parametrize("chat_type", ["private", "group", "supergroup"])
+@pytest.mark.parametrize("rich", [False, True])
 async def test_existing_forms_consume_plain_text(
-    dispatch, monkeypatch, key, state, target, chat_type
+    dispatch, monkeypatch, key, state, target, chat_type, rich
 ):
     handler = AsyncMock(return_value=True)
     monkeypatch.setattr(target, handler)
     dispatch.user_data[key] = state
-    await dispatch.send({"text": "requested value"}, chat_type=chat_type)
+    await dispatch.send(
+        _rich("requested value") if rich else {"text": "requested value"},
+        chat_type=chat_type,
+    )
     handler.assert_awaited_once()
+    assert handler.await_args.args[0].message.text == "requested value"
     dispatch.ai.assert_not_called()
 
 
@@ -420,7 +531,7 @@ async def test_explicit_config_upload_takes_priority_over_agent_document_support
         _document("config.yaml", "application/yaml"), chat_type=chat_type
     )
     dispatch.upload.assert_awaited_once()
-    assert dispatch.upload.await_args.args[0] is update
+    assert dispatch.upload.await_args.args[0].raw is update
     dispatch.ai.assert_not_called()
 
 
@@ -516,9 +627,75 @@ async def test_actual_bot_form_dispatches_its_processor_and_reports_consumption(
     dispatch.user_data["bots_state"] = "cfg_bulk_edit"
     update = await dispatch.send({"text": "  spread=0.01  "})
     processor.assert_awaited_once()
-    assert processor.await_args.args[0] is update
+    assert processor.await_args.args[0].raw is update
     assert processor.await_args.args[2] == "spread=0.01"
     dispatch.ai.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_actual_bot_form_consumes_rich_text_without_mutating_update(
+    dispatch, monkeypatch
+):
+    processor = AsyncMock()
+    monkeypatch.setitem(bots._TEXT_INPUT_HANDLERS, "cfg_bulk_edit", processor)
+    dispatch.user_data["bots_state"] = "cfg_bulk_edit"
+    update = await dispatch.send(_rich("  spread=0.01  "))
+    processor.assert_awaited_once()
+    form_update = processor.await_args.args[0]
+    assert processor.await_args.args[2] == "spread=0.01"
+    assert form_update.message.text == "  spread=0.01  "
+    assert form_update.message.bot is dispatch.app.bot
+    assert form_update.message.message_id == update.message.message_id
+    assert update.message.text is None
+    dispatch.ai.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quoted", [False, True])
+async def test_form_rejects_nested_rich_media_without_consuming_state(
+    dispatch, monkeypatch, quoted
+):
+    processor = AsyncMock()
+    monkeypatch.setitem(bots._TEXT_INPUT_HANDLERS, "cfg_bulk_edit", processor)
+    dispatch.user_data["bots_state"] = "cfg_bulk_edit"
+    content = {
+        "rich_message": {
+            "blocks": [
+                {"type": "paragraph", "text": "spread=0.01"},
+                {
+                    "type": "details",
+                    "summary": "Chart",
+                    "blocks": [_rich_photo_block()],
+                },
+            ]
+        }
+    }
+    if quoted:
+        content = {
+            **_rich("spread=0.01"),
+            "reply_to_message": {
+                "message_id": 10,
+                "date": 1,
+                "chat": {"id": 7, "type": "private"},
+                **content,
+            },
+        }
+    await dispatch.send(content)
+    processor.assert_not_awaited()
+    dispatch.ai.assert_not_called()
+    assert dispatch.user_data["bots_state"] == "cfg_bulk_edit"
+    assert "/cancel" in dispatch.reply.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_form_reports_oversized_rich_text(dispatch, monkeypatch):
+    handler = AsyncMock()
+    monkeypatch.setattr("handlers.cex.cex_message_handler", handler)
+    dispatch.user_data["cex_state"] = "trade_set_amount"
+    await dispatch.send(_rich("x" * 32769))
+    handler.assert_not_awaited()
+    assert "32,768" in dispatch.reply.await_args.args[0]
+    assert dispatch.user_data["cex_state"] == "trade_set_amount"
 
 
 @pytest.mark.asyncio
@@ -530,6 +707,6 @@ async def test_progressive_bot_form_keeps_its_existing_update_contract(
     dispatch.user_data["bots_state"] = "deploy_progressive"
     update = await dispatch.send({"text": "20"})
     processor.assert_awaited_once()
-    assert processor.await_args.args[0] is update
+    assert processor.await_args.args[0].raw is update
     assert len(processor.await_args.args) == 2
     dispatch.ai.assert_not_called()

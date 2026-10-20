@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ScopeTree } from "./ScopeTree";
 import type { FleetOwner } from "@/lib/agent-attribution";
-import type { ControllerInfo } from "@/lib/api";
+import type { ControllerInfo } from "@/lib/api/bots";
 import { buildTree, leafFromController, type PerfLeaf } from "@/lib/perf-tree";
 
 declare global {

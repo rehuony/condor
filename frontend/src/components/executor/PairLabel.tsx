@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
+import { marketApi } from "@/lib/api/market";
 
 // An EVM 0x-address or a base58 Solana pubkey. LP/DEX executors store their
 // trading_pair as `<base_address>-<quote>` (Gateway can't resolve memecoins by
@@ -34,7 +34,7 @@ export function PairLabel({
 
   const { data } = useQuery({
     queryKey: ["token-symbol", base, connector],
-    queryFn: () => api.getTokenSymbol(base, connector),
+    queryFn: () => marketApi.getTokenSymbol(base, connector),
     enabled: isAddress,
     staleTime: 24 * 60 * 60 * 1000,
     retry: 1,

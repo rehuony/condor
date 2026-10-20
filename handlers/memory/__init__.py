@@ -17,10 +17,13 @@ render, so it always matches the buttons currently on screen.
 
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-
 from condor.memory import MemoryStore, iter_user_stores
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.auth import restricted
 from utils.telegram_formatters import escape_markdown_v2
 
@@ -37,9 +40,7 @@ _MAX_AUDIT = 3
 _DEL_MAP_KEY = "memory_del_map"
 
 
-def _build_view(
-    user_id: int, context: ContextTypes.DEFAULT_TYPE
-) -> tuple[str, InlineKeyboardMarkup]:
+def _build_view(user_id: int, context: Context) -> tuple[str, InlineKeyboardMarkup]:
     """Build the /memory message text + keyboard, grouped by assistant.
 
     Populates ``context.user_data[_DEL_MAP_KEY]`` with a fresh
@@ -96,7 +97,7 @@ def _build_view(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        f"🗑 [{label}] {m['name']}",
+                        text=f"🗑 [{label}] {m['name']}",
                         callback_data=f"memory:del:{next_idx}",
                     )
                 ]
@@ -111,16 +112,16 @@ def _build_view(
         )
 
     keyboard.append(
-        [InlineKeyboardButton("🔄 Refresh", callback_data="memory:refresh")]
+        [InlineKeyboardButton(text="🔄 Refresh", callback_data="memory:refresh")]
     )
 
     context.user_data[_DEL_MAP_KEY] = del_map
 
-    return "\n".join(lines), InlineKeyboardMarkup(keyboard)
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 @restricted
-async def memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def memory_command(update: Update, context: Context) -> None:
     """Handle /memory — show each assistant's memory, grouped."""
     from handlers import clear_all_input_states
 
@@ -128,15 +129,11 @@ async def memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     user_id = update.effective_user.id
     text, keyboard = _build_view(user_id, context)
-    await update.message.reply_text(
-        text, parse_mode="MarkdownV2", reply_markup=keyboard
-    )
+    await update.message.answer(text, parse_mode="MarkdownV2", reply_markup=keyboard)
 
 
 @restricted
-async def memory_callback_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def memory_callback_handler(update: Update, context: Context) -> None:
     """Handle memory:* callbacks (delete a memory in a store, refresh)."""
     query = update.callback_query
     user_id = update.effective_user.id
@@ -160,7 +157,7 @@ async def memory_callback_handler(
 
     text, keyboard = _build_view(user_id, context)
     try:
-        await query.edit_message_text(
+        await query.message.edit_text(
             text, parse_mode="MarkdownV2", reply_markup=keyboard
         )
     except Exception:

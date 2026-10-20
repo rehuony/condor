@@ -22,7 +22,8 @@ import { effectiveTradingContext, formatRunId } from "@/components/agent/lab/run
 import { DiscardChangesDialog } from "@/components/editor/EditorDialogs";
 import { ReportBrowser } from "@/components/routines/ReportBrowser";
 import { countdown } from "@/lib/agent-attribution";
-import { api, type StrategyDetail } from "@/lib/api";
+import { agentsApi, type StrategyDetail } from "@/lib/api/agents";
+import { routinesApi } from "@/lib/api/routines";
 import { formatCurrency } from "@/lib/formatters";
 
 /**
@@ -70,7 +71,7 @@ export function PlaybookView({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.deleteStrategy(slug, sslug),
+    mutationFn: () => agentsApi.deleteStrategy(slug, sslug),
     onSuccess: () => {
       invalidateStrategyCatalog(queryClient, slug);
       onDeleted();
@@ -79,7 +80,7 @@ export function PlaybookView({
 
   const { data: routineInstances = [] } = useQuery({
     queryKey: ["routine-instances"],
-    queryFn: api.getRoutineInstances,
+    queryFn: routinesApi.getRoutineInstances,
     enabled: showRoutines,
     refetchInterval: 5000,
   });
@@ -196,7 +197,7 @@ export function PlaybookView({
           Icon={BookOpen}
           content={strategy.strategy_md}
           empty="Nothing yet. The playbook is the standing brief every session of this loop is given before its first tick — what it trades, what it may not do, and how to decide."
-          onSave={(value) => api.updateStrategyMd(slug, sslug, value)}
+          onSave={(value) => agentsApi.updateStrategyMd(slug, sslug, value)}
           invalidateKey={["strategy", slug, sslug]}
         />
         <DocCard
@@ -205,7 +206,7 @@ export function PlaybookView({
           Icon={GraduationCap}
           content={strategy.learnings}
           empty="Nothing yet. Sessions append what they worked out here, and every later session reads it back."
-          onSave={(value) => api.updateStrategyLearnings(slug, sslug, value)}
+          onSave={(value) => agentsApi.updateStrategyLearnings(slug, sslug, value)}
           invalidateKey={["strategy", slug, sslug]}
         />
       </div>
@@ -443,7 +444,7 @@ function ConfigCard({
    * switch that snaps back silently reads as a click that did not register.
    */
   const restartMutation = useMutation({
-    mutationFn: (enabled: boolean) => api.setRestartOnBoot(slug, sslug, enabled),
+    mutationFn: (enabled: boolean) => agentsApi.setRestartOnBoot(slug, sslug, enabled),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["strategy", slug, sslug] });
     },

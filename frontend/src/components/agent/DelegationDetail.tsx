@@ -1,7 +1,7 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { Delegation } from "@/lib/api";
+import type { Delegation } from "@/lib/api/delegations";
 
 const markdownComponents: Components = {
   table: ({ children }) => (

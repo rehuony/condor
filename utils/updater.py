@@ -1,7 +1,7 @@
 """
 Update primitives: the commands, none of the policy.
 
-Everything here shells out to git, docker, uv or npm and reports what happened.
+Everything here shells out to git, uv or npm and reports what happened.
 It decides nothing -- which components exist, what blocks an update, in what
 order the steps run and what is recorded lives one layer up in
 :mod:`condor.updates`, and the surfaces (Telegram, the dashboard) read that.
@@ -15,7 +15,6 @@ pane it was started in.
 """
 
 import asyncio
-import json
 import logging
 import os
 import shutil
@@ -33,11 +32,6 @@ UPDATE_CHECK_INTERVAL = int(
 )  # 1h default
 
 CONDOR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HUMMINGBOT_API_DIR = os.path.normpath(
-    os.environ.get(
-        "HUMMINGBOT_API_DIR", os.path.join(CONDOR_DIR, "..", "hummingbot-api")
-    )
-)
 FRONTEND_DIR = os.path.join(CONDOR_DIR, "frontend")
 
 # Step timeouts (seconds). A hung `npm ci` or a `uv sync` waiting on a prompt
@@ -45,7 +39,6 @@ FRONTEND_DIR = os.path.join(CONDOR_DIR, "frontend")
 GIT_TIMEOUT = 180
 DEPS_TIMEOUT = 900
 FRONTEND_BUILD_TIMEOUT = 1200
-DOCKER_TIMEOUT = 1800
 
 
 async def _run_cmd(
@@ -151,9 +144,8 @@ async def remote_default_branch(repo_dir: str = CONDOR_DIR) -> str | None:
         return None
     # refs/remotes/origin/main -> main, and refs/remotes/origin/fix/x -> fix/x.
     # Not rsplit("/", 1): a branch name may contain slashes, and taking the last
-    # segment silently renames `fix/x` to `x` -- which made the comparison in
-    # image_tracks_this_checkout never match on such a default, and put a branch
-    # that does not exist into the advice `no-upstream-branch` prints.
+    # segment silently renames `fix/x` to `x`, and puts a branch that does not
+    # exist into the advice `no-upstream-branch` prints.
     prefix = "refs/remotes/origin/"
     ref = out.strip()
     return ref[len(prefix) :] if ref.startswith(prefix) else None
@@ -333,8 +325,7 @@ async def incoming_paths(
     list. The empty list says "this update brings in nothing that could clash";
     ``None`` says "nobody knows what it brings in", and a caller that reads the
     second as the first waves through precisely the update it was asked to
-    gate. Same convention as
-    :func:`condor.updates.components.running_executor_count`.
+    gate.
     """
     branch = branch or await get_current_branch(repo_dir)
     rc, out = await _run_git(
@@ -773,7 +764,7 @@ async def frontend_needs_build(old_commit: str, new_commit: str) -> bool:
     """Whether the dashboard bundle has to be rebuilt after a pull.
 
     ``make run`` builds the frontend before starting, but an in-place update
-    never goes through the Makefile — without this, pulled frontend commits
+    never goes through it — without this, pulled frontend commits
     would keep serving the stale ``frontend/dist`` bundle until someone ran
     ``make restart`` by hand.
     """
@@ -874,10 +865,10 @@ async def run_doctor() -> tuple[bool, str]:
 async def build_frontend(
     old_commit: str = "", new_commit: str = ""
 ) -> tuple[bool, str]:
-    """Build the dashboard bundle, mirroring the Makefile's build-frontend target.
+    """Build the dashboard bundle, mirroring ``scripts/shell/build-frontend.sh``.
 
     Node usually lives under nvm rather than on the PATH Condor inherited, so
-    source nvm.sh first exactly like the Makefile does.
+    source nvm.sh first exactly like that script does.
 
     The commit range is the one the pull just moved through; it decides whether
     the JS dependencies are reinstalled first (see :func:`npm_deps_stale`).
@@ -948,7 +939,7 @@ def restart_pending() -> bool:
 def set_tmux_remain_on_exit(on: bool) -> None:
     """Toggle ``remain-on-exit`` on Condor's own tmux session, best effort.
 
-    The Makefile turns this on for the startup probe and back off once the boot
+    ``make run`` turns this on for the startup probe and back off once the boot
     is confirmed, deliberately: a crash three hours later must still take the
     session down, or ``make status`` would report a dead Condor as running. That
     leaves an in-process restart with no such protection — the successor's own
@@ -1023,304 +1014,3 @@ def _record_restart_failure() -> None:
         )
     except Exception:  # noqa: BLE001 - never mask the original failure
         logger.debug("Could not write restart-failure.log", exc_info=True)
-
-
-# ---------------------------------------------------------------------------
-# Docker: what the container actually runs
-# ---------------------------------------------------------------------------
-
-
-async def compose_service(repo_dir: str, service: str) -> dict | None:
-    """The fully resolved compose definition for one service, or None.
-
-    ``docker compose config`` is the only thing that knows how this install
-    produces the container: it merges every override file and expands the
-    environment, so the answer it gives is the deployment's own, not a guess
-    from reading ``docker-compose.yml`` by hand.
-    """
-    rc, out = await _run_cmd(
-        "docker",
-        "compose",
-        "config",
-        "--format",
-        "json",
-        cwd=repo_dir,
-        timeout=60,
-    )
-    if rc != 0 or not out:
-        logger.debug("docker compose config failed in %s: %s", repo_dir, out[:200])
-        return None
-    try:
-        parsed = json.loads(out)
-    except ValueError:
-        logger.debug("docker compose config returned non-JSON in %s", repo_dir)
-        return None
-    services = parsed.get("services")
-    if not isinstance(services, dict):
-        return None
-    definition = services.get(service)
-    return definition if isinstance(definition, dict) else None
-
-
-async def docker_running() -> bool:
-    """Whether the Docker daemon answers at all.
-
-    Needed because nothing else in this module can stand in for it, which is
-    how a stopped daemon came to be reported as a missing image. Measured with
-    Docker Desktop mid-restart:
-
-    * ``docker compose config`` exits **0** -- it merges files locally and
-      never opens the socket, so the "is Docker running?" guard on the compose
-      probe does not fire;
-    * ``docker buildx imagetools inspect`` exits **0** -- it asks the registry
-      directly, so the *available* digest still resolves;
-    * ``docker image inspect`` is the only one that needs the daemon, so it
-      alone fails -- and its failure used to be read as "this image has never
-      been pulled".
-
-    The result: a daemon that was merely restarting produced "it has never
-    been pulled by tag", about an image sitting on disk the whole time.
-    """
-    rc, _ = await _run_cmd(
-        "docker", "version", "--format", "{{.Server.Version}}", timeout=20
-    )
-    return rc == 0
-
-
-async def local_image_identity(image_ref: str) -> tuple[str | None, str | None]:
-    """``(image id, registry digest)`` for the local copy of ``image_ref``.
-
-    Two questions that had been collapsed into one, and they have different
-    answers on the two image stores Docker ships.
-
-    ``RepoDigests[0]`` is index-level when the image was pulled by tag, which
-    makes it directly comparable to what the registry reports. But a *locally
-    built* image has one only under the containerd image store; under the
-    classic (overlay2) store -- still the default on Docker Engine, which is
-    where this runs in production -- ``RepoDigests`` is simply ``[]``. So
-    "no registry digest" does not mean "no image": it is exactly the shape an
-    operator's own ``make build`` leaves behind.
-
-    The image id answers "is it here at all", because ``docker image inspect``
-    fails outright when it is not. ``(None, None)`` therefore means absent,
-    and ``(id, None)`` means present with no registry identity -- built here,
-    or loaded from a tarball. Neither is "behind".
-    """
-    rc, out = await _run_cmd(
-        "docker",
-        "image",
-        "inspect",
-        image_ref,
-        "--format",
-        "{{.Id}}\t{{json .RepoDigests}}",
-        timeout=30,
-    )
-    if rc != 0 or not out:
-        return None, None
-    image_id, _, raw = out.partition("\t")
-    image_id = image_id.strip() or None
-    try:
-        digests = json.loads(raw)
-    except ValueError:
-        return image_id, None
-    if not isinstance(digests, list) or not digests:
-        return image_id, None
-    first = str(digests[0])
-    return image_id, (first.split("@", 1)[1] if "@" in first else None)
-
-
-async def local_image_digest(image_ref: str) -> str | None:
-    """The registry digest of the local copy of ``image_ref``, or None.
-
-    Kept as the narrow question for callers that only want the comparable
-    digest; :func:`local_image_identity` is the one that can also say whether
-    the image is present at all.
-    """
-    rc, out = await _run_cmd(
-        "docker",
-        "image",
-        "inspect",
-        image_ref,
-        "--format",
-        "{{json .RepoDigests}}",
-        timeout=30,
-    )
-    if rc != 0 or not out:
-        return None
-    try:
-        digests = json.loads(out)
-    except ValueError:
-        return None
-    if not isinstance(digests, list) or not digests:
-        return None
-    first = str(digests[0])
-    return first.split("@", 1)[1] if "@" in first else None
-
-
-async def registry_image_digest(image_ref: str) -> str | None:
-    """The index digest ``image_ref`` currently resolves to upstream, or None.
-
-    ``buildx imagetools inspect`` is the only probe used. ``docker manifest
-    inspect`` returns the *inner* per-platform manifests rather than the index,
-    so it is not a drop-in fallback and a wrong comparison is worse than an
-    honest "unknown".
-    """
-    rc, out = await _run_cmd(
-        "docker",
-        "buildx",
-        "imagetools",
-        "inspect",
-        image_ref,
-        "--format",
-        "{{.Manifest.Digest}}",
-        timeout=30,
-    )
-    if rc != 0:
-        return None
-    digest = (out or "").strip()
-    return digest if digest.startswith("sha256:") else None
-
-
-async def registry_has_digest(image_ref: str, digest: str) -> bool | None:
-    """Whether the registry holds ``digest`` for ``image_ref``'s repository.
-
-    The only reliable way to tell an operator's own build from a published
-    image. The obvious test -- "a built image has no ``RepoDigests``" -- does
-    **not** work: Docker's containerd image store records a canonical digest for
-    a build as well as for a pull, so a locally built image has a RepoDigest
-    like any other, it simply is not one the registry has ever seen. Measured on
-    29.8.1: pull, then ``docker build`` over the same tag, and RepoDigests is
-    populated both times with different values. ``.Comment`` is no help either
-    (both say ``buildkit.dockerfile.v0``, because the published image was itself
-    built by buildkit in CI).
-
-    Returns ``None`` when the question could not be answered, which callers must
-    keep distinct from ``False`` -- an unreachable registry is not evidence that
-    an image was built locally.
-    """
-    repo = image_ref.split("@", 1)[0].rsplit(":", 1)[0]
-    rc, out = await _run_cmd(
-        "docker",
-        "buildx",
-        "imagetools",
-        "inspect",
-        f"{repo}@{digest}",
-        "--format",
-        "{{.Manifest.Digest}}",
-        timeout=30,
-    )
-    if rc == 0 and (out or "").strip().startswith("sha256:"):
-        return True
-    # "not found" is an answer; anything else is a failure to ask.
-    if "not found" in (out or "").lower():
-        return False
-    return None
-
-
-def _explain_docker_failure(rc: int, output: str, what: str) -> str:
-    """Turn a docker step's exit code into something the operator can act on.
-
-    The 1800s ceiling exists so a hung pull cannot wedge the update forever, but
-    hitting it returned a bare "Timed out after 1800s" and left the operator to
-    guess whether a half-rebuilt stack was safe to touch. It is: ``compose pull``
-    and ``compose up -d`` are both idempotent, so the answer is simply to run the
-    update again.
-    """
-    base = output or f"{what} failed (no output)"
-    if rc == 124:
-        return (
-            base + f"\n\nThe step timed out. `{what}` is idempotent, so re-running "
-            "the update is safe and will pick up wherever it got to. On Docker "
-            "Desktop for macOS, or on WSL2 with the daemon behind a VM, a cold "
-            "pull can legitimately take several times longer than it does on "
-            "Linux."
-        )
-    return base
-
-
-async def compose_pull(repo_dir: str, service: str) -> tuple[bool, str]:
-    """Pull the published image for one service."""
-    rc, output = await _run_cmd(
-        "docker", "compose", "pull", service, cwd=repo_dir, timeout=DOCKER_TIMEOUT
-    )
-    if rc != 0:
-        return False, _explain_docker_failure(rc, output, "docker compose pull")
-    return True, output
-
-
-async def compose_stack_owner(repo_dir: str, service: str) -> str | None:
-    """The checkout the running containers were deployed from, or ``None``.
-
-    Compose records the project's working directory on every container it
-    creates, which is the only thing that can answer "is this stack ours".
-
-    It has to be asked. ``container_name:`` is fixed for every service in
-    hummingbot-api's compose file, so two checkouts are one stack as far as
-    Docker is concerned: Compose matches the existing containers by name,
-    reports ``Recreate``, and the second checkout takes over the first one's
-    containers *and its postgres volume*. No error, no warning. The Makefile
-    gained a guard for ``make deploy``; an update never goes through the
-    Makefile, so it needs the same question asked here.
-
-    ``None`` means nothing is running under that name, or Docker could not be
-    asked -- neither of which is evidence of a conflict.
-    """
-    rc, out = await _run_cmd(
-        "docker",
-        "inspect",
-        service,
-        "--format",
-        '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}',
-        timeout=30,
-    )
-    owner = (out or "").strip()
-    if rc != 0 or not owner or owner == "<no value>":
-        return None
-    # ``realpath``, not ``normpath``: Compose records the *resolved* directory,
-    # and a checkout reached through a symlink (macOS ``/tmp`` is one) would
-    # otherwise compare unequal to itself and block the operator's own update.
-    return owner if os.path.realpath(owner) != os.path.realpath(repo_dir) else None
-
-
-async def compose_up(repo_dir: str) -> tuple[bool, str]:
-    """Recreate the stack on whatever images are now on disk."""
-    rc, output = await _run_cmd(
-        "docker", "compose", "up", "-d", cwd=repo_dir, timeout=DOCKER_TIMEOUT
-    )
-    if rc != 0:
-        return False, _explain_docker_failure(rc, output, "docker compose up -d")
-    return True, output
-
-
-async def wait_healthy(
-    url: str, timeout: float = 120, interval: float = 2
-) -> tuple[bool, str]:
-    """Poll ``url`` until it answers 200, or give up.
-
-    ``compose up -d`` returns the moment the container is *created*, which is
-    well before it serves. Without this a crash-looping container reports as a
-    successful update.
-    """
-    import aiohttp
-
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    last = "no response"
-    attempts = 0
-
-    async with aiohttp.ClientSession() as session:
-        while loop.time() < deadline:
-            attempts += 1
-            try:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=interval * 2)
-                ) as response:
-                    if response.status == 200:
-                        waited = int(timeout - (deadline - loop.time()))
-                        return True, f"Healthy after {waited}s ({attempts} probes)."
-                    last = f"HTTP {response.status}"
-            except Exception as e:  # noqa: BLE001 - a refused connection is normal here
-                last = type(e).__name__
-            await asyncio.sleep(interval)
-
-    return False, f"Not serving {url} after {int(timeout)}s (last: {last})."

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, Loader2, Lock, Monitor, ShieldAlert, Trash2 } from "lucide-react";
+import { Bell, BellOff, Lock, Monitor, ShieldAlert, Trash2 } from "lucide-react";
 
-import { api, type PushSubscriptionRow } from "@/lib/api";
+import { IconButton } from "@/components/ui/IconButton";
+import { Spinner } from "@/components/ui/Spinner";
+import { notificationsApi, type PushSubscriptionRow } from "@/lib/api/notifications";
 import { formatRelativeTime } from "@/lib/formatters";
 import {
   currentOrigin,
@@ -40,7 +42,7 @@ export function NotificationsSettings() {
 
   const { data, isLoading } = useQuery({
     queryKey: SUBSCRIPTIONS_KEY,
-    queryFn: () => api.getPushSubscriptions(),
+    queryFn: () => notificationsApi.getPushSubscriptions(),
     enabled: support === "supported",
   });
 
@@ -75,7 +77,7 @@ export function NotificationsSettings() {
   });
 
   const forget = useMutation({
-    mutationFn: (endpoint: string) => api.pushUnsubscribe(endpoint),
+    mutationFn: (endpoint: string) => notificationsApi.pushUnsubscribe(endpoint),
     onMutate: () => setError(null),
     onSuccess: refresh,
     onError: (err: Error) => setError(err.message),
@@ -134,7 +136,7 @@ export function NotificationsSettings() {
         } ${busy ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
       >
         {busy ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--color-text-muted)]" />
+          <Spinner tone="muted" />
         ) : on ? (
           <Bell className="h-4 w-4 shrink-0 text-[var(--color-primary)]" />
         ) : (
@@ -162,7 +164,7 @@ export function NotificationsSettings() {
         </h4>
         {isLoading ? (
           <div className="flex items-center justify-center py-6 text-[var(--color-text-muted)]">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner />
           </div>
         ) : items.length === 0 ? (
           <p className="text-xs text-[var(--color-text-muted)]">
@@ -189,18 +191,19 @@ export function NotificationsSettings() {
                     Added {formatRelativeTime(row.created)}
                   </span>
                 </span>
-                <button
+                <IconButton
+                  label="Stop notifying this device"
+                  size="sm"
+                  tone="danger"
                   disabled={forget.isPending}
                   onClick={() =>
                     row.endpoint === thisDevice
                       ? toggle.mutate(false)
                       : forget.mutate(row.endpoint)
                   }
-                  title="Stop notifying this device"
-                  className="shrink-0 rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-red)]"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                </IconButton>
               </li>
             ))}
           </ul>

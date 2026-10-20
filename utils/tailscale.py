@@ -78,7 +78,7 @@ async def ensure_serve(port: int) -> bool:
     Idempotent: checks ``tailscale serve status`` first and only runs
     ``tailscale serve --bg`` when the port isn't already forwarded. Never
     escalates with ``sudo`` — that's a one-time install-time step
-    (``setup-environment.sh``), not something a long-running bot process
+    (``make setup``), not something a long-running bot process
     should attempt unattended. Returns whether the port is confirmed
     forwarded; callers must not fall back to a public bind on failure, since
     the whole point of binding to 127.0.0.1 is to fail closed, not open.

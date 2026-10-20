@@ -12,11 +12,15 @@ Provides:
 import logging
 from typing import Any, Dict
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
-from telegram.ext import ContextTypes
-
 from condor.fetchers.market_data import fetch_current_price
+from condor.telegram.errors import BadRequest, is_not_modified
+from condor.telegram.transport import as_input_file
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_active_bots,
@@ -57,7 +61,7 @@ def _build_main_menu_keyboard(bots_dict: Dict[str, Any]) -> InlineKeyboardMarkup
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        f"📊 {display_name}",
+                        text=f"📊 {display_name}",
                         callback_data=f"bots:bot_detail:{bot_name}",
                     )
                 ]
@@ -72,7 +76,7 @@ def _build_main_menu_keyboard(bots_dict: Dict[str, Any]) -> InlineKeyboardMarkup
                 display_name = bot_name[:25] + "..." if len(bot_name) > 25 else bot_name
                 row.append(
                     InlineKeyboardButton(
-                        f"📊 {display_name}",
+                        text=f"📊 {display_name}",
                         callback_data=f"bots:bot_detail:{bot_name}",
                     )
                 )
@@ -81,18 +85,18 @@ def _build_main_menu_keyboard(bots_dict: Dict[str, Any]) -> InlineKeyboardMarkup
     # Action buttons - historical
     keyboard.append(
         [
-            InlineKeyboardButton("📜 Historical", callback_data="bots:archived"),
+            InlineKeyboardButton(text="📜 Historical", callback_data="bots:archived"),
         ]
     )
 
     keyboard.append(
         [
-            InlineKeyboardButton("🔄 Refresh", callback_data="bots:refresh"),
-            InlineKeyboardButton("❌ Close", callback_data="bots:close"),
+            InlineKeyboardButton(text="🔄 Refresh", callback_data="bots:refresh"),
+            InlineKeyboardButton(text="❌ Close", callback_data="bots:close"),
         ]
     )
 
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # ============================================
@@ -100,7 +104,7 @@ def _build_main_menu_keyboard(bots_dict: Dict[str, Any]) -> InlineKeyboardMarkup
 # ============================================
 
 
-async def show_bots_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_bots_menu(update: Update, context: Context) -> None:
     """Display the main bots menu with status and buttons
 
     Args:
@@ -191,15 +195,15 @@ async def show_bots_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     # Message is a photo/media, delete it and send new text message
                     await query.message.delete()
                     await context.bot.send_message(
-                        chat_id=query.message.chat_id,
+                        chat_id=query.message.chat.id,
                         text=full_message,
                         parse_mode="MarkdownV2",
                         reply_markup=reply_markup,
                     )
-                elif "Message is not modified" not in str(e):
+                elif not is_not_modified(e):
                     raise
         else:
-            await msg.reply_text(
+            await msg.answer(
                 full_message, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
 
@@ -218,7 +222,7 @@ async def show_bots_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if "no text in the message" in str(edit_error).lower():
                     await query.message.delete()
                     await context.bot.send_message(
-                        chat_id=query.message.chat_id,
+                        chat_id=query.message.chat.id,
                         text=error_message,
                         parse_mode="MarkdownV2",
                         reply_markup=reply_markup,
@@ -226,7 +230,7 @@ async def show_bots_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 else:
                     raise
         else:
-            await msg.reply_text(
+            await msg.answer(
                 error_message, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
 
@@ -236,9 +240,7 @@ async def show_bots_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ============================================
 
 
-async def show_bot_detail(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, bot_name: str
-) -> None:
+async def show_bot_detail(update: Update, context: Context, bot_name: str) -> None:
     """Show detailed status for a specific bot with controllers and actions
 
     Args:
@@ -492,10 +494,11 @@ async def show_bot_detail(
                     keyboard.append(
                         [
                             InlineKeyboardButton(
-                                f"✏️ {btn_name}", callback_data=f"bots:ctrl_idx:{idx}"
+                                text=f"✏️ {btn_name}",
+                                callback_data=f"bots:ctrl_idx:{idx}",
                             ),
                             InlineKeyboardButton(
-                                toggle_emoji,
+                                text=toggle_emoji,
                                 callback_data=f"bots:{toggle_action}:{idx}",
                             ),
                         ]
@@ -519,19 +522,21 @@ async def show_bot_detail(
         # Bot-level actions
         keyboard.append(
             [
-                InlineKeyboardButton("📋 Logs", callback_data="bots:view_logs"),
-                InlineKeyboardButton("🛑 Stop Bot", callback_data="bots:stop_bot"),
+                InlineKeyboardButton(text="📋 Logs", callback_data="bots:view_logs"),
+                InlineKeyboardButton(text="🛑 Stop Bot", callback_data="bots:stop_bot"),
             ]
         )
 
         keyboard.append(
             [
-                InlineKeyboardButton("⬅️ Back", callback_data="bots:main_menu"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="bots:refresh_bot"),
+                InlineKeyboardButton(text="⬅️ Back", callback_data="bots:main_menu"),
+                InlineKeyboardButton(
+                    text="🔄 Refresh", callback_data="bots:refresh_bot"
+                ),
             ]
         )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         # Build message and ensure it doesn't exceed Telegram's limit
         message_text = "\n".join(lines)
@@ -550,7 +555,7 @@ async def show_bot_detail(
                     await query.message.delete()
                 except Exception:
                     pass
-                await query.message.chat.send_message(
+                await query.message.answer(
                     message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
                 )
             else:
@@ -558,7 +563,7 @@ async def show_bot_detail(
                     message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
                 )
         except BadRequest as e:
-            if "Message is not modified" in str(e):
+            if is_not_modified(e):
                 # Message content is the same, just answer the callback
                 pass
             else:
@@ -567,23 +572,25 @@ async def show_bot_detail(
     except Exception as e:
         logger.error(f"Error showing bot detail: {e}", exc_info=True)
         error_message = format_error_message(f"Failed to fetch bot status: {str(e)}")
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="bots:main_menu")]]
+        keyboard = [
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:main_menu")]
+        ]
         try:
             if getattr(query.message, "photo", None):
                 try:
                     await query.message.delete()
                 except Exception:
                     pass
-                await query.message.chat.send_message(
+                await query.message.answer(
                     error_message,
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
             else:
                 await query.message.edit_text(
                     error_message,
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
         except Exception:
             pass
@@ -687,7 +694,7 @@ def _shorten_controller_name(name: str, max_len: int = 28) -> str:
 
 
 async def show_controller_detail(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, controller_idx: int
+    update: Update, context: Context, controller_idx: int
 ) -> None:
     """Show controller detail with editable config (like networks.py pattern)"""
     query = update.callback_query
@@ -766,7 +773,7 @@ async def show_controller_detail(
         # Store for input processing
         context.user_data["ctrl_editable_fields"] = editable_fields
         context.user_data["bots_state"] = "ctrl_bulk_edit"
-        context.user_data["ctrl_edit_chat_id"] = query.message.chat_id
+        context.user_data["ctrl_edit_chat_id"] = query.message.chat.id
 
         # Build config text
         config_lines = []
@@ -790,15 +797,23 @@ async def show_controller_detail(
         if is_running:
             keyboard.append(
                 [
-                    InlineKeyboardButton("📊 Chart", callback_data="bots:ctrl_chart"),
-                    InlineKeyboardButton("🛑 Stop", callback_data="bots:stop_ctrl"),
+                    InlineKeyboardButton(
+                        text="📊 Chart", callback_data="bots:ctrl_chart"
+                    ),
+                    InlineKeyboardButton(
+                        text="🛑 Stop", callback_data="bots:stop_ctrl"
+                    ),
                 ]
             )
         else:
             keyboard.append(
                 [
-                    InlineKeyboardButton("📊 Chart", callback_data="bots:ctrl_chart"),
-                    InlineKeyboardButton("▶️ Start", callback_data="bots:start_ctrl"),
+                    InlineKeyboardButton(
+                        text="📊 Chart", callback_data="bots:ctrl_chart"
+                    ),
+                    InlineKeyboardButton(
+                        text="▶️ Start", callback_data="bots:start_ctrl"
+                    ),
                 ]
             )
     elif is_pmm_mister and ctrl_config:
@@ -806,15 +821,23 @@ async def show_controller_detail(
         if is_running:
             keyboard.append(
                 [
-                    InlineKeyboardButton("🛑 Stop", callback_data="bots:stop_ctrl"),
-                    InlineKeyboardButton("📋 Clone", callback_data="bots:clone_ctrl"),
+                    InlineKeyboardButton(
+                        text="🛑 Stop", callback_data="bots:stop_ctrl"
+                    ),
+                    InlineKeyboardButton(
+                        text="📋 Clone", callback_data="bots:clone_ctrl"
+                    ),
                 ]
             )
         else:
             keyboard.append(
                 [
-                    InlineKeyboardButton("▶️ Start", callback_data="bots:start_ctrl"),
-                    InlineKeyboardButton("📋 Clone", callback_data="bots:clone_ctrl"),
+                    InlineKeyboardButton(
+                        text="▶️ Start", callback_data="bots:start_ctrl"
+                    ),
+                    InlineKeyboardButton(
+                        text="📋 Clone", callback_data="bots:clone_ctrl"
+                    ),
                 ]
             )
     else:
@@ -822,7 +845,7 @@ async def show_controller_detail(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "🛑 Stop Controller", callback_data="bots:stop_ctrl"
+                        text="🛑 Stop Controller", callback_data="bots:stop_ctrl"
                     ),
                 ]
             )
@@ -830,21 +853,21 @@ async def show_controller_detail(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "▶️ Start Controller", callback_data="bots:start_ctrl"
+                        text="▶️ Start Controller", callback_data="bots:start_ctrl"
                     ),
                 ]
             )
 
     keyboard.append(
         [
-            InlineKeyboardButton("⬅️ Back", callback_data="bots:back_to_bot"),
+            InlineKeyboardButton(text="⬅️ Back", callback_data="bots:back_to_bot"),
             InlineKeyboardButton(
-                "🔄 Refresh", callback_data=f"bots:refresh_ctrl:{controller_idx}"
+                text="🔄 Refresh", callback_data=f"bots:refresh_ctrl:{controller_idx}"
             ),
         ]
     )
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
     text_content = "\n".join(lines)
 
     # Store message_id for later edits
@@ -853,7 +876,7 @@ async def show_controller_detail(
             await query.message.delete()
         except Exception:
             pass
-        sent_msg = await query.message.chat.send_message(
+        sent_msg = await query.message.answer(
             text_content, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
         context.user_data["ctrl_edit_message_id"] = sent_msg.message_id
@@ -864,9 +887,7 @@ async def show_controller_detail(
         context.user_data["ctrl_edit_message_id"] = query.message.message_id
 
 
-async def handle_stop_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_stop_controller(update: Update, context: Context) -> None:
     """Stop current controller - show confirmation"""
     query = update.callback_query
 
@@ -884,10 +905,10 @@ async def handle_stop_controller(
     keyboard = [
         [
             InlineKeyboardButton(
-                "✅ Yes, Stop", callback_data="bots:confirm_stop_ctrl"
+                text="✅ Yes, Stop", callback_data="bots:confirm_stop_ctrl"
             ),
             InlineKeyboardButton(
-                "❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             ),
         ],
     ]
@@ -904,22 +925,20 @@ async def handle_stop_controller(
             await query.message.delete()
         except Exception:
             pass
-        await query.message.chat.send_message(
+        await query.message.answer(
             message_text,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
     else:
         await query.message.edit_text(
             message_text,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
-async def handle_confirm_stop_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_confirm_stop_controller(update: Update, context: Context) -> None:
     """Actually stop the controller"""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -951,9 +970,11 @@ async def handle_confirm_stop_controller(
 
         keyboard = [
             [
-                InlineKeyboardButton("▶️ Restart", callback_data="bots:start_ctrl"),
                 InlineKeyboardButton(
-                    "⬅️ Back to Bot", callback_data="bots:back_to_bot"
+                    text="▶️ Restart", callback_data="bots:start_ctrl"
+                ),
+                InlineKeyboardButton(
+                    text="⬅️ Back to Bot", callback_data="bots:back_to_bot"
                 ),
             ]
         ]
@@ -961,7 +982,7 @@ async def handle_confirm_stop_controller(
         await query.message.edit_text(
             f"*Controller Stopped*\n\n`{escape_markdown_v2(short_name)}`",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
     except Exception as e:
@@ -969,20 +990,18 @@ async def handle_confirm_stop_controller(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                    text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                 )
             ]
         ]
         await query.message.edit_text(
             f"*Failed*\n\nError: {escape_markdown_v2(str(e)[:100])}",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
-async def handle_start_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_start_controller(update: Update, context: Context) -> None:
     """Start/restart current controller - show confirmation"""
     query = update.callback_query
 
@@ -1000,10 +1019,10 @@ async def handle_start_controller(
     keyboard = [
         [
             InlineKeyboardButton(
-                "✅ Yes, Start", callback_data="bots:confirm_start_ctrl"
+                text="✅ Yes, Start", callback_data="bots:confirm_start_ctrl"
             ),
             InlineKeyboardButton(
-                "❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             ),
         ],
     ]
@@ -1020,22 +1039,20 @@ async def handle_start_controller(
             await query.message.delete()
         except Exception:
             pass
-        await query.message.chat.send_message(
+        await query.message.answer(
             message_text,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
     else:
         await query.message.edit_text(
             message_text,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
-async def handle_confirm_start_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_confirm_start_controller(update: Update, context: Context) -> None:
     """Actually start the controller by setting manual_kill_switch=False"""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -1066,13 +1083,17 @@ async def handle_confirm_start_controller(
         )
 
         keyboard = [
-            [InlineKeyboardButton("⬅️ Back to Bot", callback_data="bots:back_to_bot")]
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Back to Bot", callback_data="bots:back_to_bot"
+                )
+            ]
         ]
 
         await query.message.edit_text(
             f"*Controller Started*\n\n`{escape_markdown_v2(short_name)}`",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
     except Exception as e:
@@ -1080,20 +1101,18 @@ async def handle_confirm_start_controller(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                    text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                 )
             ]
         ]
         await query.message.edit_text(
             f"*Failed*\n\nError: {escape_markdown_v2(str(e)[:100])}",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
-async def handle_clone_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_clone_controller(update: Update, context: Context) -> None:
     """Clone current controller config - opens PMM wizard in review mode"""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -1132,7 +1151,7 @@ async def handle_clone_controller(
         context.user_data["bots_state"] = "pmm_wizard"
         context.user_data["pmm_wizard_step"] = "review"
         context.user_data["pmm_wizard_message_id"] = query.message.message_id
-        context.user_data["pmm_wizard_chat_id"] = query.message.chat_id
+        context.user_data["pmm_wizard_chat_id"] = query.message.chat.id
 
         # Import and show the review step
         from .controller_handlers import _pmm_show_review
@@ -1145,7 +1164,7 @@ async def handle_clone_controller(
 
 
 async def handle_quick_stop_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, controller_idx: int
+    update: Update, context: Context, controller_idx: int
 ) -> None:
     """Quick stop controller from bot detail view (no confirmation)"""
     query = update.callback_query
@@ -1184,7 +1203,7 @@ async def handle_quick_stop_controller(
 
 
 async def handle_quick_start_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, controller_idx: int
+    update: Update, context: Context, controller_idx: int
 ) -> None:
     """Quick start/resume controller from bot detail view"""
     query = update.callback_query
@@ -1227,9 +1246,7 @@ async def handle_quick_start_controller(
 # ============================================
 
 
-async def show_controller_chart(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def show_controller_chart(update: Update, context: Context) -> None:
     """Generate and show OHLC chart for controller"""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -1299,9 +1316,11 @@ async def show_controller_chart(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                        text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                     ),
-                    InlineKeyboardButton("🔄 Refresh", callback_data="bots:ctrl_chart"),
+                    InlineKeyboardButton(
+                        text="🔄 Refresh", callback_data="bots:ctrl_chart"
+                    ),
                 ]
             ]
 
@@ -1311,20 +1330,20 @@ async def show_controller_chart(
             except Exception:
                 pass
 
-            await query.message.chat.send_photo(
-                photo=chart_bytes,
+            await query.message.answer_photo(
+                photo=as_input_file(chart_bytes),
                 caption=caption,
                 parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             )
         else:
             await query.message.edit_text(
                 "❌ Could not generate chart",
                 reply_markup=InlineKeyboardMarkup(
-                    [
+                    inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                "⬅️ Back",
+                                text="⬅️ Back",
                                 callback_data=f"bots:ctrl_idx:{controller_idx}",
                             )
                         ]
@@ -1338,10 +1357,11 @@ async def show_controller_chart(
             f"❌ Error: {escape_markdown_v2(str(e)[:100])}",
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
-                [
+                inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            "⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                            text="⬅️ Back",
+                            callback_data=f"bots:ctrl_idx:{controller_idx}",
                         )
                     ]
                 ]
@@ -1349,9 +1369,7 @@ async def show_controller_chart(
         )
 
 
-async def show_controller_edit(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def show_controller_edit(update: Update, context: Context) -> None:
     """Show editable parameters for grid strike controller in bulk edit format"""
     query = update.callback_query
 
@@ -1376,7 +1394,7 @@ async def show_controller_edit(
     context.user_data["ctrl_edit_message_id"] = (
         query.message.message_id if not getattr(query.message, "photo", None) else None
     )
-    context.user_data["ctrl_edit_chat_id"] = query.message.chat_id
+    context.user_data["ctrl_edit_chat_id"] = query.message.chat.id
 
     # Build config text for display
     config_lines = []
@@ -1400,12 +1418,12 @@ async def show_controller_edit(
     keyboard = [
         [
             InlineKeyboardButton(
-                "❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             )
         ],
     ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
     text_content = "\n".join(lines)
 
     # Handle photo messages (from controller detail view with chart)
@@ -1414,7 +1432,7 @@ async def show_controller_edit(
             await query.message.delete()
         except Exception:
             pass
-        sent_msg = await query.message.chat.send_message(
+        sent_msg = await query.message.answer(
             text_content, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
         context.user_data["ctrl_edit_message_id"] = sent_msg.message_id
@@ -1508,7 +1526,7 @@ def _get_editable_controller_fields(
 
 
 async def handle_controller_set_field(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, field_name: str
+    update: Update, context: Context, field_name: str
 ) -> None:
     """Handle setting a controller field - show input prompt"""
     query = update.callback_query
@@ -1529,10 +1547,10 @@ async def handle_controller_set_field(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✅ Yes, Pause" if new_val else "✅ Yes, Resume",
+                    text="✅ Yes, Pause" if new_val else "✅ Yes, Resume",
                     callback_data=f"bots:ctrl_confirm_set:{field_name}:{new_val}",
                 ),
-                InlineKeyboardButton("❌ Cancel", callback_data="bots:ctrl_edit"),
+                InlineKeyboardButton(text="❌ Cancel", callback_data="bots:ctrl_edit"),
             ],
         ]
 
@@ -1541,7 +1559,7 @@ async def handle_controller_set_field(
             f"*{action.capitalize()} Controller?*\n\n"
             f"This will {'stop' if new_val else 'resume'} the controller from placing orders\\.",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
         return
 
@@ -1571,7 +1589,9 @@ async def handle_controller_set_field(
     context.user_data["bots_state"] = f"ctrl_set:{field_name}"
     context.user_data["editing_ctrl_field"] = field_name
 
-    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="bots:ctrl_edit")]]
+    keyboard = [
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:ctrl_edit")]
+    ]
 
     await query.message.edit_text(
         f"*Edit {escape_markdown_v2(label)}*\n\n"
@@ -1579,12 +1599,12 @@ async def handle_controller_set_field(
         f"_{escape_markdown_v2(hint)}_\n\n"
         f"Enter new value:",
         parse_mode="MarkdownV2",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
 async def handle_controller_confirm_set(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, field_name: str, value: str
+    update: Update, context: Context, field_name: str, value: str
 ) -> None:
     """Confirm and apply a controller field change"""
     query = update.callback_query
@@ -1640,7 +1660,13 @@ async def handle_controller_confirm_set(
                 f"*Validation Failed*\n\n{escape_markdown_v2(str(error_msg)[:200])}",
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⬅️ Back", callback_data="bots:ctrl_edit")]]
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="⬅️ Back", callback_data="bots:ctrl_edit"
+                            )
+                        ]
+                    ]
                 ),
             )
             return
@@ -1664,13 +1690,13 @@ async def handle_controller_confirm_set(
                 f"*Updated*\n\n`{escape_markdown_v2(field_name)}` \\= `{escape_markdown_v2(str(parsed_value))}`",
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
-                    [
+                    inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                "⬅️ Back to Edit", callback_data="bots:ctrl_edit"
+                                text="⬅️ Back to Edit", callback_data="bots:ctrl_edit"
                             ),
                             InlineKeyboardButton(
-                                "⬅️ Controller",
+                                text="⬅️ Controller",
                                 callback_data=f"bots:ctrl_idx:{controller_idx}",
                             ),
                         ]
@@ -1683,7 +1709,13 @@ async def handle_controller_confirm_set(
                 f"*Update Failed*\n\n{escape_markdown_v2(str(error_msg)[:200])}",
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⬅️ Back", callback_data="bots:ctrl_edit")]]
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="⬅️ Back", callback_data="bots:ctrl_edit"
+                            )
+                        ]
+                    ]
                 ),
             )
 
@@ -1693,13 +1725,19 @@ async def handle_controller_confirm_set(
             f"*Error*\n\n{escape_markdown_v2(str(e)[:200])}",
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅️ Back", callback_data="bots:ctrl_edit")]]
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="⬅️ Back", callback_data="bots:ctrl_edit"
+                        )
+                    ]
+                ]
             ),
         )
 
 
 async def process_controller_field_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, user_input: str
+    update: Update, context: Context, user_input: str
 ) -> None:
     """Process user input for controller bulk edit - parses key=value lines"""
     chat_id = update.effective_chat.id
@@ -1711,7 +1749,7 @@ async def process_controller_field_input(
     message_id = context.user_data.get("ctrl_edit_message_id")
 
     if not bot_name or not ctrl_config or controller_idx is None:
-        await update.message.reply_text("Context lost. Please start over.")
+        await update.message.answer("Context lost. Please start over.")
         return
 
     controller_name = controllers[controller_idx]
@@ -1757,10 +1795,10 @@ async def process_controller_field_input(
 
     if errors:
         error_msg = "⚠️ " + ", ".join(errors)
-        await update.get_bot().send_message(chat_id=chat_id, text=error_msg)
+        await context.bot.send_message(chat_id=chat_id, text=error_msg)
 
     if not updates:
-        await update.get_bot().send_message(
+        await context.bot.send_message(
             chat_id=chat_id, text="❌ No valid updates found. Use format: key=value"
         )
         return
@@ -1773,7 +1811,7 @@ async def process_controller_field_input(
     saving_text = f"💾 Saving configuration\\.\\.\\."
     try:
         if message_id:
-            await update.get_bot().edit_message_text(
+            await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=saving_text,
@@ -1827,53 +1865,56 @@ async def process_controller_field_input(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "⬅️ Controller", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                        text="⬅️ Controller",
+                        callback_data=f"bots:ctrl_idx:{controller_idx}",
                     ),
-                    InlineKeyboardButton("⬅️ Bot", callback_data="bots:back_to_bot"),
+                    InlineKeyboardButton(
+                        text="⬅️ Bot", callback_data="bots:back_to_bot"
+                    ),
                 ]
             ]
 
             success_text = f"✅ *Configuration Updated*\n\n" + "\n".join(updated_lines)
 
             if message_id:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=success_text,
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
             else:
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=chat_id,
                     text=success_text,
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
         else:
             error_msg = result_message or "Update failed"
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                        text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                     )
                 ]
             ]
 
             if message_id:
-                await update.get_bot().edit_message_text(
+                await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"❌ *Update Failed*\n\n{escape_markdown_v2(str(error_msg)[:200])}",
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
             else:
-                await update.get_bot().send_message(
+                await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"❌ *Update Failed*\n\n{escape_markdown_v2(str(error_msg)[:200])}",
                     parse_mode="MarkdownV2",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
                 )
 
     except Exception as e:
@@ -1881,15 +1922,15 @@ async def process_controller_field_input(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                    text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                 )
             ]
         ]
-        await update.get_bot().send_message(
+        await context.bot.send_message(
             chat_id=chat_id,
             text=f"❌ *Error*\n\n{escape_markdown_v2(str(e)[:200])}",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
@@ -1898,7 +1939,7 @@ async def process_controller_field_input(
 # ============================================
 
 
-async def handle_stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_stop_bot(update: Update, context: Context) -> None:
     """Show confirmation for stopping current bot"""
     query = update.callback_query
 
@@ -1911,10 +1952,12 @@ async def handle_stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     keyboard = [
         [
-            InlineKeyboardButton("✅ Yes, Stop", callback_data="bots:confirm_stop_bot"),
+            InlineKeyboardButton(
+                text="✅ Yes, Stop", callback_data="bots:confirm_stop_bot"
+            ),
         ],
         [
-            InlineKeyboardButton("❌ Cancel", callback_data="bots:back_to_bot"),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:back_to_bot"),
         ],
     ]
 
@@ -1925,13 +1968,11 @@ async def handle_stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"• Archive data locally\n"
         f"• Remove container",
         parse_mode="MarkdownV2",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def handle_confirm_stop_bot(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_confirm_stop_bot(update: Update, context: Context) -> None:
     """Actually stop and archive the bot"""
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -1958,7 +1999,7 @@ async def handle_confirm_stop_bot(
         status = result.get("status", "unknown")
 
         keyboard = [
-            [InlineKeyboardButton("⬅️ Dashboard", callback_data="bots:main_menu")]
+            [InlineKeyboardButton(text="⬅️ Dashboard", callback_data="bots:main_menu")]
         ]
 
         if status == "success":
@@ -1967,29 +2008,29 @@ async def handle_confirm_stop_bot(
                 f"`{escape_markdown_v2(display_name)}`\n\n"
                 f"_Archiving in background\\._",
                 parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             )
         else:
             message = result.get("message", "Unknown")
             await query.message.edit_text(
                 f"*Result: {escape_markdown_v2(status)}*\n\n{escape_markdown_v2(message[:100])}",
                 parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             )
 
     except Exception as e:
         logger.error(f"Error stopping bot: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="bots:back_to_bot")]]
+        keyboard = [
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:back_to_bot")]
+        ]
         await query.message.edit_text(
             f"*Failed*\n\nError: {escape_markdown_v2(str(e)[:150])}",
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
-async def handle_back_to_bot(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_back_to_bot(update: Update, context: Context) -> None:
     """Go back to bot detail view"""
     bot_name = context.user_data.get("current_bot_name")
     if bot_name:
@@ -1998,9 +2039,7 @@ async def handle_back_to_bot(
         await show_bots_menu(update, context)
 
 
-async def handle_refresh_bot(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_refresh_bot(update: Update, context: Context) -> None:
     """Refresh current bot detail"""
     bot_name = context.user_data.get("current_bot_name")
     if bot_name:
@@ -2013,7 +2052,7 @@ async def handle_refresh_bot(
 
 
 async def handle_refresh_controller(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, controller_idx: int
+    update: Update, context: Context, controller_idx: int
 ) -> None:
     """Refresh controller detail - clears cache and reloads"""
     # Clear cache to force fresh data fetch
@@ -2081,7 +2120,7 @@ def _format_log_entry(log) -> str:
     return msg
 
 
-async def show_bot_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_bot_logs(update: Update, context: Context) -> None:
     """Show recent logs for current bot with timestamps - full messages"""
     query = update.callback_query
 
@@ -2121,7 +2160,9 @@ async def show_bot_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         lines.append("_No logs available_")
 
-    keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="bots:back_to_bot")]]
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:back_to_bot")]
+    ]
 
     message = "\n".join(lines)
     if len(message) > 4000:
@@ -2132,7 +2173,9 @@ async def show_bot_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         message += "\n\\.\\.\\."
 
     await query.message.edit_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
@@ -2141,7 +2184,7 @@ async def show_bot_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # ============================================
 
 
-async def handle_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_refresh(update: Update, context: Context) -> None:
     """Handle refresh button - reload bot status
 
     Args:
@@ -2151,7 +2194,7 @@ async def handle_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await show_bots_menu(update, context)
 
 
-async def handle_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_close(update: Update, context: Context) -> None:
     """Handle close button - delete the menu message
 
     Args:

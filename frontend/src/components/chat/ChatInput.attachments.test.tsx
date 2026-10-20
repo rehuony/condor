@@ -21,8 +21,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatInput } from "./ChatInput";
 
-vi.mock("@/lib/api", () => ({
-  api: { getVoiceSettings: () => Promise.resolve({ auto_send: true }) },
+vi.mock("@/lib/api/settings", () => ({
+  settingsApi: {
+    getVoiceSettings: () => Promise.resolve({ auto_send: true }),
+  },
 }));
 
 vi.mock("@/lib/auth-token", () => ({

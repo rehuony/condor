@@ -8,11 +8,11 @@ Saves comprehensive reports to local filesystem:
 
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from condor.fetchers.archived_run import extract_bot_name
 from condor.paths import reports_dir
 
 logger = logging.getLogger(__name__)
@@ -25,16 +25,6 @@ def ensure_reports_dir() -> Path:
     return directory
 
 
-def _extract_bot_name(db_path: str) -> str:
-    """Extract readable bot name from database path."""
-    name = os.path.basename(db_path)
-    if name.endswith(".sqlite"):
-        name = name[:-7]
-    elif name.endswith(".db"):
-        name = name[:-3]
-    return name
-
-
 def generate_report_filename(db_path: str) -> str:
     """
     Generate a unique filename for the report.
@@ -42,7 +32,7 @@ def generate_report_filename(db_path: str) -> str:
     Format: {bot_name}_{YYYYMMDD_HHMMSS}
     """
     # Extract bot name from db_path
-    bot_name = _extract_bot_name(db_path)
+    bot_name = extract_bot_name(db_path)
     # Sanitize bot name for filename
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in bot_name)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -100,7 +90,7 @@ def build_report_json(
         "metadata": {
             "generated_at": datetime.now().isoformat(),
             "db_path": db_path,
-            "bot_name": _extract_bot_name(db_path),
+            "bot_name": extract_bot_name(db_path),
             "generator": "condor",
             "version": "1.1.0",
         },

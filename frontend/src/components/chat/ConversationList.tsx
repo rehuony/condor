@@ -2,7 +2,6 @@ import { memo, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
-  Loader2,
   MessageSquare,
   Pencil,
   Plus,
@@ -11,8 +10,9 @@ import {
 } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Spinner } from "@/components/ui/Spinner";
 import { TextInputDialog } from "@/components/ui/TextInputDialog";
-import { api, type ConversationMeta } from "@/lib/api";
+import { conversationsApi, type ConversationMeta } from "@/lib/api/conversations";
 
 const QUERY_KEY = ["conversations"] as const;
 
@@ -76,7 +76,7 @@ export const ConversationList = memo(function ConversationList({
   // where the user expects it.
   const { data: conversations = [], isLoading } = useQuery({
     queryKey: QUERY_KEY,
-    queryFn: () => api.listConversations(),
+    queryFn: () => conversationsApi.listConversations(),
     refetchOnMount: "always",
   });
 
@@ -84,7 +84,7 @@ export const ConversationList = memo(function ConversationList({
 
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
-      api.renameConversation(id, title),
+      conversationsApi.renameConversation(id, title),
     onSuccess: () => {
       invalidate();
       setRenaming(null);
@@ -92,7 +92,7 @@ export const ConversationList = memo(function ConversationList({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteConversation(id),
+    mutationFn: (id: string) => conversationsApi.deleteConversation(id),
     onSuccess: () => {
       invalidate();
       setConfirmDelete(null);
@@ -141,7 +141,7 @@ export const ConversationList = memo(function ConversationList({
       <div className="flex-1 overflow-y-auto">
         {isLoading && (
           <div className="flex items-center gap-2 px-3 py-4 text-xs text-[var(--color-text-muted)]">
-            <Loader2 className="h-3 w-3 animate-spin" /> Loading…
+            <Spinner size="xs" /> Loading…
           </div>
         )}
         {!isLoading && conversations.length === 0 && (

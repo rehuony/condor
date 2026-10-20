@@ -38,24 +38,35 @@ const getExecutors = vi.fn();
 const getFleetMap = vi.fn();
 const getAgents = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  api: {
+vi.mock("@/lib/api/portfolio", () => ({
+  portfolioApi: {
     getPortfolio: (...a: unknown[]) => getPortfolio(...a),
     getPortfolioHistory: (...a: unknown[]) => getPortfolioHistory(...a),
+  },
+}));
+vi.mock("@/lib/api/bots", () => ({
+  botsApi: {
     getBots: (...a: unknown[]) => getBots(...a),
+  },
+}));
+vi.mock("@/lib/api/executors", () => ({
+  executorsApi: {
     getExecutors: (...a: unknown[]) => getExecutors(...a),
-    // The execution panel reads its fleet through `useFleetData` (FEAT-114),
-    // under the same keys `/bots` holds.
     getExecutorsPage: async (...a: unknown[]) => ({
       executors: (await getExecutors(...a)) ?? [],
       next_cursor: null,
     }),
-    // The Loops section reads through `useLiveLoops` and the shared agent
-    // roster (FEAT-1xx) — both empty by default, below, so a test that never
-    // touches Loops sees exactly the "nothing looping" shell it always did.
+  },
+}));
+vi.mock("@/lib/api/market", () => ({
+  marketApi: {
+    getRates: () => Promise.resolve({ rates: {} }),
+  },
+}));
+vi.mock("@/lib/api/agents", () => ({
+  agentsApi: {
     getFleetMap: (...a: unknown[]) => getFleetMap(...a),
     getAgents: (...a: unknown[]) => getAgents(...a),
-    getRates: () => Promise.resolve({ rates: {} }),
   },
 }));
 
@@ -85,7 +96,7 @@ const { deskWasOpen, useAccountPanels } = await import("./accountPanels");
 const { WorkspaceRail } = await import("./WorkspaceRail");
 const { WorkspacePaneOutlet, WorkspacePaneProvider } =
   await import("./WorkspacePane");
-const { api } = await import("@/lib/api");
+const { portfolioApi } = await import("@/lib/api/portfolio");
 
 /**
  * `/portfolio`'s own observer, reduced to its cache key.
@@ -97,7 +108,7 @@ const { api } = await import("@/lib/api");
 function PortfolioPageQuery({ server }: { server: string }) {
   useQuery({
     queryKey: ["portfolio", server],
-    queryFn: () => api.getPortfolio(server),
+    queryFn: () => portfolioApi.getPortfolio(server),
     refetchInterval: 15_000,
   });
   return null;

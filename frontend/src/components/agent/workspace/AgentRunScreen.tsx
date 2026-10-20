@@ -29,11 +29,9 @@ import type {
   WorkspaceUrlAdapter,
   WorkspaceUrlPatch,
 } from "@/components/agent/workspace/workspaceUrl";
-import {
-  api,
-  type AgentRunRow,
-  type StrategyDetail,
-} from "@/lib/api";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { agentsApi, type AgentRunRow, type StrategyDetail } from "@/lib/api/agents";
 import { agentQuery } from "@/lib/queryClient";
 
 /**
@@ -142,7 +140,7 @@ export function AgentRunScreen({
   const [runLimit, setRunLimit] = useState(RUN_PAGE);
   const { data: runs = [] } = useQuery({
     queryKey: ["agent-runs", slug, runLimit],
-    queryFn: () => api.getAgentRuns(slug, runLimit),
+    queryFn: () => agentsApi.getAgentRuns(slug, runLimit),
     enabled: !!slug,
     refetchInterval: 5000,
     placeholderData: keepPreviousData,
@@ -190,7 +188,7 @@ export function AgentRunScreen({
   // MCP, restart_on_boot) shows on the next focus/reconnect/remount.
   const { data: strategy = null } = useQuery({
     queryKey: ["strategy", slug, sslug],
-    queryFn: () => api.getStrategy(slug, sslug!),
+    queryFn: () => agentsApi.getStrategy(slug, sslug!),
     enabled: !!slug && !!sslug,
     refetchInterval: (q) =>
       (q.state.data?.instances?.length ?? 0) > 0 ? 5000 : false,
@@ -257,7 +255,7 @@ export function AgentRunScreen({
   if (isLoading || !agent) {
     return (
       <div className="flex h-64 items-center justify-center text-[var(--color-text-muted)]">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+        <Spinner size="xl" />
       </div>
     );
   }
@@ -367,9 +365,9 @@ export function AgentRunScreen({
             onOpenRun={showRun}
           />
         ) : (
-          <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+          <EmptyState>
             Loading this loop's playbook…
-          </p>
+          </EmptyState>
         );
     }
   };
@@ -458,9 +456,9 @@ export function AgentRunScreen({
         }`}
       >
         {!sslug ? (
-          <p className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+          <EmptyState>
             This agent has no loops yet, so there is nothing to look at.
-          </p>
+          </EmptyState>
         ) : section === "now" ? (
           <div className={isPane ? "p-4" : "mx-auto w-full max-w-6xl p-6"}>
             {nowBody}

@@ -5,9 +5,13 @@ API Servers configuration handlers
 import asyncio
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes, ConversationHandler
-
+from condor.telegram.errors import is_not_modified
+from condor.telegram.types import (
+    Context,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from utils.auth import restricted
 from utils.telegram_formatters import escape_markdown_v2
 
@@ -15,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @restricted
-async def servers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def servers_command(update: Update, context: Context) -> None:
     """Handle /servers command - show API servers configuration directly."""
     from handlers import clear_all_input_states
     from utils.telegram_helpers import create_mock_query_from_message
@@ -38,9 +42,7 @@ async def servers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 ) = range(8)
 
 
-async def handle_servers_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_servers_callback(update: Update, context: Context) -> None:
     """Main router for servers-related callbacks"""
     query = update.callback_query
 
@@ -54,7 +56,7 @@ async def handle_servers_callback(
         await handle_api_server_action(query, context)
 
 
-async def show_api_servers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_api_servers(query, context: Context) -> None:
     """
     Show API servers configuration with status and actions.
     Only shows servers the user has access to.
@@ -73,7 +75,7 @@ async def show_api_servers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         # User's preferred server (checks both user_data and config.yml)
         from config_manager import get_effective_server
 
-        default_server = get_effective_server(query.message.chat_id, context.user_data)
+        default_server = get_effective_server(query.message.chat.id, context.user_data)
 
         if not servers:
             message_text = (
@@ -82,8 +84,12 @@ async def show_api_servers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "_Use the buttons below to add a server\\._"
             )
             keyboard = [
-                [InlineKeyboardButton("➕ Add Server", callback_data="api_server_add")],
-                [InlineKeyboardButton("« Close", callback_data="config_close")],
+                [
+                    InlineKeyboardButton(
+                        text="➕ Add Server", callback_data="api_server_add"
+                    )
+                ],
+                [InlineKeyboardButton(text="« Close", callback_data="config_close")],
             ]
         else:
             # Build server list with status
@@ -150,7 +156,7 @@ async def show_api_servers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
                     button_text += " ⭐️"
                 server_buttons.append(
                     InlineKeyboardButton(
-                        button_text, callback_data=f"api_server_view_{server_name}"
+                        text=button_text, callback_data=f"api_server_view_{server_name}"
                     )
                 )
 
@@ -170,23 +176,23 @@ async def show_api_servers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             keyboard = server_button_rows + [
                 [
                     InlineKeyboardButton(
-                        "➕ Add Server", callback_data="api_server_add"
+                        text="➕ Add Server", callback_data="api_server_add"
                     ),
                     InlineKeyboardButton(
-                        "🔄 Refresh", callback_data="config_api_servers"
+                        text="🔄 Refresh", callback_data="config_api_servers"
                     ),
-                    InlineKeyboardButton("« Close", callback_data="config_close"),
+                    InlineKeyboardButton(text="« Close", callback_data="config_close"),
                 ]
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         try:
             await query.message.edit_text(
                 message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
             )
         except Exception as e:
-            if "Message is not modified" in str(e):
+            if is_not_modified(e):
                 await query.answer("✅ Already up to date")
             else:
                 raise
@@ -194,14 +200,16 @@ async def show_api_servers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error(f"Error showing API servers: {e}", exc_info=True)
         error_text = f"❌ Error loading API servers: {escape_markdown_v2(str(e))}"
-        keyboard = [[InlineKeyboardButton("« Close", callback_data="config_close")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [InlineKeyboardButton(text="« Close", callback_data="config_close")]
+        ]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
             error_text, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
 
 
-async def handle_api_server_action(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_api_server_action(query, context: Context) -> None:
     """Handle API server specific actions"""
     action_data = query.data.replace("api_server_", "")
 
@@ -268,13 +276,11 @@ async def handle_api_server_action(query, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer("Unknown action")
 
 
-async def show_server_details(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> None:
+async def show_server_details(query, context: Context, server_name: str) -> None:
     """Show details and actions for a specific server (callback query wrapper)."""
     try:
         user_id = query.from_user.id
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
 
         async def edit_message(text, parse_mode=None, reply_markup=None):
             await query.message.edit_text(
@@ -293,7 +299,7 @@ async def show_server_details(
 
 
 async def _show_server_details(
-    context: ContextTypes.DEFAULT_TYPE,
+    context: Context,
     server_name: str,
     user_id: int,
     chat_id: int,
@@ -387,7 +393,7 @@ async def _show_server_details(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "⭐️ Set as Default",
+                    text="⭐️ Set as Default",
                     callback_data=f"api_server_set_default_{server_name}",
                 )
             ]
@@ -398,42 +404,44 @@ async def _show_server_details(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "🌐 Host", callback_data=f"modify_field_host_{server_name}"
+                    text="🌐 Host", callback_data=f"modify_field_host_{server_name}"
                 ),
                 InlineKeyboardButton(
-                    "🔌 Port", callback_data=f"modify_field_port_{server_name}"
+                    text="🔌 Port", callback_data=f"modify_field_port_{server_name}"
                 ),
                 InlineKeyboardButton(
-                    "👤 User", callback_data=f"modify_field_username_{server_name}"
+                    text="👤 User", callback_data=f"modify_field_username_{server_name}"
                 ),
                 InlineKeyboardButton(
-                    "🔑 Pass", callback_data=f"modify_field_password_{server_name}"
+                    text="🔑 Pass", callback_data=f"modify_field_password_{server_name}"
                 ),
             ]
         )
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    "📤 Share", callback_data=f"api_server_share_{server_name}"
+                    text="📤 Share", callback_data=f"api_server_share_{server_name}"
                 ),
                 InlineKeyboardButton(
-                    "🗑 Delete", callback_data=f"api_server_delete_{server_name}"
+                    text="🗑 Delete", callback_data=f"api_server_delete_{server_name}"
                 ),
             ]
         )
 
     keyboard.append(
-        [InlineKeyboardButton("« Back to Servers", callback_data="config_api_servers")]
+        [
+            InlineKeyboardButton(
+                text="« Back to Servers", callback_data="config_api_servers"
+            )
+        ]
     )
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await edit_message(message_text, parse_mode="MarkdownV2", reply_markup=reply_markup)
 
 
-async def set_default_server(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> None:
+async def set_default_server(query, context: Context, server_name: str) -> None:
     """Set server as default for this user/chat"""
     try:
         from condor.preferences import set_active_server
@@ -444,7 +452,7 @@ async def set_default_server(
         set_active_server(context.user_data, server_name)
 
         # Also save to config.yml for immediate persistence (survives hard kills)
-        chat_id = query.message.chat_id
+        chat_id = query.message.chat.id
         get_config_manager().set_chat_default_server(chat_id, server_name)
 
         # Invalidate ALL cached data since we're switching to a different server
@@ -462,9 +470,7 @@ async def set_default_server(
         await query.answer(f"❌ Error: {str(e)}")
 
 
-async def confirm_delete_server(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> None:
+async def confirm_delete_server(query, context: Context, server_name: str) -> None:
     """Ask for confirmation before deleting a server"""
     name_escaped = escape_markdown_v2(server_name)
     message_text = (
@@ -476,23 +482,25 @@ async def confirm_delete_server(
     keyboard = [
         [
             InlineKeyboardButton(
-                "✅ Yes, Delete",
+                text="✅ Yes, Delete",
                 callback_data=f"api_server_delete_confirm_{server_name}",
             )
         ],
-        [InlineKeyboardButton("❌ Cancel", callback_data="api_server_cancel_delete")],
+        [
+            InlineKeyboardButton(
+                text="❌ Cancel", callback_data="api_server_cancel_delete"
+            )
+        ],
     ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await query.message.edit_text(
         message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
     )
 
 
-async def delete_server(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> None:
+async def delete_server(query, context: Context, server_name: str) -> None:
     """Delete a server from configuration.
     Only owners can delete servers.
     """
@@ -576,31 +584,33 @@ def _build_add_server_message(server_data: dict, current_field: str) -> tuple:
         default_value = fields[current_field]["default"]
         buttons.append(
             InlineKeyboardButton(
-                f"Default: {default_value}",
+                text=f"Default: {default_value}",
                 callback_data=f"add_server_default_{current_field}",
             )
         )
 
     current_index = field_order.index(current_field)
     if current_index > 0:
-        buttons.append(InlineKeyboardButton("« Back", callback_data="add_server_back"))
+        buttons.append(
+            InlineKeyboardButton(text="« Back", callback_data="add_server_back")
+        )
 
     buttons.append(
-        InlineKeyboardButton("❌ Cancel", callback_data="config_api_servers")
+        InlineKeyboardButton(text="❌ Cancel", callback_data="config_api_servers")
     )
 
     keyboard = [buttons]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     return message_text, reply_markup
 
 
-async def start_add_server(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_add_server(query, context: Context) -> None:
     """Start the add server conversation"""
     context.user_data["adding_server"] = {}
     context.user_data["awaiting_add_server_input"] = "name"
     context.user_data["add_server_message_id"] = query.message.message_id
-    context.user_data["add_server_chat_id"] = query.message.chat_id
+    context.user_data["add_server_chat_id"] = query.message.chat.id
 
     message_text, reply_markup = _build_add_server_message({}, "name")
 
@@ -610,7 +620,7 @@ async def start_add_server(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
 
 
-async def _update_add_server_message(context: ContextTypes.DEFAULT_TYPE, bot) -> None:
+async def _update_add_server_message(context: Context, bot) -> None:
     """Update the add server message with current progress"""
     server_data = context.user_data.get("adding_server", {})
     current_field = context.user_data.get("awaiting_add_server_input")
@@ -634,9 +644,7 @@ async def _update_add_server_message(context: ContextTypes.DEFAULT_TYPE, bot) ->
         logger.error(f"Error updating add server message: {e}")
 
 
-async def show_add_server_confirmation(
-    context: ContextTypes.DEFAULT_TYPE, bot, chat_id: int
-) -> None:
+async def show_add_server_confirmation(context: Context, bot, chat_id: int) -> None:
     """Show confirmation screen with all values"""
     server_data = context.user_data.get("adding_server", {})
     message_id = context.user_data.get("add_server_message_id")
@@ -658,20 +666,30 @@ async def show_add_server_confirmation(
 
     keyboard = [
         [
-            InlineKeyboardButton("📝 Name", callback_data="add_server_modify_name"),
-            InlineKeyboardButton("🌐 Host", callback_data="add_server_modify_host"),
-            InlineKeyboardButton("🔌 Port", callback_data="add_server_modify_port"),
-            InlineKeyboardButton("👤 User", callback_data="add_server_modify_username"),
-            InlineKeyboardButton("🔑 Pass", callback_data="add_server_modify_password"),
+            InlineKeyboardButton(
+                text="📝 Name", callback_data="add_server_modify_name"
+            ),
+            InlineKeyboardButton(
+                text="🌐 Host", callback_data="add_server_modify_host"
+            ),
+            InlineKeyboardButton(
+                text="🔌 Port", callback_data="add_server_modify_port"
+            ),
+            InlineKeyboardButton(
+                text="👤 User", callback_data="add_server_modify_username"
+            ),
+            InlineKeyboardButton(
+                text="🔑 Pass", callback_data="add_server_modify_password"
+            ),
         ],
         [
             InlineKeyboardButton(
-                "✅ Confirm & Add", callback_data="add_server_confirm"
+                text="✅ Confirm & Add", callback_data="add_server_confirm"
             ),
-            InlineKeyboardButton("❌ Cancel", callback_data="config_api_servers"),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="config_api_servers"),
         ],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     try:
         await bot.edit_message_text(
@@ -685,9 +703,7 @@ async def show_add_server_confirmation(
         logger.error(f"Error showing confirmation: {e}")
 
 
-async def handle_add_server_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_add_server_input(update: Update, context: Context) -> None:
     """Handle text input during add server flow"""
     awaiting_field = context.user_data.get("awaiting_add_server_input")
     if not awaiting_field:
@@ -725,7 +741,7 @@ async def handle_add_server_input(
                         server_data, awaiting_field
                     )
                     message_text = error_text + "\n\n" + message_text
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=message_text,
@@ -739,11 +755,11 @@ async def handle_add_server_input(
 
             if is_initial_flow:
                 context.user_data["awaiting_add_server_input"] = "host"
-                await _update_add_server_message(context, update.get_bot())
+                await _update_add_server_message(context, context.bot)
             else:
                 context.user_data["awaiting_add_server_input"] = None
                 await show_add_server_confirmation(
-                    context, update.get_bot(), update.effective_chat.id
+                    context, context.bot, update.effective_chat.id
                 )
 
         elif awaiting_field == "host":
@@ -752,11 +768,11 @@ async def handle_add_server_input(
 
             if is_initial_flow:
                 context.user_data["awaiting_add_server_input"] = "port"
-                await _update_add_server_message(context, update.get_bot())
+                await _update_add_server_message(context, context.bot)
             else:
                 context.user_data["awaiting_add_server_input"] = None
                 await show_add_server_confirmation(
-                    context, update.get_bot(), update.effective_chat.id
+                    context, context.bot, update.effective_chat.id
                 )
 
         elif awaiting_field == "port":
@@ -773,7 +789,7 @@ async def handle_add_server_input(
                             server_data, awaiting_field
                         )
                         message_text = error_text + "\n\n" + message_text
-                        await update.get_bot().edit_message_text(
+                        await context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=message_id,
                             text=message_text,
@@ -786,11 +802,11 @@ async def handle_add_server_input(
 
                 if is_initial_flow:
                     context.user_data["awaiting_add_server_input"] = "username"
-                    await _update_add_server_message(context, update.get_bot())
+                    await _update_add_server_message(context, context.bot)
                 else:
                     context.user_data["awaiting_add_server_input"] = None
                     await show_add_server_confirmation(
-                        context, update.get_bot(), update.effective_chat.id
+                        context, context.bot, update.effective_chat.id
                     )
             except ValueError:
                 message_id = context.user_data.get("add_server_message_id")
@@ -801,7 +817,7 @@ async def handle_add_server_input(
                         server_data, awaiting_field
                     )
                     message_text = error_text + "\n\n" + message_text
-                    await update.get_bot().edit_message_text(
+                    await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=message_text,
@@ -816,11 +832,11 @@ async def handle_add_server_input(
 
             if is_initial_flow:
                 context.user_data["awaiting_add_server_input"] = "password"
-                await _update_add_server_message(context, update.get_bot())
+                await _update_add_server_message(context, context.bot)
             else:
                 context.user_data["awaiting_add_server_input"] = None
                 await show_add_server_confirmation(
-                    context, update.get_bot(), update.effective_chat.id
+                    context, context.bot, update.effective_chat.id
                 )
 
         elif awaiting_field == "password":
@@ -828,7 +844,7 @@ async def handle_add_server_input(
             context.user_data["adding_server"] = server_data
             context.user_data["awaiting_add_server_input"] = None
             await show_add_server_confirmation(
-                context, update.get_bot(), update.effective_chat.id
+                context, context.bot, update.effective_chat.id
             )
 
     except Exception as e:
@@ -837,9 +853,7 @@ async def handle_add_server_input(
         context.user_data.pop("adding_server", None)
 
 
-async def handle_add_server_callbacks(
-    query, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_add_server_callbacks(query, context: Context) -> None:
     """Handle callback queries during add server flow"""
     try:
         if query.data == "add_server_back":
@@ -855,7 +869,7 @@ async def handle_add_server_callbacks(
                     context.user_data["adding_server"] = server_data
                     context.user_data["awaiting_add_server_input"] = previous_field
                     await query.answer("« Going back")
-                    await _update_add_server_message(context, query.message.get_bot())
+                    await _update_add_server_message(context, query.message.bot)
             return
 
         if query.data.startswith("add_server_default_"):
@@ -880,12 +894,12 @@ async def handle_add_server_callbacks(
                     current_index + 1
                 ]
                 await query.answer(f"✅ Using default: {defaults[field]}")
-                await _update_add_server_message(context, query.message.get_bot())
+                await _update_add_server_message(context, query.message.bot)
             else:
                 context.user_data["awaiting_add_server_input"] = None
                 await query.answer(f"✅ Using default: {defaults[field]}")
                 await show_add_server_confirmation(
-                    context, query.message.get_bot(), query.message.chat_id
+                    context, query.message.bot, query.message.chat.id
                 )
 
         elif query.data.startswith("add_server_modify_"):
@@ -918,11 +932,11 @@ async def handle_add_server_callbacks(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back", callback_data="add_server_back_to_confirm"
+                        text="« Back", callback_data="add_server_back_to_confirm"
                     )
                 ]
             ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
             await query.message.edit_text(
                 message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -936,7 +950,7 @@ async def handle_add_server_callbacks(
             context.user_data["awaiting_add_server_input"] = None
             await query.answer()
             await show_add_server_confirmation(
-                context, query.message.get_bot(), query.message.chat_id
+                context, query.message.bot, query.message.chat.id
             )
 
     except Exception as e:
@@ -944,7 +958,7 @@ async def handle_add_server_callbacks(
         await query.answer(f"❌ Error: {str(e)}")
 
 
-async def confirm_add_server(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def confirm_add_server(query, context: Context) -> None:
     """Actually add the server to configuration"""
     try:
         from config_manager import get_config_manager
@@ -973,7 +987,7 @@ async def confirm_add_server(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             cm = get_config_manager()
             accessible = cm.get_accessible_servers(user_id)
             if accessible and len(accessible) == 1:
-                chat_id = query.message.chat_id
+                chat_id = query.message.chat.id
                 cm.set_chat_default_server(chat_id, server_data["name"])
                 auto_default = True
             else:
@@ -996,9 +1010,7 @@ async def confirm_add_server(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # Modify Server Flow
-async def start_modify_server(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> int:
+async def start_modify_server(query, context: Context, server_name: str) -> int:
     """Start the modify server conversation"""
     try:
         from config_manager import get_config_manager
@@ -1006,7 +1018,7 @@ async def start_modify_server(
         server = get_config_manager().get_server(server_name)
         if not server:
             await query.answer("❌ Server not found")
-            return ConversationHandler.END
+            return
 
         context.user_data["modifying_server"] = server_name
 
@@ -1019,32 +1031,34 @@ async def start_modify_server(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🌐 Host", callback_data=f"modify_field_host_{server_name}"
+                    text="🌐 Host", callback_data=f"modify_field_host_{server_name}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "🔌 Port", callback_data=f"modify_field_port_{server_name}"
+                    text="🔌 Port", callback_data=f"modify_field_port_{server_name}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "👤 Username", callback_data=f"modify_field_username_{server_name}"
+                    text="👤 Username",
+                    callback_data=f"modify_field_username_{server_name}",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "🔑 Password", callback_data=f"modify_field_password_{server_name}"
+                    text="🔑 Password",
+                    callback_data=f"modify_field_password_{server_name}",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "« Back", callback_data=f"api_server_view_{server_name}"
+                    text="« Back", callback_data=f"api_server_view_{server_name}"
                 )
             ],
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -1055,12 +1069,10 @@ async def start_modify_server(
     except Exception as e:
         logger.error(f"Error starting server modification: {e}", exc_info=True)
         await query.answer(f"❌ Error: {str(e)}")
-        return ConversationHandler.END
+        return
 
 
-async def handle_modify_field_selection(
-    query, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_modify_field_selection(query, context: Context) -> None:
     """Handle field selection for server modification"""
     try:
         parts = query.data.replace("modify_field_", "").split("_", 1)
@@ -1074,7 +1086,7 @@ async def handle_modify_field_selection(
         context.user_data["modifying_field"] = field
         context.user_data["awaiting_modify_input"] = True
         context.user_data["modify_message_id"] = query.message.message_id
-        context.user_data["modify_chat_id"] = query.message.chat_id
+        context.user_data["modify_chat_id"] = query.message.chat.id
 
         from config_manager import get_config_manager
 
@@ -1109,11 +1121,11 @@ async def handle_modify_field_selection(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "« Back", callback_data=f"api_server_view_{server_name}"
+                    text="« Back", callback_data=f"api_server_view_{server_name}"
                 )
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await query.message.edit_text(
             message_text, parse_mode="MarkdownV2", reply_markup=reply_markup
@@ -1124,14 +1136,12 @@ async def handle_modify_field_selection(
         await query.answer(f"❌ Error: {str(e)}")
 
 
-async def handle_modify_value_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_modify_value_input(update: Update, context: Context) -> None:
     """Handle text input for server field modification"""
     if not context.user_data.get("awaiting_modify_input"):
         return
 
-    chat_id = update.message.chat_id
+    chat_id = update.message.chat.id
     server_name = context.user_data.get("modifying_server")
     field = context.user_data.get("modifying_field")
     new_value = update.message.text.strip()
@@ -1267,9 +1277,7 @@ async def handle_modify_value_input(
 
 
 # Entry point for text input routing
-async def handle_server_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_server_input(update: Update, context: Context) -> None:
     """Route server-related text input to appropriate handler"""
     if context.user_data.get("awaiting_add_server_input"):
         await handle_add_server_input(update, context)
@@ -1282,9 +1290,7 @@ async def handle_server_input(
 # ==================== Server Sharing ====================
 
 
-async def show_server_sharing(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> None:
+async def show_server_sharing(query, context: Context, server_name: str) -> None:
     """Show sharing details and management for a server."""
     from config_manager import ServerPermission, get_config_manager
 
@@ -1324,7 +1330,7 @@ async def show_server_sharing(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        f"🗑 Revoke {target_user_id}",
+                        text=f"🗑 Revoke {target_user_id}",
                         callback_data=f"api_server_revoke_{target_user_id}_{server_name}",
                     )
                 ]
@@ -1339,23 +1345,27 @@ async def show_server_sharing(
     keyboard.append(
         [
             InlineKeyboardButton(
-                "➕ Share with User ID",
+                text="➕ Share with User ID",
                 callback_data=f"api_server_share_start_{server_name}",
             )
         ]
     )
     keyboard.append(
-        [InlineKeyboardButton("« Back", callback_data=f"api_server_view_{server_name}")]
+        [
+            InlineKeyboardButton(
+                text="« Back", callback_data=f"api_server_view_{server_name}"
+            )
+        ]
     )
 
     await query.message.edit_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def start_share_flow(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> None:
+async def start_share_flow(query, context: Context, server_name: str) -> None:
     """Start the share flow.
     - Admin sees a list of approved users to pick from
     - Regular users enter the user ID manually
@@ -1372,7 +1382,7 @@ async def start_share_flow(
 
     context.user_data["sharing_server"] = server_name
     context.user_data["share_message_id"] = query.message.message_id
-    context.user_data["share_chat_id"] = query.message.chat_id
+    context.user_data["share_chat_id"] = query.message.chat.id
 
     name_escaped = escape_markdown_v2(server_name)
     owner_id = cm.get_server_owner(server_name)
@@ -1400,7 +1410,7 @@ async def start_share_flow(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "« Back", callback_data=f"api_server_share_{server_name}"
+                        text="« Back", callback_data=f"api_server_share_{server_name}"
                     )
                 ]
             ]
@@ -1416,7 +1426,7 @@ async def start_share_flow(
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            btn_text,
+                            text=btn_text,
                             callback_data=f"api_server_share_user_{uid}_{server_name}",
                         )
                     ]
@@ -1428,7 +1438,7 @@ async def start_share_flow(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "✏️ Enter ID manually",
+                        text="✏️ Enter ID manually",
                         callback_data=f"api_server_share_manual_{server_name}",
                     )
                 ]
@@ -1436,7 +1446,7 @@ async def start_share_flow(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        "❌ Cancel",
+                        text="❌ Cancel",
                         callback_data=f"api_server_share_cancel_{server_name}",
                     )
                 ]
@@ -1453,19 +1463,22 @@ async def start_share_flow(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
+                    text="❌ Cancel",
+                    callback_data=f"api_server_share_cancel_{server_name}",
                 )
             ]
         ]
         context.user_data["awaiting_share_user_id"] = True
 
     await query.message.edit_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
 async def select_share_user(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str, target_user_id: int
+    query, context: Context, server_name: str, target_user_id: int
 ) -> None:
     """Handle user selection from the list (admin flow)."""
     from config_manager import ServerPermission, get_config_manager
@@ -1501,25 +1514,25 @@ async def select_share_user(
     keyboard = [
         [
             InlineKeyboardButton(
-                "💱 Trader (can trade)",
+                text="💱 Trader (can trade)",
                 callback_data=f"api_server_perm_trader_{server_name}",
             )
         ],
         [
             InlineKeyboardButton(
-                "❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
+                text="❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
             )
         ],
     ]
 
     await query.message.edit_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def start_manual_share_flow(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str
-) -> None:
+async def start_manual_share_flow(query, context: Context, server_name: str) -> None:
     """Start manual entry flow for sharing (used when admin clicks 'Enter ID manually')."""
     from config_manager import ServerPermission, get_config_manager
 
@@ -1534,7 +1547,7 @@ async def start_manual_share_flow(
     context.user_data["sharing_server"] = server_name
     context.user_data["awaiting_share_user_id"] = True
     context.user_data["share_message_id"] = query.message.message_id
-    context.user_data["share_chat_id"] = query.message.chat_id
+    context.user_data["share_chat_id"] = query.message.chat.id
 
     name_escaped = escape_markdown_v2(server_name)
     message = (
@@ -1546,19 +1559,19 @@ async def start_manual_share_flow(
     keyboard = [
         [
             InlineKeyboardButton(
-                "❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
+                text="❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
             )
         ]
     ]
 
     await query.message.edit_text(
-        message, parse_mode="MarkdownV2", reply_markup=InlineKeyboardMarkup(keyboard)
+        message,
+        parse_mode="MarkdownV2",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
     )
 
 
-async def handle_share_user_id_input(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_share_user_id_input(update: Update, context: Context) -> None:
     """Handle user ID input for sharing."""
     from config_manager import get_config_manager
 
@@ -1590,10 +1603,10 @@ async def handle_share_user_id_input(
                 text="❌ Invalid User ID\\. Please enter a valid number\\.\n\nEnter the User ID:",
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
-                    [
+                    inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                "❌ Cancel",
+                                text="❌ Cancel",
                                 callback_data=f"api_server_share_cancel_{server_name}",
                             )
                         ]
@@ -1613,10 +1626,10 @@ async def handle_share_user_id_input(
                 "Enter a different User ID:",
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
-                    [
+                    inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                "❌ Cancel",
+                                text="❌ Cancel",
                                 callback_data=f"api_server_share_cancel_{server_name}",
                             )
                         ]
@@ -1635,10 +1648,10 @@ async def handle_share_user_id_input(
                 text="❌ You can't share with the owner\\.\n\nEnter a different User ID:",
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
-                    [
+                    inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                "❌ Cancel",
+                                text="❌ Cancel",
                                 callback_data=f"api_server_share_cancel_{server_name}",
                             )
                         ]
@@ -1669,13 +1682,13 @@ async def handle_share_user_id_input(
     keyboard = [
         [
             InlineKeyboardButton(
-                "💱 Trader (can trade)",
+                text="💱 Trader (can trade)",
                 callback_data=f"api_server_perm_trader_{server_name}",
             )
         ],
         [
             InlineKeyboardButton(
-                "❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
+                text="❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
             )
         ],
     ]
@@ -1686,12 +1699,12 @@ async def handle_share_user_id_input(
             message_id=message_id,
             text=message,
             parse_mode="MarkdownV2",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
 
 
 async def set_share_permission(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str, permission: str
+    query, context: Context, server_name: str, permission: str
 ) -> None:
     """Set the permission level and complete sharing."""
     from config_manager import ServerPermission, get_config_manager
@@ -1761,7 +1774,7 @@ async def set_share_permission(
 
 
 async def revoke_access(
-    query, context: ContextTypes.DEFAULT_TYPE, server_name: str, target_user_id: int
+    query, context: Context, server_name: str, target_user_id: int
 ) -> None:
     """Revoke a user's access to a server."""
     from config_manager import get_config_manager

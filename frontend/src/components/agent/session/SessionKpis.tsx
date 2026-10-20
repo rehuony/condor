@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 
 import { closeSummary } from "@/components/agent/session/closeTypes";
-import type { AgentPerformance } from "@/lib/api";
+import type { AgentPerformance } from "@/lib/api/agents";
 import { formatCompactUsd, formatCurrencyPnl, pnlTextClass } from "@/lib/formatters";
 
 // ── Session KPIs ──

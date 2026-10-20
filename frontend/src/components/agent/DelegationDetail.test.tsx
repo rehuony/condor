@@ -21,7 +21,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { Delegation } from "@/lib/api";
+import type { Delegation } from "@/lib/api/delegations";
 import { DelegationDetail } from "./DelegationDetail";
 
 declare global {

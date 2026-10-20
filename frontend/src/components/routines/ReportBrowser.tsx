@@ -7,7 +7,6 @@ import {
   Clock,
   Download,
   ListX,
-  Loader2,
   Play,
   PlayCircle,
   Settings2,
@@ -21,9 +20,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
+import { IconButton } from "@/components/ui/IconButton";
+import { Spinner } from "@/components/ui/Spinner";
+import { FULLSCREEN_LAYER, FULLSCREEN_LAYER_TOP } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/select-field";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { type RoutineInstance, api } from "@/lib/api";
+import { reportsApi } from "@/lib/api/reports";
+import { routinesApi, type RoutineInstance } from "@/lib/api/routines";
 import { toMs } from "@/lib/formatters";
 import {
   buildConfigValues,
@@ -148,7 +151,7 @@ export function ReportBrowser({
   // Fetch all routines for the sidebar
   const { data: routines = [] } = useQuery({
     queryKey: ["routines"],
-    queryFn: api.getRoutines,
+    queryFn: routinesApi.getRoutines,
   });
 
   const [pickedSource, setActiveSource] = useState(initialSource ?? "");
@@ -242,7 +245,7 @@ export function ReportBrowser({
    */
   const { data: reportGroups = [] } = useQuery({
     queryKey: ["reports-grouped"],
-    queryFn: api.getReportsGrouped,
+    queryFn: reportsApi.getReportsGrouped,
     enabled: !externalPicker,
     refetchInterval: 30_000,
   });
@@ -300,7 +303,7 @@ export function ReportBrowser({
   );
   const { data: reportsData, isLoading: loadingReports } = useQuery({
     queryKey: ["routine-reports", activeSource],
-    queryFn: () => api.getRoutineReports(activeSource),
+    queryFn: () => routinesApi.getRoutineReports(activeSource),
     enabled: !!activeSource,
     refetchInterval: hasScheduledInstance ? 10_000 : false,
   });
@@ -311,7 +314,7 @@ export function ReportBrowser({
   // Source code query (lazy)
   const { data: sourceData } = useQuery({
     queryKey: ["routine-source", activeSource],
-    queryFn: () => api.getRoutineSource(activeSource),
+    queryFn: () => routinesApi.getRoutineSource(activeSource),
     enabled: showSourceModal && !!activeSource,
   });
 
@@ -371,7 +374,7 @@ export function ReportBrowser({
   // run live behind its own route, so the view that shows them fetches it.
   const { data: outputRunFull } = useQuery({
     queryKey: ["routine-instance", outputRun?.instance_id],
-    queryFn: () => api.getRoutineInstance(outputRun!.instance_id),
+    queryFn: () => routinesApi.getRoutineInstance(outputRun!.instance_id),
     enabled: view === "output" && !!outputRun,
   });
   const shownRun = outputRunFull ?? outputRun;
@@ -401,7 +404,7 @@ export function ReportBrowser({
 
   const { data: polledInstance } = useQuery({
     queryKey: ["routine-instance", pollingInstanceId],
-    queryFn: () => api.getRoutineInstance(pollingInstanceId!),
+    queryFn: () => routinesApi.getRoutineInstance(pollingInstanceId!),
     enabled: !!pollingInstanceId,
     refetchInterval: 2000,
   });
@@ -416,7 +419,7 @@ export function ReportBrowser({
 
   const runMutation = useMutation({
     mutationFn: () =>
-      api.runRoutine(runServer!, activeSource, configValues, {
+      routinesApi.runRoutine(runServer!, activeSource, configValues, {
         sessionKey: runContext?.sessionKey,
         attributeTo: runContext?.agentSlug,
       }),
@@ -429,7 +432,7 @@ export function ReportBrowser({
 
   const scheduleMutation = useMutation({
     mutationFn: (intervalSec: number) =>
-      api.scheduleRoutine(runServer!, activeSource, configValues, intervalSec),
+      routinesApi.scheduleRoutine(runServer!, activeSource, configValues, intervalSec),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["routine-instances"] });
       setShowConfigPanel(false);
@@ -437,7 +440,7 @@ export function ReportBrowser({
   });
 
   const stopMutation = useMutation({
-    mutationFn: (id: string) => api.stopRoutineInstance(id),
+    mutationFn: (id: string) => routinesApi.stopRoutineInstance(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["routine-instances"] });
     },
@@ -460,7 +463,7 @@ export function ReportBrowser({
   >(null);
 
   const deleteMutation = useMutation({
-    mutationFn: ({ id }: { id: string; source: string }) => api.deleteReport(id),
+    mutationFn: ({ id }: { id: string; source: string }) => reportsApi.deleteReport(id),
     onSuccess: (_, { id, source }) => {
       invalidateReports(source);
       setConfirmDelete(null);
@@ -508,7 +511,7 @@ export function ReportBrowser({
       const routine = toRun[i];
       const cfg = buildConfigValues(routine);
       try {
-        await api.runRoutine(runServer, routine.name, cfg, {
+        await routinesApi.runRoutine(runServer, routine.name, cfg, {
           sessionKey: runContext?.sessionKey,
           attributeTo: runContext?.agentSlug,
         });
@@ -531,7 +534,7 @@ export function ReportBrowser({
     if (!selectedReport) return;
     // Hydrated: the saved file is opened at `file://`, where the shared plotly
     // bundle the stored report references cannot resolve (PERF-267).
-    const html = await api.getReportHtml(selectedReport.id, { hydrate: true });
+    const html = await reportsApi.getReportHtml(selectedReport.id, { hydrate: true });
     const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
     const link = document.createElement("a");
     link.href = url;
@@ -664,7 +667,7 @@ export function ReportBrowser({
       title="Run all filtered routines with saved configs and defaults"
       aria-label={runAllProgress ? `Running routines ${runAllProgress.current} of ${runAllProgress.total}` : `Run all ${filteredRoutines.length} filtered routines`}
     >
-      {runAllProgress ? <Loader2 className="animate-spin" /> : <PlayCircle />}
+      {runAllProgress ? <Spinner /> : <PlayCircle />}
       {!iconOnly && (
         <span aria-live="polite">{runAllProgress ? `${runAllProgress.current}/${runAllProgress.total}` : "Run All"}</span>
       )}
@@ -712,7 +715,7 @@ export function ReportBrowser({
           ? "@container/routine-browser flex min-h-0 w-full min-w-0 flex-1 flex-col md:flex-row overflow-hidden outline-none"
           : page
             ? "@container/routine-browser flex h-full min-h-0 w-full min-w-0 flex-col md:flex-row overflow-hidden outline-none"
-            : "@container/routine-browser fixed inset-0 z-50 flex min-w-0 flex-col md:flex-row bg-[var(--color-bg)]"
+            : `@container/routine-browser ${FULLSCREEN_LAYER} min-w-0 md:flex-row`
       }
       tabIndex={hosted ? -1 : undefined}
       onKeyDown={hosted ? handleKey : undefined}
@@ -849,7 +852,7 @@ export function ReportBrowser({
                   className={ROUTINE_PRIMARY_ACTION}
                   title="Run with current config"
                 >
-                  {runMutation.isPending ? <Loader2 className="animate-spin" /> : <Play />}
+                  {runMutation.isPending ? <Spinner /> : <Play />}
                   Run
                 </button>
                 <button
@@ -901,13 +904,13 @@ export function ReportBrowser({
             </div>
           </div>
           {!hosted && !page && onClose && (
-            <button
+            <IconButton
+              label="Close (Esc)"
+              size="lg"
               onClick={onClose}
-              className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              title="Close (Esc)"
             >
               <X className="h-4 w-4" />
-            </button>
+            </IconButton>
           )}
         </div>
 
@@ -932,13 +935,13 @@ export function ReportBrowser({
               <div className="max-w-4xl">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-[var(--color-text)]">Configuration</h3>
-                  <button
+                  <IconButton
+                    label="Close configuration"
+                    size="lg"
                     onClick={() => setShowConfigPanel(false)}
-                    aria-label="Close configuration"
-                    className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
                   >
                     <X className="h-4 w-4" />
-                  </button>
+                  </IconButton>
                 </div>
                 {configForm}
               </div>
@@ -957,13 +960,13 @@ export function ReportBrowser({
                 <h3 className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
                   Notifications
                 </h3>
-                <button
+                <IconButton
+                  label="Close notifications"
+                  size="sm"
                   onClick={() => setShowNotifyPanel(false)}
-                  aria-label="Close notifications"
-                  className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
                 >
                   <X className="h-3 w-3" />
-                </button>
+                </IconButton>
               </div>
               <RoutineHooksPanel routineName={activeSource} collapsible={false} />
             </div>
@@ -1002,57 +1005,51 @@ export function ReportBrowser({
                     <span className="mr-1 text-xs text-[var(--color-text-muted)]">
                       {selectedReportIdx + 1} of {reports.length}
                     </span>
-                    <button
+                    <IconButton
+                      label="Previous report"
                       onClick={goPrevReport}
                       disabled={selectedReportIdx === 0}
-                      className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30"
-                      title="Previous report"
                     >
                       <ChevronLeft className="h-4 w-4" />
-                    </button>
-                    <button
+                    </IconButton>
+                    <IconButton
+                      label="Next report"
                       onClick={goNextReport}
                       disabled={selectedReportIdx >= reports.length - 1}
-                      className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30"
-                      title="Next report"
                     >
                       <ChevronRight className="h-4 w-4" />
-                    </button>
+                    </IconButton>
                   </>
                 )}
                 {/* Download */}
                 {view === "report" && selectedReport && (
-                  <button
+                  <IconButton
+                    label="Download report"
                     onClick={downloadReport}
-                    className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                    title="Download report"
                   >
                     <Download className="h-4 w-4" />
-                  </button>
+                  </IconButton>
                 )}
                 {/* Delete this report, or every report the routine has made */}
                 {view === "report" && selectedReport && (
                   <>
-                    <button
-                      type="button"
+                    <IconButton
+                      label="Delete report"
+                      tone="danger"
                       onClick={() => setConfirmDelete({ kind: "one", source: activeSource, id: selectedReport.id, label: selectedReport.title || selectedReport.filename })}
                       disabled={deleting}
-                      aria-label="Delete report"
-                      title="Delete report"
-                      className="rounded p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-red)]/10 hover:text-[var(--color-red)] disabled:opacity-40"
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
+                    </IconButton>
+                    <IconButton
+                      label="Delete all reports"
+                      title={`Delete all ${reportsData?.total ?? reports.length} reports from this routine`}
+                      tone="danger"
                       onClick={() => setConfirmDelete({ kind: "all", source: activeSource, total: reportsData?.total ?? reports.length })}
                       disabled={deleting}
-                      aria-label="Delete all reports"
-                      title={`Delete all ${reportsData?.total ?? reports.length} reports from this routine`}
-                      className="rounded p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-red)]/10 hover:text-[var(--color-red)] disabled:opacity-40"
                     >
                       <ListX className="h-4 w-4" />
-                    </button>
+                    </IconButton>
                   </>
                 )}
               </div>
@@ -1123,7 +1120,7 @@ export function ReportBrowser({
               </div>
             ) : loadingReports ? (
               <div className="flex h-full items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]" />
+                <Spinner size="xl" tone="muted" />
               </div>
             ) : !selectedReport ? (
               <div className="flex h-full grow overflow-y-auto px-3 py-4 text-left md:px-6 md:py-6">
@@ -1142,7 +1139,7 @@ export function ReportBrowser({
                         disabled={runMutation.isPending}
                         className="mt-4 flex min-h-10 items-center gap-2 rounded-md bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-[var(--on-primary)] hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
                       >
-                        {runMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        {runMutation.isPending ? <Spinner /> : <Play className="h-4 w-4" />}
                         Retry
                       </button>
                     )}
@@ -1172,7 +1169,7 @@ export function ReportBrowser({
                               disabled={runMutation.isPending}
                               className="flex h-9 items-center gap-2 rounded-md bg-[var(--color-primary)] px-4 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--color-primary)]/80 disabled:opacity-50"
                             >
-                              {runMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                              {runMutation.isPending ? <Spinner /> : <Play className="h-4 w-4" />}
                               Run for the first time
                             </button>
                             {runMutation.isError && (
@@ -1263,7 +1260,7 @@ export function ReportBrowser({
       )}
 
       {showSourceModal && (
-        <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-bg)]">
+        <div className={FULLSCREEN_LAYER_TOP}>
           <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
             <div className="flex items-center gap-3 min-w-0">
               <Code className="h-4 w-4 text-[var(--color-text-muted)]" />
@@ -1271,13 +1268,12 @@ export function ReportBrowser({
                 {sourceData?.filename ?? activeSource}
               </span>
             </div>
-            <button
+            <IconButton
+              label="Close (Esc)"
               onClick={() => setShowSourceModal(false)}
-              className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              title="Close (Esc)"
             >
               <X className="h-4 w-4" />
-            </button>
+            </IconButton>
           </div>
           <div className="flex-1 overflow-auto bg-[var(--color-surface)]">
             {sourceData ? (
@@ -1293,7 +1289,7 @@ export function ReportBrowser({
               </pre>
             ) : (
               <div className="flex h-full items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]" />
+                <Spinner size="xl" tone="muted" />
               </div>
             )}
           </div>

@@ -37,7 +37,11 @@ def test_ticker_fetch_raises_with_context_and_original_cause(
     monkeypatch.setattr(scanner, "fetch_top_pairs", AsyncMock(side_effect=error))
 
     with pytest.raises(RuntimeError, match="Failed to fetch Binance tickers") as raised:
-        asyncio.run(scanner.run(scanner.Config(), SimpleNamespace(_chat_id=0)))
+        asyncio.run(
+            scanner.run(
+                scanner.Config(), SimpleNamespace(chat_id=0, user_data={}, bot=None)
+            )
+        )
 
     assert detail in str(raised.value)
     assert raised.value.__cause__ is error

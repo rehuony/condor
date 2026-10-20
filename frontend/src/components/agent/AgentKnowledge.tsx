@@ -4,11 +4,8 @@ import {
   BookOpen,
   Brain,
   Check,
-  ChevronDown,
-  ChevronRight,
   Cpu,
   History,
-  Loader2,
   Repeat,
   Sparkles,
   Wrench,
@@ -39,13 +36,9 @@ import {
 import { ControllersTab } from "@/components/agent/knowledge/ControllersTab";
 import { MemoryEditor } from "@/components/agent/knowledge/MemoryEditor";
 import { SkillEditor } from "@/components/agent/knowledge/SkillEditor";
-import {
-  api,
-  type AgentBrain,
-  type MemoryCard,
-  type SkillCard,
-  type SkillProposal,
-} from "@/lib/api";
+import { Disclosure } from "@/components/ui/Disclosure";
+import { Spinner } from "@/components/ui/Spinner";
+import { agentsApi, type AgentBrain, type MemoryCard, type SkillCard, type SkillProposal } from "@/lib/api/agents";
 import { agentQuery } from "@/lib/queryClient";
 import { formatRoutineName } from "@/lib/routineUtils";
 
@@ -162,7 +155,7 @@ export const AgentKnowledge = memo(function AgentKnowledge({
     error,
   } = useQuery({
     queryKey: ["agent-brain", slug],
-    queryFn: () => api.getAgentBrain(slug),
+    queryFn: () => agentsApi.getAgentBrain(slug),
     // A brain changes when someone edits it, not while you read it. Fresh on
     // open is what matters; a poll here would walk the skill and memory stores
     // on disk every few seconds for a panel nobody is looking at.
@@ -214,8 +207,8 @@ export const AgentKnowledge = memo(function AgentKnowledge({
   const deleteMut = useMutation({
     mutationFn: (target: Reading) =>
       target.kind === "skill"
-        ? api.deleteAgentSkill(slug, target.card.slug)
-        : api.deleteAgentMemory(slug, target.card.name),
+        ? agentsApi.deleteAgentSkill(slug, target.card.slug)
+        : agentsApi.deleteAgentMemory(slug, target.card.name),
     onSuccess: () => {
       refresh();
       setDeleting(null);
@@ -239,7 +232,7 @@ export const AgentKnowledge = memo(function AgentKnowledge({
       kind: "skill" | "routine" | "tool";
       name: string;
       muted: boolean;
-    }) => api.setAgentMute(slug, v),
+    }) => agentsApi.setAgentMute(slug, v),
     onMutate: async (v) => {
       await queryClient.cancelQueries({ queryKey: ["agent-brain", slug] });
       const previous = queryClient.getQueryData<AgentBrain>([
@@ -463,7 +456,7 @@ export const AgentKnowledge = memo(function AgentKnowledge({
     <>
       {isLoading && (
         <div className="flex items-center gap-2 py-8 text-xs text-[var(--color-text-muted)]">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading the brain…
+          <Spinner size="sm" /> Reading the brain…
         </div>
       )}
       {error && !brain && (
@@ -739,8 +732,7 @@ function BrainTab({
           // The agent page reads the same file under its own key, so a save
           // here has to reach both or the page keeps showing the old text.
           onSave={(value) =>
-            api
-              .updateAgentMd(slug, value)
+            agentsApi.updateAgentMd(slug, value)
               .then(() =>
                 queryClient.invalidateQueries({ queryKey: agentQuery(slug).queryKey }),
               )
@@ -817,11 +809,11 @@ function ProposedSkill({
 }) {
   const [open, setOpen] = useState(false);
   const accept = useMutation({
-    mutationFn: () => api.acceptAgentSkillProposal(slug),
+    mutationFn: () => agentsApi.acceptAgentSkillProposal(slug),
     onSuccess: onRuled,
   });
   const discard = useMutation({
-    mutationFn: () => api.discardAgentSkillProposal(slug),
+    mutationFn: () => agentsApi.discardAgentSkillProposal(slug),
     onSuccess: onRuled,
   });
   const busy = accept.isPending || discard.isPending;
@@ -839,24 +831,18 @@ function ProposedSkill({
         {proposal.when_to_use || proposal.description}
       </p>
 
-      <button
-        onClick={() => setOpen((was) => !was)}
-        className="mt-1.5 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
+      <Disclosure
+        buttonClassName="mt-1.5 gap-1 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        chevronClassName="h-3 w-3"
+        open={open}
+        onOpenChange={setOpen}
+        summary={open ? "Hide the steps" : "Read the steps"}
+        bodyClassName="chat-markdown mt-2 text-xs text-[var(--color-text)]"
       >
-        {open ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        {open ? "Hide the steps" : "Read the steps"}
-      </button>
-      {open && (
-        <div className="chat-markdown mt-2 text-xs text-[var(--color-text)]">
-          <ReactMarkdown remarkPlugins={GFM}>
-            {proposal.body}
-          </ReactMarkdown>
-        </div>
-      )}
+        <ReactMarkdown remarkPlugins={GFM}>
+          {proposal.body}
+        </ReactMarkdown>
+      </Disclosure>
 
       <div className="mt-2 flex items-center gap-1.5">
         <button
@@ -865,7 +851,7 @@ function ProposedSkill({
           className="flex items-center gap-1 rounded border border-[var(--color-primary)]/50 px-2 py-1 text-[11px] text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10 disabled:opacity-50"
         >
           {accept.isPending ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Spinner size="xs" />
           ) : (
             <Check className="h-3 w-3" />
           )}

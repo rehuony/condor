@@ -23,7 +23,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatMessage, ChatSlot } from "@/hooks/useChatSocket";
-import type { AgentSummary } from "@/lib/api";
+import type { AgentSummary } from "@/lib/api/agents";
 
 // The composer is not what is under test and it opens a react-query fetch of
 // its own; the transcript above it is the whole subject here.

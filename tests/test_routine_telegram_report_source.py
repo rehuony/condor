@@ -19,6 +19,7 @@ from pydantic import BaseModel
 import condor.reports as rep
 import handlers.routines as hr
 from condor.preferences import SERVER_PIN_KEY, USER_PREFERENCES_KEY
+from tests.conftest import patch_routines
 
 GROUP_ID = -1001234
 OWNER_ID = 7
@@ -42,8 +43,8 @@ def reports_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def quiet(monkeypatch):
     """Silence the parts of a run that talk to the store and to Telegram."""
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine_store",
         lambda: SimpleNamespace(
             store_result=lambda *a, **kw: None, remove_instance=lambda *a: None
@@ -57,8 +58,8 @@ def quiet(monkeypatch):
 
 
 def _library(monkeypatch, run_fn, *, continuous=False):
-    monkeypatch.setattr(
-        hr,
+    patch_routines(
+        monkeypatch,
         "get_routine",
         lambda name: SimpleNamespace(
             name="probe",
