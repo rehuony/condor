@@ -177,6 +177,13 @@ async def startup(application: TelegramApp) -> None:
 
     get_routine_store().set_bot(sender)
 
+    # A card outlives the scanner that published it. Its tracker belongs to
+    # the process, and handler/routine reloads must not recreate it.
+    if not LOCAL_MODE:
+        from condor.trade_cards import start_tracker
+
+        await start_tracker(sender)
+
     # Start ServerDataService (unified server-centric cache)
     from condor.server_data_service import get_server_data_service
     from condor.server_data_service import register_default_fetches as sds_register
@@ -327,6 +334,9 @@ async def teardown(application: TelegramApp) -> None:
     from condor.runtime import sessions as runtime_sessions
 
     get_scheduler().shutdown()
+    from condor.trade_cards import stop_tracker
+
+    await stop_tracker()
     await runtime_sessions.stop_health_monitor()
 
     # Stop all trading agents. Graceful stop, deliberately NOT the shutdown

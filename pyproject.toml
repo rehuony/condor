@@ -62,3 +62,5 @@ extend_skip_glob = ["agents/*/controllers/*"]
 # here rather than assumed present: without it the ingress scrubber degrades to
 # no recovery-phrase detection at all, silently.
 "condor.runtime" = ["bip39_english.txt"]
+# Explicit font files keep trade-card rendering independent of host fonts.
+"condor.trade_cards" = ["fonts/*.ttf", "fonts/*.otf", "fonts/*.txt", "fonts/*.md"]

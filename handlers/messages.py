@@ -90,6 +90,11 @@ def _text_form_handlers(user_data):
     extension registration where one exists, so opening a menu cannot capture
     the user's next question or image.
     """
+    if user_data.get("trade_card_amount_input"):
+        from handlers.trade_cards import trade_cards_message_handler
+
+        yield trade_cards_message_handler
+
     if user_data.get("cex_state") in _CEX_INPUT_STATES:
         from handlers.cex import cex_message_handler
 

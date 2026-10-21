@@ -24,9 +24,12 @@ SKIP_DIRS = {".git", ".venv", "node_modules", "worktrees", "__pycache__"}
 
 
 def _source_files():
-    """Every Python file in the working tree, excluding vendored/nested trees."""
+    """Maintained Python sources, excluding vendored trees and research snapshots."""
     for path in REPO.rglob("*.py"):
-        if SKIP_DIRS.isdisjoint(path.relative_to(REPO).parts):
+        relative = path.relative_to(REPO)
+        if relative.parts[:2] == (".condor", "research"):
+            continue
+        if SKIP_DIRS.isdisjoint(relative.parts):
             yield path
 
 

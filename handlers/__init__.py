@@ -52,6 +52,11 @@ def clear_all_input_states(context: Context) -> None:
     - Gateway wallet/pool/connector states
     """
     # CEX trading states
+    pending_trade_card = context.user_data.pop("trade_card_amount_input", None)
+    if pending_trade_card and context.user_data.get("_user_id"):
+        from condor.trade_cards.service import cancel_input_state
+
+        cancel_input_state(pending_trade_card, owner_id=context.user_data["_user_id"])
     context.user_data.pop("cex_state", None)
     context.user_data.pop("place_order_params", None)
     context.user_data.pop("current_positions", None)
@@ -234,7 +239,12 @@ async def cancel_command(update: Update, context: Context) -> None:
 
     @restricted
     async def _cancel(update: Update, context: Context) -> None:
+        from handlers.trade_cards import cancel_amount_input
+
+        cancelled_card_input = await cancel_amount_input(update, context)
         clear_all_input_states(context)
-        await update.message.answer("Cancelled.")
+        await update.message.answer(
+            "已取消自定义金额。" if cancelled_card_input else "Cancelled."
+        )
 
     await _cancel(update, context)

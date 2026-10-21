@@ -42,6 +42,7 @@ def register_handlers() -> None:
     from handlers.portfolio import portfolio_callback_handler, portfolio_command
     from handlers.routines import routines_callback_handler, routines_command
     from handlers.start import start_callback_handler, start_command
+    from handlers.trade_cards import trade_cards_callback_handler
     from handlers.trading import trade_command as unified_trade_command
     from handlers.trading.router import unified_trade_callback_handler
     from handlers.web import web_command
@@ -78,6 +79,7 @@ def register_handlers() -> None:
     routes.callback("^start:", start_callback_handler)
     # Unified trade BEFORE cex/dex (for connector switching)
     routes.callback("^trade:", unified_trade_callback_handler)
+    routes.callback("^tc:", trade_cards_callback_handler)
     routes.callback("^cex:", cex_callback_handler)
     routes.callback("^dex:", dex_callback_handler)
     routes.callback("^bots:", bots_callback_handler)
