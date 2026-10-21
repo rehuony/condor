@@ -67,7 +67,7 @@ def _resolve_agent_argument(arg: str) -> tuple[str, str, str]:
         shown = "\n".join(f"• {_label(a)} ({a.slug})" for a in rows[:_ARG_LIST_LIMIT])
         rest = len(rows) - _ARG_LIST_LIMIT
         if rest > 0:
-            shown += f"\n…and {rest} more — see /agent → Talk to."
+            shown += f"\n…and {rest} more — see /agent → Talk To."
         return shown
 
     keys = {

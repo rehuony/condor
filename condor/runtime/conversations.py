@@ -1265,6 +1265,7 @@ class Recorder:
                     status=str(event.field("status") or ""),
                     kind=str(event.field("kind") or ""),
                     input=_dict_or_none(event.field("input")),
+                    name=normalize_tool_title(event.field("name")),
                 ),
             )
             # The fold returns the entry only when it *created* one, so a
@@ -1285,6 +1286,7 @@ class Recorder:
                     title=normalize_tool_title(event.field("title")),
                     output=str(event.field("output") or ""),
                     input=_dict_or_none(event.field("input")),
+                    name=normalize_tool_title(event.field("name")),
                 ),
             )
         elif event.type == EventType.ERROR:
@@ -1337,6 +1339,7 @@ class Recorder:
         (``name``); a transcript has always said ``title``, and
         ``TurnEntry.tool_calls`` documents that spelling to every reader of a
         share. One rename, in one place, instead of a second fold.
+        A distinct canonical tool identity, when known, is stored as ``name``.
 
         ``output`` is defaulted to ``""`` rather than omitted so a call that
         never reported a result still lands on disk with the same key set as
@@ -1346,6 +1349,7 @@ class Recorder:
             {
                 "id": str(call.get("id") or ""),
                 "title": str(call.get("name") or ""),
+                **({"name": call["tool_name"]} if call.get("tool_name") else {}),
                 "status": str(call.get("status") or ""),
                 "kind": str(call.get("kind") or ""),
                 "input": _tool_input(call.get("input")),
@@ -1404,6 +1408,7 @@ class Recorder:
                             else "error"
                         ),
                         request_id=self.request_id,
+                        stop_reason=self._stop,
                     )
                 )
             # On the *last* entry written — the answer, else the error, else the

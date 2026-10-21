@@ -298,7 +298,7 @@ The Telegram bot (aiogram) and the dashboard (FastAPI) run in one process.
 
 ```
 condor/
-├── main.py              # Entry point: Telegram bot + web dashboard
+├── main.py              # Entry point, process wiring and startup/teardown
 ├── config_manager.py    # Servers, users and permissions in config.yml
 ├── handlers/            # Telegram commands and callbacks, one package per feature
 ├── condor/              # Core: agents, runtime, Telegram layer, web API, updates
@@ -312,6 +312,9 @@ condor/
 ├── docs/                # User, maintenance and design documentation
 └── tests/               # Backend tests
 ```
+
+Handler hot reload lives in `condor/reload.py`; dashboard server configuration lives
+in `condor/web/server.py`.
 
 ## Handler Features
 
@@ -407,6 +410,7 @@ the [maintenance guide](maintenance.md) for branches, validation and publication
 `make run-fg` for foreground debugging and `make test` for backend tests.
 
 A Telegram feature is a package under `handlers/` with its command, callback router and
-message handler; register its command and callback prefix in `main.register_handlers`.
+message handler; register its command and callback prefix in `handlers/routes.py`,
+and list the command in the menu in `handlers/commands.py`.
 Callback data uses `{module}:{action}:{params}`. Hummingbot API, Gateway and exchange
 services are managed as separate dependencies.

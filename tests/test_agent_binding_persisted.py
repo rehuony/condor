@@ -103,6 +103,15 @@ class _Context:
 
 class _Streamer:
     def __init__(self, **kw):
+        self.timing = kw["timing"]
+
+    def begin_preparation(self, label, cancel):
+        pass
+
+    def set_phase(self, label):
+        pass
+
+    def bind_input(self, **kwargs):
         pass
 
     def start_edit_loop(self):

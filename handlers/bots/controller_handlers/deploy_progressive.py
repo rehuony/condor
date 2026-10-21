@@ -373,7 +373,7 @@ def _build_deploy_progressive_message(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Skip (keep default)", callback_data="bots:deploy_skip_field"
+                    text="Skip (Keep Default)", callback_data="bots:deploy_skip_field"
                 )
             ]
         )

@@ -1,7 +1,7 @@
 """Tailscale `serve` integration for Condor's web dashboard.
 
-When ``USE_TAILSCALE=true``, ``main.py`` binds the dashboard to 127.0.0.1
-only (see ``_run_dual()``) instead of every interface, and calls
+When ``USE_TAILSCALE=true``, Condor binds the dashboard to 127.0.0.1
+only (see ``condor.web.server``) instead of every interface, and calls
 :func:`ensure_serve` here so the tailnet can still reach it — the same
 check-then-set pattern hummingbot-api's own ``Makefile`` already uses for
 its dev-mode Tailscale run (``tailscale serve status | grep ... || tailscale

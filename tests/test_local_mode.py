@@ -230,13 +230,13 @@ def test_is_tailnet_ip_matches_the_cgnat_range(addr, expected):
 
 def test_uvicorn_binds_the_resolved_host(monkeypatch):
     """CONTROL (b) is wired, not just computed: uvicorn gets WEB_HOST."""
-    import main
+    from condor.web import server
 
-    monkeypatch.setattr(main, "WEB_HOST", "127.0.0.1")
-    assert ipaddress.ip_address(main._web_server_config(object()).host).is_loopback
+    monkeypatch.setattr(server, "WEB_HOST", "127.0.0.1")
+    assert ipaddress.ip_address(server.web_server_config(object()).host).is_loopback
 
-    monkeypatch.setattr(main, "WEB_HOST", "0.0.0.0")
-    assert main._web_server_config(object()).host == "0.0.0.0"
+    monkeypatch.setattr(server, "WEB_HOST", "0.0.0.0")
+    assert server.web_server_config(object()).host == "0.0.0.0"
 
 
 # ── Local identity ──
@@ -509,7 +509,7 @@ def test_outbound_messages_go_to_the_bell_in_local_mode(monkeypatch):
         bot = object()
 
     monkeypatch.setattr(main, "LOCAL_MODE", True)
-    assert isinstance(main._outbound_bot(_App()), NotifyBot)
+    assert isinstance(main.outbound_bot(_App()), NotifyBot)
 
     monkeypatch.setattr(main, "LOCAL_MODE", False)
-    assert main._outbound_bot(_App()) is _App.bot
+    assert main.outbound_bot(_App()) is _App.bot

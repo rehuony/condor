@@ -20,7 +20,6 @@ from aiogram.types import (
     CallbackQuery,
     Chat,
     Message,
-    MessageGenerationStopped,
     Update,
     User,
 )
@@ -32,27 +31,24 @@ if TYPE_CHECKING:
 class TgUpdate:
     """One inbound update with the message or callback query it carries."""
 
-    __slots__ = ("raw", "message", "callback_query", "stopped_message_generation")
+    __slots__ = ("raw", "message", "callback_query")
 
     def __init__(
         self,
         *,
         message: Message | None = None,
         callback_query: CallbackQuery | None = None,
-        stopped_message_generation: MessageGenerationStopped | None = None,
         raw: Update | None = None,
     ) -> None:
         self.raw = raw
         self.message = message
         self.callback_query = callback_query
-        self.stopped_message_generation = stopped_message_generation
 
     @classmethod
     def from_aiogram(cls, update: Update) -> "TgUpdate":
         return cls(
             message=update.message,
             callback_query=update.callback_query,
-            stopped_message_generation=update.stopped_message_generation,
             raw=update,
         )
 
@@ -82,8 +78,6 @@ class TgUpdate:
         message = self.effective_message
         if message is not None:
             return message.chat
-        if self.stopped_message_generation is not None:
-            return self.stopped_message_generation.chat
         return None
 
     def with_text(self, text: str) -> "TgUpdate":
@@ -102,7 +96,7 @@ class TgUpdate:
         kind = (
             "message"
             if self.message
-            else "callback_query" if self.callback_query else "stopped"
+            else "callback_query" if self.callback_query else "empty"
         )
         return f"TgUpdate({kind}, id={self.update_id})"
 

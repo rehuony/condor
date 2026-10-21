@@ -37,6 +37,7 @@ def _update():
 def _context(**user_data):
     """A bot that records what it sent, plus empty user/chat data."""
     sent: list = []
+    edited: list[str] = []
 
     async def send_message(chat_id, text, **kwargs):
         sent.append(SimpleNamespace(text=text, markup=kwargs.get("reply_markup")))
@@ -49,18 +50,26 @@ def _context(**user_data):
         sent.append(SimpleNamespace(text=text, markup=kwargs.get("reply_markup")))
         return SimpleNamespace(message_id=100 + len(sent))
 
-    async def send_rich_message_draft(**kwargs):
+    async def edit_message_text(**kwargs):
+        text = getattr(kwargs.get("rich_message"), "markdown", None) or kwargs.get(
+            "text", ""
+        )
+        edited.append(text)
+        message = sent[kwargs["message_id"] - 101]
+        message.text = text
+        message.markup = kwargs.get("reply_markup")
         return True
 
     return SimpleNamespace(
         bot=SimpleNamespace(
             send_message=send_message,
             send_rich_message=send_rich_message,
-            send_rich_message_draft=send_rich_message_draft,
+            edit_message_text=edit_message_text,
         ),
         user_data=dict(user_data),
         chat_data={},
         sent=sent,
+        edited=edited,
     )
 
 
@@ -267,7 +276,7 @@ def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
         requests.append(request)
         yield RuntimeEvent(type=EventType.ACCEPTED)
         yield RuntimeEvent(type=EventType.TEXT, data={"text": answer})
-        # Pin both silent progress and the permanent final-message surfaces.
+        # Observe a body edit before the terminal edit settles the same message.
         await asyncio.wait_for(progress_seen.wait(), timeout=1)
         yield RuntimeEvent.done("end_turn")
 
@@ -275,26 +284,23 @@ def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
 
     update = _voice_update()
     context = _context()
-    edited = []
-    drafts = []
-    deleted_statuses = []
+    edit = context.bot.edit_message_text
+    progress = []
 
-    async def send_rich_message_draft(**kwargs):
-        drafts.append(getattr(kwargs.get("rich_message"), "markdown", ""))
-        progress_seen.set()
-        return True
+    async def edit_message_text(**kwargs):
+        text = getattr(kwargs.get("rich_message"), "markdown", None) or kwargs.get(
+            "text", ""
+        )
+        if kwargs.get("reply_markup") is not None and answer in text:
+            progress.append(text)
+            progress_seen.set()
+        return await edit(**kwargs)
 
-    async def delete_message(**kwargs):
-        deleted_statuses.append(kwargs["message_id"])
-        return True
-
-    context.bot.send_rich_message_draft = send_rich_message_draft
-    context.bot.delete_message = delete_message
+    context.bot.edit_message_text = edit_message_text
     asyncio.run(agents.agent_message_handler(update, context))
     return SimpleNamespace(
-        edited=edited,
-        drafts=drafts,
-        deleted_statuses=deleted_statuses,
+        edited=context.edited,
+        progress=progress,
         context=context,
         requests=requests,
         update=update,
@@ -303,16 +309,13 @@ def _run_streamed_answer(monkeypatch, spoken, answer="All set."):
 
 def test_a_spoken_phrase_is_redacted_before_it_is_shown(monkeypatch):
     out = _run_streamed_answer(monkeypatch, SEED)
-    assert out.drafts, "progress uses a native rich-message draft"
-    assert "[redacted: mnemonic]" in out.context.sent[-1].text
+    assert out.progress, "the response body is visible before finalization"
+    assert "[redacted: mnemonic]" in out.edited[-1]
     displayed = (
-        out.drafts
-        + out.edited
-        + out.update.replies
-        + [message.text for message in out.context.sent]
+        out.edited + out.update.replies + [message.text for message in out.context.sent]
     )
     assert not any("sausage" in text for text in displayed)
-    assert out.deleted_statuses == [99]
+    assert not out.update.replies, "attachments share the reply receipt"
     assert "_voice_transcription" not in out.context.chat_data
     assert "_voice_placeholder" not in out.context.chat_data
 
@@ -323,15 +326,14 @@ def test_the_raw_transcript_still_reaches_detection_and_the_funnel(monkeypatch):
     # Detection sees the original phrase and deletes the message carrying it.
     # The runtime funnel owns redaction before forwarding text to the model.
     assert out.update.deleted == [True]
-    assert out.context.sent and "/gateway" in out.context.sent[0].text
+    assert any("/gateway" in message.text for message in out.context.sent)
 
 
 def test_an_ordinary_transcription_stays_at_the_head_of_the_answer(monkeypatch):
     out = _run_streamed_answer(monkeypatch, "how is SOL-USDC doing?")
-    for text in (out.context.sent[-1].text,):
+    for text in (*out.progress, out.edited[-1]):
         assert text.startswith("🎙 how is SOL-USDC doing?")
         assert "All set." in text
         assert "redacted" not in text
-    assert out.drafts[-1] == "All set."
-    assert out.deleted_statuses == [99]
+    assert not out.update.replies, "attachments share the reply receipt"
     assert not out.update.deleted

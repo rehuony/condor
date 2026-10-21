@@ -1,65 +1,56 @@
-"""Draft updates share one draft_id; parse failures still deliver a final."""
+"""Ordinary message progress and final formatting reuse acknowledged messages."""
+
+import asyncio
 
 import pytest
 
 from condor.runtime.events import RuntimeEvent
 from condor.telegram.errors import bad_request
-from condor.telegram.output.renderer import RICH_MAX_LEN, TelegramStreamer
-from tests.support.telegram import Bot, feed
+from condor.telegram.output.renderer import TelegramStreamer
+from tests.support.telegram import Bot, feed, message_text
 
 
 @pytest.mark.asyncio
-async def test_progress_reuses_one_draft_id():
+async def test_progress_and_final_reuse_one_message():
     bot = Bot()
     target = TelegramStreamer(bot, 42, request_id="r")
     await feed(target, "hello")
-    await target._flush()
+    await target._deliver(False)
     await feed(target, " world")
-    await target._flush()
-    assert {c["draft_id"] for c in bot.drafts} == {target.draft_id}
-    assert bot.drafts[-1]["text"] == "hello world"
-    await target.stop_edit_loop()
+    await target._deliver(False)
+    assert len(bot.messages) == 1
+    assert bot.edits[-1]["text"].startswith("hello world\n\n")
+    assert all(call["message_id"] == 101 for call in bot.edits)
+    await target.process_event(RuntimeEvent.done())
+    first, second = await asyncio.gather(target.finalize(), target.finalize())
+    assert first is second and first.status == "complete"
+    assert first.message_ids == [101]
+    assert len(bot.messages) == 1
+    assert message_text(bot.edits[-1]) == "hello world"
+    assert bot.edits[-1]["reply_markup"] is None
 
 
 @pytest.mark.asyncio
-async def test_native_stop_flags_disable_further_drafts():
+async def test_parse_failure_falls_back_in_place_without_replaying_body():
     bot = Bot()
-    target = TelegramStreamer(bot, 42, request_id="r")
-    await feed(target, "partial")
-    await target._flush()
-    target.target.stopped = True
-    await feed(target, " more")
-    await target._flush()
-    assert len(bot.drafts) == 1
-    await target.stop_edit_loop()
+    original = bot.edit_message_text
+    attempts = []
 
+    async def edit(**kwargs):
+        attempts.append(kwargs)
+        if kwargs.get("rich_message") is not None:
+            raise bad_request("can't parse entities")
+        return await original(**kwargs)
 
-@pytest.mark.asyncio
-async def test_parse_failure_falls_back_to_plain_final():
-    bot = Bot()
-    original = bot.send_rich_message
-
-    async def send_rich(**kw):
-        raise bad_request("can't parse entities")
-
-    bot.send_rich_message = send_rich
     target = TelegramStreamer(bot, 42)
-    await feed(target, "plain enough")
+    await feed(target, "Answer **ready**")
+    await target._deliver(False)
+    bot.edit_message_text = edit
     await target.process_event(RuntimeEvent.done())
     result = await target.finalize()
     assert result.status == "complete"
-    assert bot.messages[-1]["text"] == "plain enough"
-    assert "rich_message" not in bot.messages[-1]
-
-
-@pytest.mark.asyncio
-async def test_overlong_final_is_split():
-    bot = Bot()
-    target = TelegramStreamer(bot, 42)
-    await feed(target, "x" * (RICH_MAX_LEN + 50))
-    await target.process_event(RuntimeEvent.done())
-    result = await target.finalize()
-    assert result.status == "complete"
-    assert result.confirmed == 2
-    assert bot.messages[0].get("disable_notification") is False
-    assert bot.messages[1].get("disable_notification") is True
+    assert len(bot.messages) == 1
+    assert len(attempts) == 2
+    assert {call["message_id"] for call in attempts} == {101}
+    assert bot.edits[-1]["text"] == "Answer **ready**"
+    assert bot.edits[-1]["parse_mode"] is None

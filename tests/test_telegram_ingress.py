@@ -1,6 +1,7 @@
 """Telegram intake preserves ordering while keeping stop and streaming concurrent."""
 
 import asyncio
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -17,8 +18,18 @@ def update(message_id, *, chat_id=7, album=None):
     )
 
 
+@asynccontextmanager
+async def receive(ingress, message):
+    ticket = ingress.reserve(message)
+    if ticket is None:
+        yield None
+    else:
+        async with ingress.admit(ticket) as admission:
+            yield admission
+
+
 async def accepted(ingress, message):
-    async with ingress.receive(message) as admission:
+    async with receive(ingress, message) as admission:
         if admission:
             admission.accepted = True
             admission.release()
@@ -48,7 +59,7 @@ async def test_text_waits_for_earlier_image_preparation_but_not_its_model_respon
     text_prepared = asyncio.Event()
 
     async def image():
-        async with ingress.receive(update(1, album="photos")) as admission:
+        async with receive(ingress, update(1, album="photos")) as admission:
             prepared.set()
             await release.wait()
             admission.accepted = True
@@ -56,7 +67,7 @@ async def test_text_waits_for_earlier_image_preparation_but_not_its_model_respon
             await finish.wait()
 
     async def text():
-        async with ingress.receive(update(2)) as admission:
+        async with receive(ingress, update(2)) as admission:
             text_prepared.set()
             admission.accepted = True
             admission.release()
@@ -76,7 +87,7 @@ async def test_text_waits_for_earlier_image_preparation_but_not_its_model_respon
 @pytest.mark.asyncio
 async def test_other_chat_can_prepare_while_first_chat_waits():
     ingress = TelegramIngress()
-    async with ingress.receive(update(1)):
+    async with receive(ingress, update(1)):
         result = await asyncio.wait_for(accepted(ingress, update(1, chat_id=8)), 1)
         assert result.request_id == "telegram:8:1"
 
@@ -84,7 +95,7 @@ async def test_other_chat_can_prepare_while_first_chat_waits():
 @pytest.mark.asyncio
 async def test_duplicates_are_suppressed_during_preparation_and_after_acceptance():
     ingress = TelegramIngress()
-    async with ingress.receive(update(1)) as admission:
+    async with receive(ingress, update(1)) as admission:
         assert await accepted(ingress, update(1)) is None
         admission.accepted = True
         admission.release()
@@ -95,7 +106,7 @@ async def test_duplicates_are_suppressed_during_preparation_and_after_acceptance
 @pytest.mark.asyncio
 async def test_releasing_a_failed_turn_does_not_prevent_retry():
     ingress = TelegramIngress()
-    async with ingress.receive(update(1)) as admission:
+    async with receive(ingress, update(1)) as admission:
         admission.release()
         assert not admission.accepted
     assert await accepted(ingress, update(1)) is not None
@@ -104,13 +115,13 @@ async def test_releasing_a_failed_turn_does_not_prevent_retry():
 @pytest.mark.asyncio
 async def test_admission_limits_count_turns_and_ignore_duplicate_members():
     ingress = TelegramIngress(per_chat_limit=1, global_limit=2)
-    async with ingress.receive(update(1)) as first:
+    async with receive(ingress, update(1)) as first:
         first.release()
         assert await accepted(ingress, update(1)) is None
         with pytest.raises(InputError) as error:
             await accepted(ingress, update(2))
         assert error.value.code == "busy"
-        async with ingress.receive(update(1, chat_id=8)) as second:
+        async with receive(ingress, update(1, chat_id=8)) as second:
             second.release()
             with pytest.raises(InputError) as error:
                 await accepted(ingress, update(1, chat_id=9))
@@ -121,7 +132,7 @@ async def test_admission_limits_count_turns_and_ignore_duplicate_members():
 @pytest.mark.asyncio
 async def test_late_album_member_is_rejected_before_and_after_owner_finishes():
     ingress = TelegramIngress(album_quiet=0)
-    async with ingress.receive(update(1, album="photos")) as admission:
+    async with receive(ingress, update(1, album="photos")) as admission:
         admission.accepted = True
         admission.release()
         assert await accepted(ingress, update(1, album="photos")) is None
@@ -137,7 +148,7 @@ async def test_late_album_member_is_rejected_before_and_after_owner_finishes():
 @pytest.mark.asyncio
 async def test_failed_sealed_album_requires_a_new_album_instead_of_partial_retry():
     ingress = TelegramIngress(album_quiet=0)
-    async with ingress.receive(update(1, album="photos")):
+    async with receive(ingress, update(1, album="photos")):
         pass
     for message_id in (1, 2):
         with pytest.raises(InputError) as error:
@@ -180,14 +191,14 @@ async def test_stop_cancels_preparation_and_waiters_but_keeps_accepted_owner():
     finish = asyncio.Event()
 
     async def stream():
-        async with ingress.receive(update(1)) as admission:
+        async with receive(ingress, update(1)) as admission:
             admission.accepted = True
             admission.release()
             streaming.set()
             await finish.wait()
 
     async def prepare():
-        async with ingress.receive(update(2)):
+        async with receive(ingress, update(2)):
             preparing.set()
             await asyncio.Event().wait()
 
@@ -211,9 +222,45 @@ async def test_stop_cancels_preparation_and_waiters_but_keeps_accepted_owner():
 
 
 @pytest.mark.asyncio
+async def test_repeated_stop_does_not_interrupt_preparation_cleanup():
+    ingress = TelegramIngress()
+    preparing = asyncio.Event()
+    cleaning = asyncio.Event()
+    release = asyncio.Event()
+    cleaned = asyncio.Event()
+
+    async def prepare():
+        async with receive(ingress, update(1)):
+            try:
+                preparing.set()
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+                cleaned.set()
+
+    task = asyncio.create_task(prepare())
+    try:
+        await asyncio.wait_for(preparing.wait(), 1)
+        assert ingress.cancel(7)
+        await asyncio.wait_for(cleaning.wait(), 1)
+        assert ingress.cancel(7)
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 1)
+        assert cleaned.is_set()
+        assert not ingress._pending and not ingress._locks
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_cancelling_waiter_does_not_unlock_another_preparation():
     ingress = TelegramIngress()
-    async with ingress.receive(update(1)):
+    async with receive(ingress, update(1)):
         waiter = asyncio.create_task(accepted(ingress, update(2)))
         await asyncio.sleep(0)
         waiter.cancel()
@@ -279,3 +326,39 @@ async def test_cancelled_album_does_not_restart_from_a_delayed_member():
         await accepted(ingress, update(2, album="photos"))
     assert error.value.code == "late_album"
     assert await accepted(ingress, update(3)) is not None
+
+
+@pytest.mark.asyncio
+async def test_synchronous_tickets_reserve_fifo_before_either_caller_waits():
+    ingress = TelegramIngress()
+    first = ingress.reserve(update(1))
+    second = ingress.reserve(update(2))
+    assert first.request_id == "telegram:7:1"
+    assert second.waiting
+    assert ingress.reserve(update(2)) is None
+    order = []
+
+    async def prepare(ticket):
+        async with ingress.admit(ticket):
+            order.append(ticket.request_id)
+
+    # A later request reaches admission first after presenting its own receipt.
+    second_task = asyncio.create_task(prepare(second))
+    await asyncio.sleep(0)
+    assert not order
+    await prepare(first)
+    await second_task
+    assert order == [first.request_id, second.request_id]
+    assert not ingress._pending and not ingress._locks
+
+
+@pytest.mark.asyncio
+async def test_ticket_can_be_released_before_admission_without_leaking_a_lock():
+    ingress = TelegramIngress()
+    first = ingress.reserve(update(1))
+    second = ingress.reserve(update(2))
+    await asyncio.sleep(0)
+    ingress.release(first)
+    async with ingress.admit(second) as admission:
+        assert admission.request_id == "telegram:7:2"
+    assert not ingress._pending and not ingress._locks

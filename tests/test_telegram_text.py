@@ -14,9 +14,9 @@ from condor.telegram.format import (
     plain_text,
     render_html,
     render_markdown,
+    render_rich_reply,
     split_text,
 )
-from condor.telegram.output.runs import RunTarget, register_run
 from condor.telegram.transport import send_markdown, send_text
 
 
@@ -98,6 +98,124 @@ def test_code_and_literal_symbols_are_not_reinterpreted_as_markup():
     assert "**literal** _value_ <script> & 中文" in pages[0].text
     assert "&lt;script&gt; &amp;" in pages[0].html
     assert "文件 (/tmp/report.md)" in pages[0].text
+
+
+def test_rich_reply_normalizes_mixed_mobile_layout_without_losing_links():
+    source = (
+        "# Result\n\n1. Parent\n    - Child A\n    - Child B\n2. Next\n\n"
+        "| Coin | Source |\n|---|---|\n| **BTC** | [Report](https://example.com) |"
+    )
+    html = render_rich_reply(source)
+    assert html is not None
+    assert html.startswith(
+        "<b>Result</b><br/><br/>1. Parent<br/>\N{NO-BREAK SPACE}\N{NO-BREAK SPACE}• Child A"
+        "<br/>\N{NO-BREAK SPACE}\N{NO-BREAK SPACE}• Child B<br/>2. Next"
+    )
+    assert "Coin: <b>BTC</b><br/>Source: " in html
+    assert '<a href="https://example.com">Report</a>' in html
+    assert "<table" not in html and "<h1" not in html
+    assert render_markdown("- A\n- B")[0].text == "• A\n• B"
+
+
+def test_rich_reply_keeps_inline_native_styles_outside_literal_or_escaped_content():
+    source = (
+        "~~removed~~ ||**hidden**|| ==marked==\n\n"
+        r"\~\~literal\~\~ \|\|literal\|\| \=\=literal\=\="
+        "\n\n`~~code~~ ||code|| ==code==`\n\n"
+        "```text\n~~block~~ ||block|| ==block==\n```"
+    )
+    html = render_rich_reply(source)
+    soup = BeautifulSoup(html, "html.parser")
+    assert soup.s.get_text() == "removed"
+    assert soup.find("tg-spoiler").b.get_text() == "hidden"
+    assert soup.mark.get_text() == "marked"
+    assert "~~literal~~ ||literal|| ==literal==" in plain_text(html)
+    assert [node.get_text() for node in soup.find_all("code")] == [
+        "~~code~~ ||code|| ==code==",
+        "~~block~~ ||block|| ==block==\n",
+    ]
+    assert render_markdown("~~removed~~ ||secret|| ==marked==")[0].html == (
+        "~~removed~~ ||secret|| ==marked=="
+    )
+
+
+def test_rich_html_inline_tags_and_explicit_math_survive_without_changing_legacy_html():
+    source = r"<mark>hi</mark> <sub>i</sub> <sup>2</sup> <tg-math>x_i + y_j + \frac{a}{b}</tg-math>"
+    assert render_rich_reply(source) == source
+    assert render_html(source)[0].html == r"hi i 2 x_i + y_j + \frac{a}{b}"
+    assert render_rich_reply("`<tg-math>x_i</tg-math>`") == (
+        "<code>&lt;tg-math&gt;x_i&lt;/tg-math&gt;</code>"
+    )
+
+
+def test_plain_text_preserves_structural_breaks_and_link_destinations():
+    assert plain_text(
+        'First<br/><br/>Second<br><a href="https://example.com">Source</a>'
+    ) == ("First\n\nSecond\nSource (https://example.com)")
+
+
+@pytest.mark.parametrize("language,label", [("text", "Text"), ("python", "Python")])
+def test_rich_reply_collapses_long_literal_blocks_without_reinterpreting_content(
+    language, label
+):
+    literal = "  **literal** _value_ <script> & 中文😀 https://example.com\n" * 13
+    html = render_rich_reply(f"Before\n\n```{language}\n{literal}```\n\nAfter")
+    assert html is not None
+    soup = BeautifulSoup(html, "html.parser")
+    details = soup.find("details")
+    assert details is not None and not details.has_attr("open")
+    assert details.summary.get_text() == f"{label} · 13 lines"
+    assert details.pre.get_text() == literal
+    assert not details.pre.find("a") and not details.pre.find("b")
+    assert "Before" in soup.get_text() and "After" in soup.get_text()
+    # Notification/legacy HTML keeps its existing full-code presentation.
+    assert "<details" not in render_markdown(f"```{language}\n{literal}```")[0].html
+
+
+@pytest.mark.parametrize("language", ["text", "txt", "plain", "plaintext"])
+def test_plain_code_labels_are_omitted_and_short_real_code_keeps_its_language(language):
+    html = render_rich_reply(f"```{language}\n  <literal> & 😀\n```")
+    soup = BeautifulSoup(html, "html.parser")
+    assert soup.pre.get_text() == "  <literal> & 😀\n"
+    assert not soup.code.has_attr("class") and soup.find("details") is None
+    python = render_rich_reply("```python\nprint('ok')\n```")
+    assert '<code class="language-python">' in python and "<details" not in python
+
+
+def test_rich_reply_disclosure_counts_utf16_and_sanitizes_language_labels():
+    literal = "😀" * 451 + "\n"
+    html = render_rich_reply("```\n" + literal + "```")
+    soup = BeautifulSoup(html, "html.parser")
+    assert soup.summary.get_text() == "Text · 1 line"
+    assert soup.pre.get_text() == literal
+    unsafe = (
+        '<pre><code class="language-private/label">' + "line\n" * 13 + "</code></pre>"
+    )
+    safe = BeautifulSoup(render_rich_reply(unsafe), "html.parser")
+    assert safe.summary.get_text() == "Text · 13 lines"
+    assert not safe.code.has_attr("class")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "",
+        "<!-- no visible content -->",
+        "x" * (MAX_MESSAGE_LEN + 1),
+        "| Long header name repeated | Value |\n|---|---|\n" + "|x|y|\n" * 200,
+        "[Source](https://example.com/" + "x" * RICH_MAX_LEN + ")",
+    ],
+)
+def test_rich_reply_rejects_empty_or_expanded_output_that_would_need_new_pages(source):
+    assert render_rich_reply(source) is None
+
+
+def test_rich_reply_parser_failure_returns_control_to_literal_delivery(monkeypatch):
+    def fail(*args, **kwargs):
+        raise ValueError("Malformed input")
+
+    monkeypatch.setattr("condor.telegram.format.render_markdown", fail)
+    assert render_rich_reply("original **source**") is None
 
 
 def test_a_malformed_link_cannot_prevent_delivery_of_the_answer():
@@ -274,26 +392,15 @@ def test_markdown_v2_is_passed_through_without_rewriting_escapes():
 
 def test_markdown_uses_a_rich_message_and_keeps_tables():
     delivered = []
-    nudged = []
 
     async def send_rich(**kwargs):
         delivered.append(kwargs["rich_message"].markdown)
         return SimpleNamespace(message_id=len(delivered))
 
-    register_run(
-        RunTarget(
-            chat_id=42,
-            user_id=1,
-            conversation_id="c",
-            request_id="r",
-            nudge=lambda: nudged.append(1),
-        )
-    )
     source = "| 币种 | 风险 |\n| --- | --- |\n| **ABC** | [解锁](https://example.com/unlock) |"
     asyncio.run(send_markdown(SimpleNamespace(send_rich_message=send_rich), 42, source))
     assert delivered == [source]
     assert "|" in delivered[0]
-    assert nudged == [1]
 
 
 def test_rich_markdown_splits_at_the_native_limit():

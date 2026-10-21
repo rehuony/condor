@@ -61,8 +61,9 @@ sending them.
 - Telegram message IDs and album IDs identify turns. In-flight and recent
   duplicates are suppressed; retained conversation history prevents accepted
   turns from running again after restart, including in a different selected chat.
-- `/stop` cancels unaccepted preparation for that chat and interrupts the active
-  answer. Already accepted queued turns retain the existing runtime semantics.
+- `/stop` and inline **Stop and Clear Queue** cancel preparation, accepted queued
+  requests and running Telegram replies registered in that chat when Stop arrives.
+  New inputs received afterwards remain eligible to run.
   Native image/audio work that has already started finishes under its resource
   limit; cancellation does not release its worker capacity early.
 - A plain `-`, including in a rich formatted paragraph, resets the conversation
@@ -80,15 +81,18 @@ sending them.
 
 ## Agent replies
 
-Replies stream as a native rich-message draft (composer stop in the bottom
-right) and finish as a new rich message. Raw reasoning and tool logs are
-hidden. Voice transcripts remain in the final answer, including partial or
-failed responses.
+Replies begin with a nonempty ordinary message before model startup or attachment
+preparation. Literal body text accumulates in that message; status appears on its
+last line. Long answers keep earlier segments and continue in a new one, with a
+3500 UTF-16-unit body budget per segment. Completed segments lose their status and
+Stop button. At completion, safe Markdown is formatted in place without changing
+segment boundaries. Cross-segment code and tables remain literal. Raw reasoning
+and tool logs are hidden. Sanitized voice transcripts remain in the answer,
+including partial or failed responses.
 
-`/stop` and the native composer stop end generation and preserve the
-conversation; they do not undo completed actions or stop trading. Unknown
-final delivery is not blindly retried; the saved conversation remains available
-in the dashboard.
+Stop preserves the conversation and partial answer. It does not undo completed
+actions or stop trading. Unknown new-message delivery is not blindly retried;
+the saved conversation remains available in the dashboard.
 
 See [Telegram agent reply delivery](telegram-reply-delivery.md) for request
 ownership, notification behavior, delivery guarantees and verification.
@@ -103,9 +107,10 @@ creates the existing `PromptRequest` and consumes runtime events for delivery.
 model capability checks, and history.
 
 Tasks, locks, binary payloads, and HTTP clients stay outside Telegram persistence
-and outside reloadable handler modules. Shutdown closes admission before the
-aiogram dispatcher drains queued updates, cancels handler work, and drains actual decoder/transcriber
-workers. Closed services cannot be lazily reopened by a late update.
+and outside reloadable handler modules. Shutdown stops polling and admission,
+cancels handler work, and drains actual decoder/transcriber workers. Execution,
+approvals and output workers are cleaned up before the bot transport closes.
+Closed services cannot be lazily reopened by a late update.
 
 Restart Condor when changing handler registration or startup/shutdown lifecycle.
 

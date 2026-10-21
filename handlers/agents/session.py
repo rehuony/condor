@@ -117,7 +117,7 @@ async def _handle_start(
 
     "New session" means a new conversation, not a new interlocutor: a chat bound
     to a specialist restarts as that specialist, but with an empty transcript.
-    Use "Talk to → Condor" to go back to the coordinator.
+    Use "Talk To → Condor" to go back to the coordinator.
     """
     query = update.callback_query
     message = query.message if query else update.message
@@ -157,7 +157,7 @@ async def _handle_start(
         await _create_tg_session(
             chat_id=chat_id,
             # A bound Agent's own configured model wins, exactly as it does when
-            # the binding is first made in the "Talk to" picker.
+            # the binding is first made in the "Talk To" picker.
             agent_key="" if agent else agent_key,
             user_id=user_id,
             permission_callback=_perm_cb,
@@ -187,7 +187,7 @@ async def _handle_new_session(update: Update, context: Context) -> None:
     await _handle_start(update, context)
 
 
-async def _ensure_chat_session(update, context) -> SessionInfo | None:
+async def _ensure_chat_session(update, context, *, on_error=None) -> SessionInfo | None:
     """Reuse or restore this chat's selected conversation and model."""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
@@ -218,7 +218,14 @@ async def _ensure_chat_session(update, context) -> SessionInfo | None:
         # CLI has to be there.
         probe_key = (agent.agent_key or agent_key) if agent else agent_key
         if not _is_agent_available(probe_key):
-            await _report_agent_unavailable(update, probe_key)
+            if on_error is not None:
+                await on_error(
+                    f"The AI backend for {probe_key} is not available on this server. "
+                    "Choose another model with /agent, or install its command-line backend "
+                    "and retry after a minute."
+                )
+            else:
+                await _report_agent_unavailable(update, probe_key)
             return None
 
         try:
@@ -244,12 +251,13 @@ async def _ensure_chat_session(update, context) -> SessionInfo | None:
             log.warning(
                 "Failed to create agent session error_type=%s", type(exc).__name__
             )
-            await _try_telegram_message(
-                update,
-                "session_start",
-                update.message.answer,
-                text="Could not start the agent. Please try again or choose another model with /agent.",
-            )
+            text = "Could not start the agent. Please try again or choose another model with /agent."
+            if on_error is not None:
+                await on_error(text)
+            else:
+                await _try_telegram_message(
+                    update, "session_start", update.message.answer, text=text
+                )
             return None
 
     return session

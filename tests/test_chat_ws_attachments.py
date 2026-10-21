@@ -1,7 +1,7 @@
 """What the dashboard's send frame does with a picture (FEAT-098).
 
 The frame carries **ids**, never bytes. That is the whole reason this file
-exists: uvicorn runs without ``ws_max_size`` (``main.py``), so the websockets
+exists: uvicorn runs without ``ws_max_size`` (``condor/web/server.py``), so the websockets
 default of 16 MiB applies and an oversize frame *closes the socket* rather than
 failing the message — one pasted screenshot would drop the user's chat
 connection mid-answer with no error naming a cause. The bytes go over HTTP, to

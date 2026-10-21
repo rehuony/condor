@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from contextlib import aclosing
 
 import condor.runtime.client as runtime
@@ -11,6 +12,7 @@ from condor.runtime import (
     secrets,
 )
 from condor.runtime.events import RuntimeEvent
+from condor.telegram.output.timing import ReplyTiming
 from condor.telegram.types import (
     Context,
     Update,
@@ -37,7 +39,7 @@ log = logging.getLogger(__name__)
 # Flags that make the next plain message mean something other than "talk to the
 # agent". Tapping any button is a fresh intent, so they are all disarmed before
 # the callback router dispatches: otherwise walking away from a prompt (e.g.
-# "Enter model manually", then picking a different LLM) leaves the flag set and
+# "Enter Model Manually", then picking a different LLM) leaves the flag set and
 # the user's next task is parsed as a model slug / URL / compact instruction.
 # Handlers that genuinely want an armed mode set their own flag after this runs.
 _ARMED_TEXT_INPUT_KEYS = (
@@ -114,27 +116,133 @@ async def agent_message_handler(update: Update, context: Context) -> None:
     runtime owns durable deduplication, the conversation queue and model work.
     No media payload, download task or voice hand-off enters the user-state store.
     """
+    from condor.runtime import conversations
     from condor.telegram.ingress import get_ingress
-    from condor.telegram.input import InputError
+    from condor.telegram.input import (
+        InputError,
+        input_has_attachments,
+        message_text,
+        rich_message_payload,
+    )
     from config_manager import UserRole, get_config_manager
 
     if not update.message or update.effective_chat.type != "private":
         return
-    role = get_config_manager().get_user_role(update.effective_user.id)
-    if role not in (UserRole.ADMIN, UserRole.USER):
+    user_id = update.effective_user.id
+    if get_config_manager().get_user_role(user_id) not in (
+        UserRole.ADMIN,
+        UserRole.USER,
+    ):
         return
+    ingress = get_ingress()
+    received_at = time.monotonic()
+    ticket = None
+    streamer = None
+    timing = None
     try:
-        async with get_ingress().receive(update) as admission:
-            if admission is not None:
-                await _process_agent_input(update, context, admission)
+        # Explicit controls do not create a conversation turn or progress receipt.
+        own_text = ""
+        if update.message.text or rich_message_payload(update.message):
+            try:
+                own_text = message_text(update.message)
+            except InputError:
+                pass  # The ordinary input path reports malformed rich content.
+        armed = any(context.user_data.get(key) for key in _ARMED_TEXT_INPUT_KEYS)
+        if armed and input_has_attachments(update.message):
+            raise InputError(
+                "text_expected",
+                "Please send text for the current input, or use /cancel before sending attachments.",
+            )
+        is_control = bool(own_text and (own_text.strip() == "-" or armed))
+        ticket = ingress.reserve(update)
+        if ticket is None:
+            return
+        timing = ReplyTiming(ticket.request_id, received_at)
+        timing.mark("received")
+        # Durable acceptance survives restart, unlike the ingress tombstones.
+        timing.mark("dedupe_start")
+        duplicate = conversations.has_request(user_id, ticket.request_id)
+        timing.mark("dedupe_end")
+        if duplicate:
+            timing.mark("duplicate")
+            ticket.accepted = True
+            return
+
+        def begin_reply():
+            reply = TelegramStreamer(
+                bot=context.bot,
+                chat_id=update.effective_chat.id,
+                user_id=user_id,
+                request_id=ticket.request_id,
+                input_message_id=update.message.message_id,
+                timing=timing,
+            )
+            owner = asyncio.current_task()
+            assert owner is not None
+            reply.begin_preparation(
+                (
+                    "Waiting for earlier messages…"
+                    if ticket.waiting
+                    else "Preparing your message…"
+                ),
+                owner.cancel,
+            )
+            return reply
+
+        if not is_control:
+            streamer = begin_reply()
+        async with ingress.admit(ticket) as admission:
+            timing.mark("preparation_admitted")
+            if is_control:
+                await _notice_input_secrets(update, context, own_text)
+                if await _consume_agent_text_input(update, context, own_text):
+                    admission.accepted = True
+                    return
+                # A menu callback may disarm a typed form while admission waits.
+                streamer = begin_reply()
+            streamer.set_phase("Preparing your message…")
+            await _process_agent_input(update, context, admission, streamer)
     except InputError as exc:
         log.warning("Telegram input rejected code=%s", exc.code)
-        await _try_telegram_message(
-            update, "input_error", update.message.answer, text=exc.user_message
+        if streamer is not None:
+            await streamer.process_event(
+                RuntimeEvent(
+                    type=EventType.ERROR,
+                    data={"code": "telegram_input", "message": exc.user_message},
+                )
+            )
+            await streamer.process_event(RuntimeEvent.done("error"))
+            await streamer.finalize()
+        else:
+            await _try_telegram_message(
+                update, "input_error", update.message.answer, text=exc.user_message
+            )
+    except asyncio.CancelledError:
+        # Shutdown must not wait for Telegram's delivery cooldown. The finally
+        # closes delivery workers after runtime and attachment cleanup settle.
+        if streamer is not None and not ingress.closed:
+            await streamer.process_event(RuntimeEvent.done("cancelled"))
+            await streamer.finalize()
+        raise
+    except Exception as exc:
+        if streamer is None:
+            raise
+        log.warning("Telegram input failed error_type=%s", type(exc).__name__)
+        await streamer.process_event(
+            RuntimeEvent.error("Could not finish this turn. Please try again.")
         )
+        await streamer.process_event(RuntimeEvent.done("error"))
+        await streamer.finalize()
+    finally:
+        if ticket is not None:
+            ingress.release(ticket)
+        if streamer is not None:
+            await streamer.stop_edit_loop()
+        if timing is not None:
+            timing.mark("request_released")
 
 
-async def _process_agent_input(update, context, admission) -> None:
+async def _process_agent_input(update, context, admission, streamer) -> None:
     from condor.preferences import get_voice_prefs
     from condor.runtime import attachments, conversations
     from condor.runtime.models import PromptImage
@@ -144,7 +252,6 @@ async def _process_agent_input(update, context, admission) -> None:
         extract_input,
         get_resolver,
         message_text,
-        rich_message_payload,
     )
     from config_manager import UserRole, get_config_manager
 
@@ -154,30 +261,11 @@ async def _process_agent_input(update, context, admission) -> None:
         UserRole.ADMIN,
         UserRole.USER,
     ):
-        return
-    # Typed controls act on this message, never on quoted text or a transcript.
+        raise InputError(
+            "access_changed",
+            "Your access changed. This message was not sent to the agent.",
+        )
     input_error = None
-    try:
-        own_text = message_text(update.message)
-    except InputError as exc:
-        own_text = ""
-        input_error = exc
-    # Captions remain prompt context, never typed reset or configuration controls.
-    if not update.message.text and not rich_message_payload(update.message):
-        own_text = ""
-    armed = any(context.user_data.get(key) for key in _ARMED_TEXT_INPUT_KEYS)
-    if own_text and (own_text.strip() == "-" or armed):
-        from condor.telegram.input import input_has_attachments
-
-        if armed and input_has_attachments(update.message):
-            raise InputError(
-                "text_expected",
-                "Please send text for the current input, or use /cancel before sending attachments.",
-            )
-        await _notice_input_secrets(update, context, own_text)
-        if await _consume_agent_text_input(update, context, own_text):
-            admission.accepted = True
-            return
     sources = {}
     for message in admission.messages:
         sources[(message.chat.id, message.message_id)] = message
@@ -212,15 +300,11 @@ async def _process_agent_input(update, context, admission) -> None:
         UserRole.ADMIN,
         UserRole.USER,
     ):
-        return
+        raise InputError(
+            "access_changed",
+            "Your access changed. This message was not sent to the agent.",
+        )
     incoming = extract_input(admission.messages)
-
-    # Avoid downloading/retranscribing a replay after a restart, which the
-    # ingress tombstones (in memory) cannot cover. A set lookup against the
-    # request index; the runtime remains the final deduplication gate.
-    if incoming.media and conversations.has_request(user_id, admission.request_id):
-        admission.accepted = True
-        return
 
     if incoming.media and any(
         context.user_data.get(key) for key in _ARMED_TEXT_INPUT_KEYS
@@ -230,35 +314,29 @@ async def _process_agent_input(update, context, admission) -> None:
             "Please send text for the current input, or use /cancel before sending attachments.",
         )
 
-    session = await _ensure_chat_session(update, context)
+    async def startup_error(text):
+        raise InputError("session_start", text)
+
+    streamer.set_phase("Starting agent…")
+    streamer.timing.mark("session_start")
+    session = await _ensure_chat_session(update, context, on_error=startup_error)
     if session is None:
-        return
+        raise InputError(
+            "session_start",
+            "Could not start the agent. Please try again or choose another model with /agent.",
+        )
+    streamer.timing.mark("session_ready")
     conversation_id = getattr(session, "conversation_id", "")
-    status = None
     resolved = ResolvedInput(incoming.text, (), ())
     if incoming.media:
-        status = await _try_telegram_message(
-            update,
-            "input_status",
-            update.message.answer,
-            text="Reading attachments… /stop cancels this message.",
-            disable_notification=True,
-        )
+        streamer.set_phase("Reading attachments…")
+        streamer.timing.mark("attachments_start")
         prefs = get_voice_prefs(context.user_data)
-        try:
-            resolved = await get_resolver(context.bot).resolve(
-                incoming,
-                language=prefs.get("language"),
-                model_size=prefs.get("whisper_model", "base"),
-            )
-        except InputError as exc:
-            await _try_telegram_message(
-                update,
-                "input_error",
-                status.edit_text if status else update.message.answer,
-                text=exc.user_message,
-            )
-            return
+        resolved = await get_resolver(context.bot).resolve(
+            incoming,
+            language=prefs.get("language"),
+            model_size=prefs.get("whisper_model", "base"),
+        )
         # Resolution preserves incoming text and appends document/transcript
         # content. Do not deliver the same caption warning twice.
         decoded_text = resolved.text[len(incoming.text) :]
@@ -267,7 +345,7 @@ async def _process_agent_input(update, context, admission) -> None:
                 update, context, decoded_text, tuple(sources.values())
             )
         # Commands and other surfaces may switch conversations during downloads
-        # or notices. This is the last await before saving/accepting the input.
+        # or notices. Reject those changes before saving files unnecessarily.
         current = await get_session(chat_id)
         if (
             current is None
@@ -276,31 +354,59 @@ async def _process_agent_input(update, context, admission) -> None:
             or get_config_manager().get_user_role(user_id)
             not in (UserRole.ADMIN, UserRole.USER)
         ):
-            await _try_telegram_message(
-                update,
+            raise InputError(
                 "input_changed",
-                status.edit_text if status else update.message.answer,
-                text="The chat or your access changed while reading attachments. Please send the message again.",
+                "The chat or your access changed while reading attachments. Please send the message again.",
             )
-            return
 
     if get_config_manager().get_user_role(user_id) not in (
         UserRole.ADMIN,
         UserRole.USER,
     ):
-        return
+        raise InputError(
+            "access_changed",
+            "Your access changed. This message was not sent to the agent.",
+        )
     saved = []
     duplicate = False
     try:
         images = []
         for image in resolved.images:
-            attachment = await asyncio.to_thread(
-                attachments.save, user_id, conversation_id, image.data
+            saving = asyncio.create_task(
+                asyncio.to_thread(
+                    attachments.save, user_id, conversation_id, image.data
+                )
             )
+            try:
+                attachment = await asyncio.shield(saving)
+            except asyncio.CancelledError:
+                # A worker thread can finish its write after cancellation.
+                # Recover its receipt so the finally below can remove it.
+                try:
+                    saved.append(await saving)
+                except (attachments.AttachmentError, OSError):
+                    pass
+                raise
             saved.append(attachment)
             images.append(
                 PromptImage(data=image.data, mime=attachment.mime, id=attachment.id)
             )
+        if saved:
+            # Saving runs in worker threads, so the chat may have changed since
+            # resolution. From this local snapshot through runtime.prompt's
+            # initial session capture, there is no further scheduling boundary.
+            current = await get_session(chat_id)
+            if (
+                current is None
+                or not current.alive
+                or getattr(current, "conversation_id", "") != conversation_id
+                or get_config_manager().get_user_role(user_id)
+                not in (UserRole.ADMIN, UserRole.USER)
+            ):
+                raise InputError(
+                    "input_changed",
+                    "The chat or your access changed while preparing attachments. Please send the message again.",
+                )
         request = PromptRequest(
             text=resolved.text,
             images=images,
@@ -309,24 +415,29 @@ async def _process_agent_input(update, context, admission) -> None:
         prefix = "\n".join(
             f"🎙 {_voice_display(text)}" for text in resolved.transcriptions
         )
+        streamer.timing.mark("input_ready")
         duplicate = await _stream_agent_turn(
             update,
             context,
             admission,
             request,
-            status,
             prefix,
             conversation_id=conversation_id,
+            streamer=streamer,
         )
-    except (attachments.AttachmentError, OSError):
-        await _try_telegram_message(
-            update,
+    except (attachments.AttachmentError, OSError) as exc:
+        raise InputError(
             "attachment_save",
-            status.edit_text if status else update.message.answer,
-            text="Could not save the attachments in this conversation. Please send the message again.",
-        )
+            "Could not save the attachments in this conversation. Please send the message again.",
+        ) from exc
     finally:
-        if not admission.accepted or duplicate:
+        # Cancellation can arrive while the runtime's acceptance write is
+        # finishing, before it yields ACCEPTED. Keep files already referenced
+        # by that durable turn, even though this handler saw no event.
+        accepted = admission.accepted or conversations.has_request(
+            user_id, admission.request_id
+        )
+        if not accepted or duplicate:
             for attachment in saved:
                 (
                     attachments.attachments_dir(user_id, conversation_id)
@@ -335,26 +446,37 @@ async def _process_agent_input(update, context, admission) -> None:
 
 
 async def _stream_agent_turn(
-    update, context, admission, request, status, prefix, *, conversation_id
+    update,
+    context,
+    admission,
+    request,
+    prefix,
+    *,
+    conversation_id,
+    streamer=None,
 ) -> bool:
     """Delivery consumes accepted events and never retries the underlying turn."""
     from config_manager import UserRole, get_config_manager
 
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    streamer = TelegramStreamer(
-        bot=context.bot,
-        chat_id=chat_id,
-        message_id=status.message_id if status else None,
-        prefix=prefix,
-        user_id=user_id,
+    owns_streamer = streamer is None
+    if streamer is None:
+        streamer = TelegramStreamer(
+            bot=context.bot,
+            chat_id=chat_id,
+            user_id=user_id,
+            request_id=request.request_id,
+            input_message_id=update.message.message_id,
+        )
+    streamer.bind_input(
         conversation_id=conversation_id,
-        request_id=request.request_id,
-        input_message_id=update.message.message_id,
+        prefix=prefix,
     )
     edit_started = False
     last_event = None
     try:
+        streamer.timing.mark("runtime_start")
         async with aclosing(
             runtime.prompt(
                 _tg_key(chat_id),
@@ -370,6 +492,8 @@ async def _stream_agent_turn(
                 admission.release()
                 if event.type == EventType.DONE and event.stop_reason == "duplicate":
                     admission.accepted = True
+                    await streamer.process_event(event)
+                    await streamer.finalize()
                     return True
                 await streamer.process_event(event)
                 if not edit_started:
@@ -395,5 +519,6 @@ async def _stream_agent_turn(
         )
         await streamer.finalize()
     finally:
-        await streamer.stop_edit_loop()
+        if owns_streamer:
+            await streamer.stop_edit_loop()
     return False

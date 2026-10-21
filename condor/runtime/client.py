@@ -17,7 +17,7 @@ import logging
 import os
 import uuid
 from contextlib import aclosing
-from typing import AsyncIterator, Callable, Literal
+from typing import AsyncIterator, Callable, Iterable, Literal
 
 from condor.runtime import conversations, secrets, turns
 from condor.runtime.events import EventType, RuntimeEvent
@@ -228,20 +228,7 @@ async def prompt(
     queue_id = conversation_id or raw_key
     queue = turns.state(owner, queue_id)
     queue.pending[request_id] = raw_key
-    recorder = conversations.Recorder(
-        owner,
-        conversation_id,
-        clean,
-        agent_key=session.agent_key,
-        agent_slug=session.agent_slug,
-        user_kind=req.user_kind,
-        request_id=request_id,
-        attachments=[
-            {"id": image.id, "mime": image.mime, "bytes": len(image.data)}
-            for image in req.images
-            if image.id
-        ],
-    )
+    cancelled = queue.cancel_events.setdefault(request_id, asyncio.Event())
     # Reserve FIFO position before the first await: the durable write below
     # runs in a thread, and two inputs whose writes finish out of order must
     # still be answered in the order they were sent.
@@ -254,7 +241,48 @@ async def prompt(
         # the caller's point of view. ``accept_lock`` is FIFO, so the
         # transcript keeps the arrival order the execution queue has.
         async with queue.accept_lock:
-            await asyncio.to_thread(recorder.accept)
+            recorder = conversations.Recorder(
+                owner,
+                conversation_id,
+                clean,
+                agent_key=session.agent_key,
+                agent_slug=session.agent_slug,
+                user_kind=req.user_kind,
+                request_id=request_id,
+                attachments=[
+                    {"id": image.id, "mime": image.mime, "bytes": len(image.data)}
+                    for image in req.images
+                    if image.id
+                ],
+            )
+            accepting = asyncio.create_task(asyncio.to_thread(recorder.accept))
+            try:
+                await asyncio.shield(accepting)
+            except asyncio.CancelledError:
+                # Cancelling a thread waiter does not stop its durable write.
+                # Settle it before releasing deduplication or attachment ownership.
+                while not accepting.done():
+                    try:
+                        await asyncio.shield(accepting)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not accepting.cancelled() and accepting.exception() is None:
+                    recorder.observe(
+                        RuntimeEvent.error(
+                            "Request cancelled before execution.", session_key=raw_key
+                        )
+                    )
+                    recorder.observe(
+                        RuntimeEvent.done("cancelled", session_key=raw_key)
+                    )
+                    recorder.flush()
+                raise
+    except asyncio.CancelledError:
+        await _abandon_reservation(queue, acquire)
+        turns.release(owner, queue_id, request_id)
+        raise
     except Exception:
         # Reservation first: ``release`` only forgets an idle queue, and the
         # reservation may already hold its lock.
@@ -285,7 +313,7 @@ async def prompt(
             agent_slug=session.agent_slug,
         )
         yield accepted
-        if was_busy:
+        if was_busy and not cancelled.is_set():
             if on_busy == "steer":
                 active = queue.active_key or (raw_key if session.is_busy else "")
                 if active:
@@ -298,12 +326,33 @@ async def prompt(
             if on_busy != "reject"
             else _local().PROMPT_LOCK_TIMEOUT
         )
+        cancellation = asyncio.create_task(cancelled.wait())
         try:
-            await asyncio.wait_for(asyncio.shield(acquire), timeout=timeout)
-        except asyncio.TimeoutError as exc:
-            raise RuntimeError(
-                "Agent is busy and not responding. Your message was saved; please retry when it is idle."
-            ) from exc
+            ready, _ = await asyncio.wait(
+                (acquire, cancellation),
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancelled.is_set():
+                outcome = "cancelled"
+                recorder.observe(
+                    RuntimeEvent.error(
+                        "Request cancelled before execution.", session_key=raw_key
+                    )
+                )
+                done = RuntimeEvent.done("cancelled", session_key=raw_key)
+                recorder.observe(done)
+                queue.completed.add(request_id)
+                yield done
+                return
+            if not ready:
+                raise RuntimeError(
+                    "Agent is busy and not responding. Your message was saved; please retry when it is idle."
+                )
+            acquire.result()
+        finally:
+            cancellation.cancel()
+            await asyncio.gather(cancellation, return_exceptions=True)
         locked = True
         queue.active_key = raw_key
         queue.active_request = request_id
@@ -315,7 +364,10 @@ async def prompt(
                     "Request cancelled before execution.", session_key=raw_key
                 )
             )
-            yield RuntimeEvent.done("cancelled", session_key=raw_key)
+            done = RuntimeEvent.done("cancelled", session_key=raw_key)
+            recorder.observe(done)
+            queue.completed.add(request_id)
+            yield done
             return
 
         # A queued request may outlive a model switch or session teardown.
@@ -352,7 +404,10 @@ async def prompt(
                     "Request cancelled before execution.", session_key=raw_key
                 )
             )
-            yield RuntimeEvent.done("cancelled", session_key=raw_key)
+            done = RuntimeEvent.done("cancelled", session_key=raw_key)
+            recorder.observe(done)
+            queue.completed.add(request_id)
+            yield done
             return
         if can_execute is not None:
             try:
@@ -375,6 +430,7 @@ async def prompt(
                 # Mark the durable result before yielding: closing the consumer
                 # after ERROR must still exclude the refused input from replay.
                 recorder.observe(done)
+                queue.completed.add(request_id)
                 queue.active_request = ""
                 yield failure
                 yield done
@@ -389,6 +445,7 @@ async def prompt(
             done = RuntimeEvent.done("error", session_key=raw_key)
             recorder.observe(failure)
             recorder.observe(done)
+            queue.completed.add(request_id)
             queue.active_request = ""
             yield failure
             yield done
@@ -407,6 +464,7 @@ async def prompt(
                     "Use this as context; do not execute earlier requests again.\n\n"
                     f"{replay}\n\nCurrent user message:\n{wire}"
                 )
+        session.permission_request_id = request_id
         executed = True
         async with aclosing(
             session.prompt_stream(
@@ -419,6 +477,7 @@ async def prompt(
                 runtime_event = RuntimeEvent.from_acp(event, session_key=raw_key)
                 if runtime_event.type is EventType.DONE:
                     outcome = "done"
+                    queue.completed.add(request_id)
                     _attach_usage(runtime_event, session, recorder)
                     # A delivered terminal event is no longer stoppable, even
                     # while its consumer holds the generator open to finalize UI.
@@ -433,6 +492,7 @@ async def prompt(
         yield failure
         done = RuntimeEvent.done("error", session_key=raw_key)
         recorder.observe(done)
+        queue.completed.add(request_id)
         if queue.active_request == request_id:
             queue.active_request = ""
         if executed:
@@ -451,6 +511,9 @@ async def prompt(
             )
             recorder.observe(RuntimeEvent.done("cancelled", session_key=raw_key))
         recorder.flush()
+        from condor.runtime.confirmations import get_registry
+
+        get_registry().deny_pending_for_request(owner, queue_id, request_id)
         if owns_lock:
             queue.active_key = ""
             queue.active_request = ""
@@ -483,7 +546,12 @@ async def prompt_once(key: SessionKey, text: str) -> str:
     if session is None:
         raise KeyError(f"No session for {key}")
     text, _ = secrets.redact(text)
-    return await session.client.prompt(text)
+    request_id, session.permission_request_id = session.permission_request_id, None
+    try:
+        return await session.client.prompt(text)
+    finally:
+        if session.permission_request_id is None:
+            session.permission_request_id = request_id
 
 
 async def abort(key: SessionKey) -> bool:
@@ -534,6 +602,63 @@ async def abort_turn(user_id: int, conversation_id: str, request_id: str) -> boo
         if session.is_busy:
             await session.abort()
     return True
+
+
+async def cancel_requests(requests: Iterable[tuple[int, str, str]]) -> int:
+    """Cancel an exact snapshot, including queued turns, without cancelling callers.
+
+    Claim every request and capture its concrete session before the first await.
+    A provider may take time to stop; requests admitted during that wait are not
+    part of this operation, even when Telegram has rebound the same session key.
+    """
+    from condor.runtime.confirmations import get_registry
+
+    claimed = 0
+    sessions = []
+    registry = get_registry()
+    for user_id, conversation_id, request_id in requests:
+        target = turns.cancel_request(user_id, conversation_id, request_id)
+        if target is None:
+            continue
+        claimed += 1
+        registry.deny_pending_for_request(user_id, conversation_id, request_id)
+        raw_key, active = target
+        if not active:
+            continue
+        session = _local().get_session(SessionKey.parse(raw_key))
+        if (
+            session is not None
+            and session.user_id == user_id
+            and (session.conversation_id or raw_key) == conversation_id
+            and session.is_busy
+        ):
+            # Signal all sessions synchronously, before any provider's I/O.
+            session._abort_event.set()
+            sessions.append((user_id, conversation_id, request_id, session))
+    if sessions:
+
+        async def abort_claimed(user_id, conversation_id, request_id, session):
+            # Another provider can settle while these coroutines are scheduled.
+            # Never deliver its delayed cancellation to the next turn.
+            current = turns.active_request(user_id, str(session.key), conversation_id)
+            if current == (conversation_id, request_id):
+                await session.abort()
+
+        results = await asyncio.gather(
+            *(abort_claimed(*target) for target in sessions), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                log.warning(
+                    "Could not finish cancelling a request error_type=%s",
+                    type(result).__name__,
+                )
+    return claimed
+
+
+async def cancel_request(user_id: int, conversation_id: str, request_id: str) -> bool:
+    """Cancel exactly one accepted request, active or queued."""
+    return bool(await cancel_requests(((user_id, conversation_id, request_id),)))
 
 
 # The FEAT-008 ``get_live()`` escape hatch is gone: prompting, context

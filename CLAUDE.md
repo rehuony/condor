@@ -55,11 +55,11 @@ Telegram → main.py → handlers/ → config_manager.py → Hummingbot Backend 
 
 ### Key Components
 
-**Entry Point** (`main.py`):
-- Runs Telegram bot + FastAPI web dashboard concurrently via `_run_dual()`
-- Uses `condor.telegram.state.UserStateStore` for per-user state across restarts
-- Auto-reloads handlers on file changes via `watchfiles`
-- Web dashboard served on `WEB_PORT` (configurable via env)
+**Entry Point and Process Wiring** (`main.py`, the composition root; `condor/` and `handlers/` never import it):
+- Configures logging and runs the Telegram bot + FastAPI web dashboard concurrently via `serve()`
+- Owns `startup()` / `teardown()`; per-user state is the app's `UserStateStore`
+- Uses `condor/reload.py` to auto-reload handlers on file changes via `watchfiles`
+- Uses `condor/web/server.py` to serve the dashboard on `WEB_PORT` (configurable via env)
 
 **Configuration Manager** (`config_manager.py`):
 - `ConfigManager` singleton manages servers, users, permissions in `config.yml`
@@ -72,6 +72,7 @@ Telegram → main.py → handlers/ → config_manager.py → Hummingbot Backend 
 - `menu.py` contains main menu display
 - `_shared.py` contains shared utilities and caching
 - Callback data format: `{module}:{action}:{params}` (e.g., `dex:swap:execute`)
+- `routes.py` routes every command and callback prefix; `commands.py` is the `/` menu
 
 ### State Management
 

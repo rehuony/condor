@@ -1,10 +1,12 @@
 """A woken turn renders in Telegram like any other answer (FEAT-034, slice 5).
 
-Wake turns use the same rich-draft presenter as a typed request. Opening the
-sink performs no Telegram I/O; the final answer is a new rich message.
+Wake turns use the same editable receipt as a typed request. Stop targets the
+wake request without cancelling the background producer awaiting its result.
 """
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,8 +16,11 @@ from condor.runtime import wake as runtime_wake
 from condor.runtime.events import EventType, RuntimeEvent
 from condor.runtime.keys import TELEGRAM
 from condor.telegram.errors import bad_request
+from condor.telegram.output import runs
 from condor.telegram.types import NO_LINK_PREVIEW
 from handlers.agents import wake as tg_wake
+from handlers.agents.stop import handle_stop_callback
+from tests.support.telegram import message_text
 
 
 class _Message:
@@ -36,12 +41,9 @@ class _FakeBot:
 
     async def send_rich_message(self, **kw):
         payload = dict(kw)
-        payload["text"] = getattr(kw.get("rich_message"), "markdown", "")
+        payload["text"] = message_text(kw)
         self.sent.append(payload)
         return _Message(100 + len(self.sent))
-
-    async def send_rich_message_draft(self, **kw):
-        return True
 
     async def delete_message(self, **kw):
         return True
@@ -62,9 +64,6 @@ class _MuteBot(_FakeBot):
         self.sent.append(kw)
         return None
 
-    async def send_rich_message_draft(self, **kw):
-        return True
-
 
 @pytest.fixture(autouse=True)
 def _register_wake():
@@ -73,6 +72,7 @@ def _register_wake():
 
 @pytest.fixture
 def bot(monkeypatch):
+    monkeypatch.setattr("condor.telegram.output.writer.UPDATE_INTERVAL", 0.001)
     fake = _FakeBot()
     monkeypatch.setattr(delegate_module, "resolve_bot", lambda b=None: fake)
     return fake
@@ -95,10 +95,10 @@ async def _drive(sink):
     await sink.close()
 
 
-def test_wake_uses_a_formal_new_final_message(bot):
+def test_wake_finalizes_its_answer(bot):
     asyncio.run(_drive(tg_wake.TelegramWakeSink(42)))
     assert bot.sent[-1]["text"] == "the pools I found are thin; not worth it"
-    assert bot.sent[-1]["disable_notification"] is False
+    assert bot.sent[-1]["disable_notification"] is True
 
 
 def test_a_chat_this_process_cannot_reach_leaves_the_sink_inert(monkeypatch):
@@ -246,3 +246,77 @@ def test_a_web_key_is_not_this_sinks_business(bot):
     )
 
     assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_queued_wake_stop_preserves_the_background_producer(
+    bot, live_session, monkeypatch
+):
+    from condor.runtime import client
+
+    queued = asyncio.Event()
+    cancelled = asyncio.Event()
+    prompt_ids = []
+    claims = []
+
+    async def prompt(key, request, **kwargs):
+        prompt_ids.append(request.request_id)
+        yield RuntimeEvent(
+            type=EventType.ACCEPTED,
+            data={
+                "conversation_id": "conv-1",
+                "request_id": request.request_id,
+            },
+        )
+        yield RuntimeEvent.queued()
+        queued.set()
+        await cancelled.wait()
+        yield RuntimeEvent.done("cancelled")
+
+    async def cancel_requests(requests):
+        claims.extend(requests)
+        cancelled.set()
+
+    monkeypatch.setattr(client, "prompt", prompt)
+    monkeypatch.setattr(client, "cancel_requests", cancel_requests)
+    producer_finished = []
+
+    async def producer():
+        result = await runtime_wake.resume_session(
+            session_key="tg:42",
+            conversation_id="conv-1",
+            text="Task result",
+            kind="routine",
+        )
+        producer_finished.append(result)
+
+    producer_task = asyncio.create_task(producer())
+    try:
+        async with asyncio.timeout(1):
+            await queued.wait()
+            while not bot.sent:
+                await asyncio.sleep(0.001)
+        target = next(iter(runs._runs.values()))
+        await handle_stop_callback(
+            SimpleNamespace(
+                effective_chat=SimpleNamespace(id=42),
+                effective_user=SimpleNamespace(id=7),
+                callback_query=SimpleNamespace(
+                    data=f"agent:stop_run:{target.token}",
+                    message=SimpleNamespace(message_id=101),
+                    answer=AsyncMock(),
+                ),
+            ),
+            None,
+        )
+        await asyncio.wait_for(producer_task, 1)
+        assert producer_finished == [True]
+        assert not producer_task.cancelled()
+        assert prompt_ids[0]
+        assert claims == [(7, "conv-1", prompt_ids[0])]
+        assert len(bot.sent) == 1
+        assert "Stopped" in message_text(bot.edits[-1])
+        assert not runs._runs
+    finally:
+        producer_task.cancel()
+        await asyncio.gather(producer_task, return_exceptions=True)

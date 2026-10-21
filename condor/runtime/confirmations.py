@@ -23,9 +23,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
-from condor.runtime import danger
+from condor.runtime import danger, turns
 from condor.runtime.timeouts import TIMEOUTS
 
 log = logging.getLogger(__name__)
@@ -69,6 +69,38 @@ class PendingConfirmation:
     created_at: float = field(default_factory=time.time)
     timeout_seconds: int = CONFIRMATION_TIMEOUT
     _event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    conversation_id: str = ""
+    request_id: str = ""
+    _callbacks: list[Callable[[], None]] = field(default_factory=list, repr=False)
+
+    def finish(self, status: ConfirmationStatus, option_id: str = "") -> bool:
+        """Resolve once and notify displays without waiting for their network I/O."""
+        if self.status is not ConfirmationStatus.PENDING:
+            return False
+        self.status = status
+        self.selected_option_id = option_id
+        self._event.set()
+        callbacks, self._callbacks = self._callbacks, []
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception as exc:
+                log.warning(
+                    "Confirmation display notification failed error_type=%s",
+                    type(exc).__name__,
+                )
+        return True
+
+    def add_done_callback(self, callback: Callable[[], None]) -> None:
+        if self.status is ConfirmationStatus.PENDING:
+            self._callbacks.append(callback)
+        else:
+            callback()
+
+    def request_is_open(self) -> bool:
+        return not self.request_id or turns.request_is_open(
+            self.user_id, self.conversation_id, self.request_id
+        )
 
     @property
     def approved(self) -> bool:
@@ -84,6 +116,8 @@ class PendingConfirmation:
             "id": self.id,
             "session_key": self.session_key,
             "user_id": self.user_id,
+            "conversation_id": self.conversation_id,
+            "request_id": self.request_id,
             "summary": self.summary,
             "origin": self.origin,
             "detail": self.detail,
@@ -118,6 +152,7 @@ class ConfirmationRegistry:
     def __init__(self):
         self._entries: dict[str, PendingConfirmation] = {}
         self._cleanup_task: asyncio.Task | None = None
+        self._notifications: set[asyncio.Task] = set()
 
     # ── Lifecycle ──
 
@@ -131,12 +166,18 @@ class ConfirmationRegistry:
         timeout_seconds: int = CONFIRMATION_TIMEOUT,
         origin: str = "",
         detail: str = "",
+        conversation_id: str = "",
+        request_id: str = "",
     ) -> PendingConfirmation:
         """Create a pending entry. Synchronous and I/O-free by design.
 
         The entry must exist before any channel is told about it; otherwise a
         fast surface could resolve an id the registry has not stored yet.
         """
+        if not request_id:
+            identity = _request_of(session_key, user_id)
+            if identity is not None:
+                conversation_id, request_id = identity
         pending = PendingConfirmation(
             id=str(uuid.uuid4())[:8],
             session_key=session_key,
@@ -147,9 +188,43 @@ class ConfirmationRegistry:
             tool_call=tool_call,
             options=options,
             timeout_seconds=timeout_seconds,
+            conversation_id=conversation_id,
+            request_id=request_id,
         )
         self._entries[pending.id] = pending
+        if not pending.request_is_open():
+            pending.finish(ConfirmationStatus.DENIED)
         return pending
+
+    def on_resolved(
+        self,
+        pending: PendingConfirmation,
+        callback: Callable[[PendingConfirmation], Awaitable[None]],
+    ) -> None:
+        """Track cleanup even when resolution races a channel's send receipt."""
+
+        async def deliver():
+            try:
+                await callback(pending)
+            except Exception as exc:
+                log.warning(
+                    "Could not update a resolved confirmation error_type=%s",
+                    type(exc).__name__,
+                )
+
+        def schedule():
+            task = asyncio.create_task(deliver())
+            self._notifications.add(task)
+            task.add_done_callback(self._notifications.discard)
+
+        pending.add_done_callback(schedule)
+
+    async def drain(self) -> None:
+        """Finish already scheduled display cleanup before closing transports."""
+        while self._notifications:
+            tasks = tuple(self._notifications)
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._notifications.difference_update(tasks)
 
     async def wait_for(self, confirmation_id: str) -> PendingConfirmation | None:
         """Block until the entry is resolved or its TTL expires.
@@ -166,7 +241,7 @@ class ConfirmationRegistry:
             await asyncio.wait_for(pending._event.wait(), timeout=max(remaining, 0))
         except asyncio.TimeoutError:
             if pending.status is ConfirmationStatus.PENDING:
-                pending.status = ConfirmationStatus.TIMEOUT
+                pending.finish(ConfirmationStatus.TIMEOUT)
                 log.info("Confirmation %s timed out; denying", confirmation_id)
         return pending
 
@@ -197,12 +272,16 @@ class ConfirmationRegistry:
             )
             return False
 
-        pending.status = (
-            ConfirmationStatus.APPROVED if approved else ConfirmationStatus.DENIED
+        if pending.expires_at <= time.time():
+            pending.finish(ConfirmationStatus.TIMEOUT)
+            return False
+        if not pending.request_is_open():
+            pending.finish(ConfirmationStatus.DENIED)
+            return False
+        return pending.finish(
+            ConfirmationStatus.APPROVED if approved else ConfirmationStatus.DENIED,
+            option_id,
         )
-        pending.selected_option_id = option_id
-        pending._event.set()
-        return True
 
     def get(self, confirmation_id: str) -> PendingConfirmation | None:
         return self._entries.get(confirmation_id)
@@ -232,14 +311,26 @@ class ConfirmationRegistry:
                 continue
             if pending.status is not ConfirmationStatus.PENDING:
                 continue
-            pending.status = ConfirmationStatus.DENIED
-            pending._event.set()
+            pending.finish(ConfirmationStatus.DENIED)
             denied += 1
         return denied
 
+    def deny_pending_for_request(
+        self, user_id: int | None, conversation_id: str, request_id: str
+    ) -> int:
+        return sum(
+            pending.finish(ConfirmationStatus.DENIED)
+            for pending in tuple(self._entries.values())
+            if pending.user_id == user_id
+            and pending.conversation_id == conversation_id
+            and pending.request_id == request_id
+        )
+
     def discard(self, confirmation_id: str) -> None:
         """Drop a finished entry once its waiter has consumed the outcome."""
-        self._entries.pop(confirmation_id, None)
+        pending = self._entries.pop(confirmation_id, None)
+        if pending is not None:
+            pending.finish(ConfirmationStatus.DENIED)
 
     # ── Background sweep ──
 
@@ -252,8 +343,7 @@ class ConfirmationRegistry:
                 pending.status is ConfirmationStatus.PENDING
                 and pending.expires_at <= now
             ):
-                pending.status = ConfirmationStatus.TIMEOUT
-                pending._event.set()  # wake any waiter immediately
+                pending.finish(ConfirmationStatus.TIMEOUT)
             elif pending.status is not ConfirmationStatus.PENDING:
                 # Give the waiter a grace period to read the outcome first.
                 if now - pending.expires_at > CLEANUP_INTERVAL:
@@ -285,6 +375,7 @@ class ConfirmationRegistry:
             except asyncio.CancelledError:
                 pass
         self._cleanup_task = None
+        await self.drain()
 
 
 # Process-global singleton, same pattern as the engine registry. A user's tap
@@ -322,6 +413,20 @@ def _session_of(session_key: str):
     except Exception:  # noqa: BLE001 - attribution must never block an approval
         log.debug("Could not read session %s", session_key, exc_info=True)
         return None
+
+
+def _request_of(session_key: str, user_id: int) -> tuple[str, str] | None:
+    session = _session_of(session_key)
+    if session is not None:
+        if session.user_id != user_id:
+            return None
+        request_id = getattr(session, "permission_request_id", None)
+        if request_id is not None:
+            return session.conversation_id or session_key, request_id
+        return turns.active_request(
+            user_id, session_key, session.conversation_id or session_key
+        )
+    return turns.active_request(user_id, session_key)
 
 
 def describe_origin(session_key: str) -> str:
@@ -440,6 +545,9 @@ def build_permission_callback(
     async def permission_callback(
         tool_call: dict[str, Any], options: list[dict[str, Any]]
     ) -> dict[str, Any]:
+        identity = _request_of(session_key, user_id)
+        if identity is not None and not turns.request_is_open(user_id, *identity):
+            return CANCELLED
         tool_name = tool_call.get("tool", "") or tool_call.get("title", "")
         # Read through the module so a monkeypatched BLOCKED_TOOLS is honored.
         if tool_name in danger.BLOCKED_TOOLS:
@@ -469,38 +577,41 @@ def build_permission_callback(
             timeout_seconds=timeout_seconds,
         )
 
-        # A channel that blows up must not swallow the request: the others
-        # still render it, and the TTL denies if nobody can answer.
-        results = await asyncio.gather(
-            *(ch.deliver(pending) for ch in channels), return_exceptions=True
-        )
-        for result in results:
-            if isinstance(result, Exception):
-                log.warning("Confirmation channel failed to deliver", exc_info=result)
-
-        if not channels:
-            # Nothing can render it, so nobody can approve it. Deny now rather
-            # than stalling the agent for the full TTL.
-            log.warning(
-                "No confirmation channel for session %s; denying %s",
-                session_key,
-                tool_name,
+        try:
+            # A channel failure must not prevent the other surfaces answering.
+            results = await asyncio.gather(
+                *(ch.deliver(pending) for ch in channels), return_exceptions=True
             )
-            _registry.discard(pending.id)
-            return CANCELLED
+            for result in results:
+                if isinstance(result, Exception):
+                    log.warning(
+                        "Confirmation channel failed to deliver", exc_info=result
+                    )
 
-        resolved = await _registry.wait_for(pending.id)
-        _registry.discard(pending.id)
+            if not channels:
+                log.warning(
+                    "No confirmation channel for session %s; denying %s",
+                    session_key,
+                    tool_name,
+                )
+                return CANCELLED
 
-        if resolved is not None and resolved.approved:
-            if resolved.selected_option_id:
-                return {
-                    "outcome": {
-                        "outcome": "selected",
-                        "optionId": resolved.selected_option_id,
+            resolved = await _registry.wait_for(pending.id)
+            if (
+                resolved is not None
+                and resolved.approved
+                and resolved.request_is_open()
+            ):
+                if resolved.selected_option_id:
+                    return {
+                        "outcome": {
+                            "outcome": "selected",
+                            "optionId": resolved.selected_option_id,
+                        }
                     }
-                }
-            return _select_allow(options)
-        return CANCELLED
+                return _select_allow(options)
+            return CANCELLED
+        finally:
+            _registry.discard(pending.id)
 
     return permission_callback

@@ -1,6 +1,7 @@
 """Received messages survive transport failures and share an ordered history."""
 
 import asyncio
+import threading
 
 import pytest
 
@@ -131,6 +132,78 @@ def test_concurrent_arrivals_of_one_request_execute_once(chat, monkeypatch):
         if t.role == "user"
     ]
     assert len(openings) == 1
+
+
+def test_cancelled_acceptance_settles_write_and_releases_the_conversation(
+    chat, monkeypatch
+):
+    tg, web = chat
+    accept = conversations.Recorder.accept
+    request_id = "telegram:7:cancel-write"
+    release = threading.Event()
+
+    async def run():
+        entered = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def slow_accept(self):
+            if self.request_id == request_id:
+                loop.call_soon_threadsafe(entered.set)
+                assert release.wait(2)
+            accept(self)
+
+        monkeypatch.setattr(conversations.Recorder, "accept", slow_accept)
+        task = asyncio.create_task(collect(tg, "cancel this", request_id=request_id))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            queue = turns.state(7, tg.conversation_id)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            assert (7, request_id) in runtime._in_flight
+            duplicate = await collect(web, "cancel this", request_id=request_id)
+            assert duplicate[-1].stop_reason == "duplicate"
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 1)
+            assert not queue.lock.locked() and not queue.accept_lock.locked()
+            assert not queue.pending and not turns._turns
+            assert not runtime._in_flight and not conversations._live_recorders
+            assert tg.client.inputs == web.client.inputs == []
+            saved = conversations.read_transcript(7, tg.conversation_id)
+            assert saved[0].request_id == request_id
+            assert saved[-1].kind == "error" and "cancelled" in saved[-1].text
+            duplicate = await collect(web, "cancel this", request_id=request_id)
+            assert duplicate[-1].stop_reason == "duplicate"
+            next_turn = await asyncio.wait_for(collect(web, "next request"), 1)
+            assert next_turn[-1].stop_reason == "end_turn"
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(run())
+
+
+def test_cancel_before_acceptance_write_leaves_no_record_or_queue(chat):
+    tg, _ = chat
+
+    async def run():
+        queue = turns.state(7, tg.conversation_id)
+        async with queue.accept_lock:
+            task = asyncio.create_task(
+                collect(tg, "not accepted", request_id="telegram:7:cancel-wait")
+            )
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not queue.lock.locked() and not queue.pending
+            assert not conversations._live_recorders and not runtime._in_flight
+        assert not turns._turns
+        assert not conversations.has_request(7, "telegram:7:cancel-wait")
+        assert not conversations.read_transcript(7, tg.conversation_id)
+
+    asyncio.run(run())
 
 
 def test_duplicate_message_is_not_executed_after_registry_restart_or_chat_switch(chat):

@@ -144,37 +144,27 @@ async def send_text(
 
     Standard Markdown prefers ``send_rich_message`` (native tables, 32000-character
     pages). A parse rejection or a sender without that method falls through to
-    the HTML renderer. Any confirmed non-draft send restores live drafts in the
-    same chat.
+    the HTML renderer.
     """
-    from .output.runs import bump_chat
     from .types import NO_LINK_PREVIEW
 
     results: list = []
-    try:
-        if parse_mode == "Markdown" and callable(
-            getattr(bot, "send_rich_message", None)
-        ):
-            try:
-                await _deliver_rich(
-                    bot, chat_id, text, results, reply_markup=reply_markup
-                )
-                return results
-            except _RichUnavailable:
-                results.clear()
-        await _deliver_pages(
-            bot,
-            chat_id,
-            text,
-            results,
-            parse_mode=parse_mode,
-            reply_markup=reply_markup,
-            link_preview=NO_LINK_PREVIEW,
-        )
-        return results
-    finally:
-        if any(reached_telegram(item) for item in results):
-            bump_chat(chat_id)
+    if parse_mode == "Markdown" and callable(getattr(bot, "send_rich_message", None)):
+        try:
+            await _deliver_rich(bot, chat_id, text, results, reply_markup=reply_markup)
+            return results
+        except _RichUnavailable:
+            results.clear()
+    await _deliver_pages(
+        bot,
+        chat_id,
+        text,
+        results,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        link_preview=NO_LINK_PREVIEW,
+    )
+    return results
 
 
 async def _deliver_rich(bot, chat_id: int, text: str, results: list, *, reply_markup):

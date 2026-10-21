@@ -37,7 +37,7 @@ async def start_deploy_gateway(query, context: Context) -> None:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="hummingbot/gateway:development (recommended)",
+                        text="hummingbot/gateway:development (Recommended)",
                         callback_data="gateway_deploy_image_development",
                     )
                 ],

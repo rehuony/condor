@@ -9,8 +9,8 @@ Ownership follows the same idiom as ``sessions.py``: admins see everything,
 everyone else only their own. The store is keyed by owner, so reading someone
 else's requires naming them explicitly via ``?user_id=``.
 
-Note: modules under ``condor/web/routes/`` are not in ``main.py``'s hot-reload
-list, so changes here need a full bot restart.
+Note: modules under ``condor/web/routes/`` are not in the hot-reload list
+(``condor/reload.py``), so changes here need a full bot restart.
 """
 
 from __future__ import annotations

@@ -12,20 +12,23 @@ from condor.telegram.errors import network_failure
 from handlers import agents
 from handlers.agents import stream
 from tests.conftest import patch_agents
+from tests.support.telegram import message_text
 
 
-def _markdown(kwargs):
-    rich = kwargs.get("rich_message")
-    return getattr(rich, "markdown", None) or kwargs.get("text")
+def _output_calls(bot):
+    return [
+        call.kwargs
+        for method in (bot.send_message, bot.send_rich_message, bot.edit_message_text)
+        for call in method.await_args_list
+    ]
 
 
 def _bot(**overrides):
     methods = dict(
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=99)),
         send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=99)),
-        send_rich_message_draft=AsyncMock(return_value=True),
         delete_message=AsyncMock(),
-        edit_message_text=AsyncMock(),
+        edit_message_text=AsyncMock(return_value=True),
     )
     methods.update(overrides)
     return SimpleNamespace(**methods)
@@ -69,35 +72,32 @@ def _approved_private_chat(monkeypatch, *, mock_session=True):
     return update
 
 
-@pytest.mark.parametrize("recover_for_final", [False, True])
+@pytest.mark.parametrize("failure_kind", ["connect", "ambiguous"])
 def test_progress_failure_does_not_abort_or_replay_the_turn(
-    monkeypatch, caplog, recover_for_final
+    monkeypatch, caplog, failure_kind
 ):
+    import aiohttp
+
     update = _approved_private_chat(monkeypatch)
-    requests = []
-    completed = []
-    sends = []
-    drafts = []
+    requests, completed, sends, progress = [], [], [], []
     initial_delivery_failed = asyncio.Event()
 
-    async def send_rich_message_draft(**kwargs):
-        # This proves output starts after the runtime has accepted the request.
-        assert requests
-        drafts.append(kwargs)
+    async def send_message(**kwargs):
+        progress.append(kwargs)
         initial_delivery_failed.set()
-        raise network_failure("https://api.telegram.org/botSECRET/sendMessage")
+        cause = aiohttp.ConnectionTimeoutError() if failure_kind == "connect" else None
+        raise network_failure(
+            "https://api.telegram.org/botSECRET/sendMessage", cause=cause
+        )
 
     async def send_rich_message(**kwargs):
         sends.append(kwargs)
-        if not recover_for_final:
-            raise network_failure("https://api.telegram.org/botSECRET/sendMessage")
         return SimpleNamespace(message_id=99)
 
     async def prompt(key, request, **kwargs):
         requests.append(request.request_id)
-        yield RuntimeEvent(type=EventType.ACCEPTED)
+        yield RuntimeEvent.accepted()
         yield RuntimeEvent(type=EventType.HEARTBEAT)
-        # The AI keeps consuming its turn while background output fails.
         await initial_delivery_failed.wait()
         yield RuntimeEvent(type=EventType.TEXT, data={"text": "**The answer**"})
         yield RuntimeEvent.done("end_turn")
@@ -107,50 +107,56 @@ def test_progress_failure_does_not_abort_or_replay_the_turn(
     context = SimpleNamespace(
         user_data={},
         chat_data={},
-        bot=_bot(
-            send_rich_message_draft=send_rich_message_draft,
-            send_rich_message=send_rich_message,
-        ),
+        bot=_bot(send_message=send_message, send_rich_message=send_rich_message),
     )
     asyncio.run(agents.agent_message_handler(update, context))
-
     assert requests == ["telegram:4242:17"]
     assert completed == [True]
     assert not update.message.answer.called
-    assert drafts
-    assert len(sends) == 1, "an ambiguous final send must not be blindly retried"
-    assert _markdown(sends[-1]) == "**The answer**"
-    assert "SECRET" not in caplog.text
-    assert "4242" not in caplog.text
-    if not recover_for_final:
+    assert progress
+    if failure_kind == "connect":
+        assert len(sends) == 1
+        assert message_text(sends[0]) == "The answer"
+    else:
+        assert len(progress) == 1 and not sends
         assert "status=delivery_unknown" in caplog.text
+    assert "SECRET" not in caplog.text and "4242" not in caplog.text
 
 
-def test_failed_progress_does_not_prevent_independent_final_delivery():
+def test_failed_progress_edit_does_not_prevent_in_place_final_delivery():
     from tests.support.telegram import Bot
 
     bot = Bot()
-    bot.draft_failure = network_failure("simulated outage")
+    original = bot.edit_message_text
+    attempts = []
+
+    async def fail(**kwargs):
+        attempts.append(kwargs)
+        raise network_failure("simulated edit outage")
+
+    bot.edit_message_text = fail
     streamer = stream.TelegramStreamer(bot, 4242, 10)
 
     async def drive():
         await streamer.process_event(
             RuntimeEvent(type=EventType.TEXT, data={"text": "First "})
         )
-        await streamer._flush()
-        assert streamer._progress_disabled
+        await streamer._deliver(False)
+        assert len(attempts) == 3
+        bot.edit_message_text = original
         await streamer.process_event(
             RuntimeEvent(type=EventType.TEXT, data={"text": "and final."})
         )
         await streamer.process_event(RuntimeEvent.done())
         result = await streamer.finalize()
-        assert result.status == "complete"
+        assert result.status == "complete" and result.message_ids == [10]
 
     asyncio.run(drive())
-    assert bot.messages[-1]["text"] == "First and final."
+    assert not bot.messages
+    assert message_text(bot.edits[-1]) == "First and final."
 
 
-def test_duplicate_update_does_not_create_a_second_telegram_reply(monkeypatch):
+def test_runtime_duplicate_settles_existing_receipt_without_another_reply(monkeypatch):
     update = _approved_private_chat(monkeypatch)
     seen = []
 
@@ -164,7 +170,11 @@ def test_duplicate_update_does_not_create_a_second_telegram_reply(monkeypatch):
     asyncio.run(agents.agent_message_handler(update, context))
     assert seen == ["telegram:4242:17"]
     assert not bot.send_rich_message.called
-    assert not bot.send_message.called
+    assert bot.send_message.await_count == 1
+    final = bot.edit_message_text.await_args.kwargs
+    assert final["message_id"] == 99
+    assert message_text(final) == "This request was already received."
+    assert final["reply_markup"] is None
     assert not update.message.answer.called
 
 
@@ -240,10 +250,10 @@ def test_a_failed_secret_notice_does_not_prevent_the_runtime_redaction(monkeypat
     context = SimpleNamespace(user_data={}, chat_data={}, bot=bot)
     asyncio.run(agents.agent_message_handler(update, context))
     assert requests == [update.message.text]
-    assert _markdown(bot.send_rich_message.await_args.kwargs) == "Processed safely."
+    assert any(message_text(call) == "Processed safely." for call in _output_calls(bot))
 
 
-def test_real_runtime_persists_before_delivery_and_deduplicates_telegram_updates(
+def test_real_runtime_persists_before_model_and_deduplicates_telegram_updates(
     monkeypatch,
 ):
     """Only the model and Telegram are doubles; acceptance and recording are real."""
@@ -259,7 +269,7 @@ def test_real_runtime_persists_before_delivery_and_deduplicates_telegram_updates
     finish_model = asyncio.Event()
     prompts = []
     sends = []
-    drafts = []
+    progress = []
 
     def saved_user_turn():
         saved = conversations.read_transcript(owner, meta.id)
@@ -291,9 +301,8 @@ def test_real_runtime_persists_before_delivery_and_deduplicates_telegram_updates
     monkeypatch.setattr(turns, "_turns", {})
     monkeypatch.setattr(turns, "_sinks", [])
 
-    async def send_rich_message_draft(**kwargs):
-        drafts.append(kwargs)
-        saved_user_turn()
+    async def send_message(**kwargs):
+        progress.append(kwargs)
         placeholder_failed.set()
         raise network_failure("simulated progress outage")
 
@@ -305,7 +314,7 @@ def test_real_runtime_persists_before_delivery_and_deduplicates_telegram_updates
         user_data={},
         chat_data={},
         bot=_bot(
-            send_rich_message_draft=send_rich_message_draft,
+            send_message=send_message,
             send_rich_message=send_rich_message,
         ),
     )
@@ -325,9 +334,8 @@ def test_real_runtime_persists_before_delivery_and_deduplicates_telegram_updates
 
     asyncio.run(drive())
     assert prompts == [update.message.text]
-    assert drafts
-    assert len(sends) == 1
-    assert _markdown(sends[-1]) == "The recorded answer."
+    assert len(progress) == 1
+    assert not sends, "An unacknowledged send must not create another message"
     saved = conversations.read_transcript(owner, meta.id)
     assert [(entry.role, entry.text) for entry in saved] == [
         ("user", update.message.text),
@@ -338,7 +346,7 @@ def test_real_runtime_persists_before_delivery_and_deduplicates_telegram_updates
     assert not conversations._live_recorders
 
 
-@pytest.mark.parametrize("failed_stage", ["input_status", "final_send"])
+@pytest.mark.parametrize("failed_stage", ["initial_send", "final_edit"])
 def test_voice_display_failure_still_hands_transcription_to_the_ai(
     monkeypatch, caplog, failed_stage
 ):
@@ -350,19 +358,26 @@ def test_voice_display_failure_still_hands_transcription_to_the_ai(
         file_id="voice", file_unique_id="voice", file_size=3
     )
     outage = network_failure("https://api.telegram.org/botSECRET/sendMessage")
-    status = SimpleNamespace(
-        message_id=22,
-        edit_text=AsyncMock(),
-    )
-    update.message.answer = AsyncMock(
-        side_effect=outage if failed_stage == "input_status" else None,
-        return_value=status,
-    )
-    resolve = AsyncMock(
-        return_value=telegram_input.ResolvedInput(
+    progress_ready = asyncio.Event()
+
+    async def send(**kwargs):
+        progress_ready.set()
+        if failed_stage == "initial_send":
+            raise outage
+        return SimpleNamespace(message_id=99)
+
+    async def edit(**kwargs):
+        if kwargs.get("reply_markup") is None:
+            raise outage
+        return True
+
+    async def resolve_input(*args, **kwargs):
+        await progress_ready.wait()
+        return telegram_input.ResolvedInput(
             "How is the market?", (), ("How is the market?",)
         )
-    )
+
+    resolve = AsyncMock(side_effect=resolve_input)
     monkeypatch.setattr(
         telegram_input, "get_resolver", lambda bot: SimpleNamespace(resolve=resolve)
     )
@@ -370,34 +385,38 @@ def test_voice_display_failure_still_hands_transcription_to_the_ai(
 
     async def prompt(key, request, **kwargs):
         requests.append(request)
-        yield RuntimeEvent(type=EventType.ACCEPTED)
+        yield RuntimeEvent.accepted()
         yield RuntimeEvent(type=EventType.TEXT, data={"text": "The answer."})
         yield RuntimeEvent.done("end_turn")
 
     monkeypatch.setattr(agents.runtime, "prompt", prompt)
     bot = _bot(
-        send_rich_message=AsyncMock(
-            return_value=SimpleNamespace(message_id=99),
-            side_effect=outage if failed_stage == "final_send" else None,
-        ),
+        send_message=AsyncMock(side_effect=send),
+        edit_message_text=AsyncMock(side_effect=edit),
     )
     context = SimpleNamespace(user_data={}, chat_data={}, bot=bot)
     asyncio.run(agents.agent_message_handler(update, context))
-
     resolve.assert_awaited_once()
     assert resolve.await_args.args[0].media[0].kind == "audio"
     assert [(req.text, req.request_id) for req in requests] == [
         ("How is the market?", "telegram:4242:17")
     ]
     assert not context.chat_data
-    markdown = _markdown(bot.send_rich_message.await_args.kwargs)
-    assert markdown.startswith("🎙 How is the market?")
-    assert "The answer." in markdown
-    assert (
-        "stage=input_status"
-        if failed_stage == "input_status"
-        else "status=delivery_unknown"
-    ) in caplog.text
+    assert bot.send_message.await_count == 1 and not bot.send_rich_message.called
+    if failed_stage == "final_edit":
+        final_edits = [
+            call.kwargs
+            for call in bot.edit_message_text.await_args_list
+            if call.kwargs.get("reply_markup") is None
+        ]
+        assert len(final_edits) == 3
+        assert all(call["message_id"] == 99 for call in final_edits)
+        assert message_text(final_edits[-1]).startswith("🎙 How is the market?")
+        assert "The answer." in message_text(final_edits[-1])
+    else:
+        assert not bot.edit_message_text.called
+        assert "status=delivery_unknown" in caplog.text
+    assert "Telegram final delivery status=" in caplog.text
     assert "SECRET" not in caplog.text
 
 
@@ -412,8 +431,6 @@ def test_voice_input_failure_does_not_invent_an_ai_prompt(monkeypatch, caplog, c
     update.message.voice = SimpleNamespace(
         file_id="voice", file_unique_id="voice", file_size=3
     )
-    status = SimpleNamespace(message_id=22, edit_text=AsyncMock())
-    update.message.answer = AsyncMock(return_value=status)
     error = telegram_input.InputError(
         code, "Could not read the audio. Please try again."
     )
@@ -424,14 +441,14 @@ def test_voice_input_failure_does_not_invent_an_ai_prompt(monkeypatch, caplog, c
     )
     prompt = AsyncMock()
     monkeypatch.setattr(agents.runtime, "prompt", prompt)
-    context = SimpleNamespace(user_data={}, chat_data={}, bot=object())
+    bot = _bot()
+    context = SimpleNamespace(user_data={}, chat_data={}, bot=bot)
     asyncio.run(agents.agent_message_handler(update, context))
 
     assert not prompt.called
     assert not context.chat_data
-    assert "Please try again" in status.edit_text.await_args.kwargs["text"]
     resolve.assert_awaited_once()
-    assert status.edit_text.await_args.kwargs["text"] == error.user_message
+    assert any(message_text(call) == error.user_message for call in _output_calls(bot))
     assert "SECRET" not in caplog.text
 
 
@@ -467,18 +484,25 @@ def test_missing_cli_is_explained_and_notice_failure_is_logged(
     patch_agents(monkeypatch, "_is_agent_available", lambda _: False)
     prompt = AsyncMock()
     monkeypatch.setattr(agents.runtime, "prompt", prompt)
-    update.message.answer = AsyncMock(
-        side_effect=network_failure("unavailable") if delivery_fails else None
+    bot = _bot(
+        edit_message_text=AsyncMock(
+            side_effect=network_failure("unavailable") if delivery_fails else None,
+            return_value=True,
+        )
     )
-    context = SimpleNamespace(user_data={}, chat_data={}, bot=object())
+    context = SimpleNamespace(user_data={}, chat_data={}, bot=bot)
     asyncio.run(agents.agent_message_handler(update, context))
 
     assert not prompt.called
-    notice = update.message.answer.await_args.kwargs["text"]
+    notice = next(
+        message_text(call)
+        for call in _output_calls(bot)
+        if "not available" in message_text(call)
+    )
     assert "claude-code" in notice and "/agent" in notice
     assert "not available" in notice
     if delivery_fails:
-        assert "stage=agent_unavailable" in caplog.text
+        assert "Telegram final delivery status=" in caplog.text
 
 
 @pytest.mark.parametrize("has_update", [False, True])

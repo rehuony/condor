@@ -554,7 +554,7 @@ async def process_field_input(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="Fetching market data...", callback_data="bots:noop"
+                        text="Fetching Market Data...", callback_data="bots:noop"
                     )
                 ]
             ]

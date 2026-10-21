@@ -408,7 +408,7 @@ deploy_hummingbot_api() {
         use_tailscale_early="N"
         # Step 1 already recorded USE_TAILSCALE=true. Leaving it would put
         # the rest of the system at odds with what we just told the user:
-        # main.py would try a tailnet bind, fail closed to loopback, and
+        # Condor would try a tailnet bind, fail closed to loopback, and
         # doctor would report the dashboard as unreachable -- all correct
         # individually, and all confusing after "continuing without".
         USE_TAILSCALE=false

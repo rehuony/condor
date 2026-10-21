@@ -447,6 +447,16 @@ def test_an_overwrite_confirmation_carries_the_recorded_impact(
 
     from condor.telegram.approvals import TelegramChannel
 
+    # Resolved approvals are not rendered again; exercise delivery with a fresh ask.
+    pending = registry.register(
+        str(key),
+        1,
+        pending.summary,
+        pending.tool_call,
+        pending.options,
+        origin=pending.origin,
+        detail=pending.detail,
+    )
     asyncio.run(TelegramChannel(_Bot(), 42).deliver(pending))
     assert expected in sent["text"]
     assert sent["text"].index(pending.summary) < sent["text"].index(expected)

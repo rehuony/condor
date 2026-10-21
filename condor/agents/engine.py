@@ -55,9 +55,10 @@ log = logging.getLogger(__name__)
 # which is the single place that mutates it and records each transition to
 # disk. These stay as thin delegations for existing callers.
 #
-# NOTE: neither this module nor condor.runtime.* belongs in main.py's
-# modules_to_reload — they hold live process state (running tick tasks, ACP
-# subprocesses), and re-executing them would orphan every running loop.
+# NOTE: neither this module nor condor.runtime.* belongs in
+# condor/reload.py's modules_to_reload — they hold live process state
+# (running tick tasks, ACP subprocesses), and re-executing them would orphan
+# every running loop.
 
 
 class _NullTracker:

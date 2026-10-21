@@ -376,6 +376,10 @@ def test_tools_finish_only_after_actual_results_and_authorize_complete_args(fail
             return "found"
 
         async def allow(call, options):
+            pending = [event for event in events if isinstance(event, ToolCallEvent)]
+            assert [
+                (event.tool_call_id, event.name, event.status) for event in pending
+            ] == [("call-1", "lookup", "pending")]
             authorized.append(call["input"])
             return {"outcome": {"outcome": "selected", "optionId": "allow"}}
 
@@ -402,12 +406,13 @@ def test_tools_finish_only_after_actual_results_and_authorize_complete_args(fail
         assert authorized == [{"value": 12}]
         assert [
             e.status for e in events if isinstance(e, (ToolCallEvent, ToolCallUpdate))
-        ] == ["in_progress"]
+        ] == ["pending", "in_progress"]
         finish.set()
         await consumer
         updates = [e for e in events if isinstance(e, ToolCallUpdate)]
         assert len(updates) == 1
         assert updates[0].status == ("failed" if fails else "completed")
+        assert updates[0].name == "lookup"
         assert events[-1] == PromptDone("end_turn")
 
     asyncio.run(asyncio.wait_for(run(), timeout=2))

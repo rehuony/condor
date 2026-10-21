@@ -345,6 +345,13 @@ def test_a_late_settle_lets_the_next_turn_through_clean(monkeypatch):
         replace(timeouts.TIMEOUTS, prompt_cancel=0.05, prompt_settle=5),
     )
     client = _client(answers_cancel=True, cancel_delay=0.2)
+    permissions = []
+
+    async def allow(tool_call, options):
+        permissions.append(tool_call)
+        return {"outcome": {"outcome": "selected", "optionId": "allow"}}
+
+    client.permission_callback = allow
 
     async def scenario():
         first: list = []
@@ -361,8 +368,24 @@ def test_a_late_settle_lets_the_next_turn_through_clean(monkeypatch):
         task = asyncio.create_task(
             _drive(client.prompt_stream("actually, what's the SOL price?"), second)
         )
+        await asyncio.sleep(0)
+        assert client._unsettled_req is not None
+        permission = {
+            "sessionId": "sess-1",
+            "options": [{"optionId": "allow", "kind": "allow_once"}],
+            "toolCall": {"title": "place_order", "rawInput": {}},
+        }
+        assert await client._on_request_permission(**permission) == {
+            "outcome": {"outcome": "cancelled"}
+        }
+        assert permissions == []
         # The gate holds the new turn until the old one settles for real.
         await asyncio.sleep(0.3)
+        assert (await client._on_request_permission(**permission))["outcome"] == {
+            "outcome": "selected",
+            "optionId": "allow",
+        }
+        assert len(permissions) == 1
         client._on_session_update("sess-1", _chunk("SOL is $200"))
         await _finish(client)
         await asyncio.wait_for(task, timeout=5)

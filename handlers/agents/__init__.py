@@ -124,7 +124,7 @@ from .session import (
 from .stop import (
     _handle_close,
     _handle_stop,
-    handle_stopped_generation,
+    handle_stop_callback,
     stop_command,
 )
 from .stream import TelegramStreamer
@@ -286,6 +286,9 @@ PREFIX_ACTIONS: tuple[PrefixRoute, ...] = (
 async def agent_callback_handler(update: Update, context: Context) -> None:
     """Route agent:* callbacks."""
     query = update.callback_query
+    if query.data and query.data.startswith("agent:stop_run:"):
+        await handle_stop_callback(update, context)
+        return
     await query.answer()
 
     chat_type = update.effective_chat.type
@@ -349,7 +352,7 @@ __all__ = [
     "_edit_render",
     "_ensure_chat_session",
     "_handle_agent_argument",
-    "handle_stopped_generation",
+    "handle_stop_callback",
     "_handle_close",
     "_handle_compact",
     "_handle_compact_custom_prompt",

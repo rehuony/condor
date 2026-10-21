@@ -195,7 +195,7 @@ async def config_callback_handler(update: Update, context: Context) -> None:
         await admin_callback_handler(update, context)
 
 
-#: The callback data this module answers; ``main.register_handlers`` routes
+#: The callback data this module answers; ``handlers.routes`` routes
 #: it here after the per-module ``^admin:`` handler has had its turn.
 CONFIG_CALLBACK_PATTERN = (
     "^config_|^modify_field_|^add_server_|^api_server_|^api_key_|^gateway_|^admin:"

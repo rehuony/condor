@@ -211,7 +211,7 @@ def _preflight_keyboard(key: str, preflight) -> InlineKeyboardMarkup:
     # and spelling a component key out twice was already within 3 of it.
     scope = "a" if key == ALL else "s"
     for component, action in offered:
-        label = f"{action.title()} conflicts in {component}"
+        label = f"{action.title()} Conflicts in {component}"
         # Discarding destroys work, so it gets its own confirm screen.
         prefix = "update_cfix" if action == "discard" else "update_fix"
         rows.append(
@@ -271,7 +271,7 @@ async def _confirm_fix(query, component: str, action: str, key: str) -> None:
     keyboard = [
         [
             InlineKeyboardButton(
-                text="Yes, discard",
+                text="Yes, Discard",
                 callback_data=(
                     f"admin:update_fix:{component}:{action}:"
                     f"{'a' if key == ALL else 's'}"
@@ -280,7 +280,7 @@ async def _confirm_fix(query, component: str, action: str, key: str) -> None:
         ],
         [
             InlineKeyboardButton(
-                text="Keep them", callback_data=f"admin:update_go:{key}"
+                text="Keep Them", callback_data=f"admin:update_go:{key}"
             )
         ],
     ]

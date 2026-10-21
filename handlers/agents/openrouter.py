@@ -159,7 +159,7 @@ async def _resolve_openrouter_typed_slug(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Use this model", callback_data="agent:or_type_confirm"
+                    text="Use This Model", callback_data="agent:or_type_confirm"
                 ),
                 InlineKeyboardButton(
                     text="Cancel", callback_data="agent:or_type_cancel"

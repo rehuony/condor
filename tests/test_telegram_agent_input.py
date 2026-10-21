@@ -22,6 +22,7 @@ from condor.telegram.input import InputError, TelegramInputResolver
 from condor.telegram.update import TgUpdate
 from handlers import agents
 from tests.conftest import patch_agents
+from tests.support.telegram import message_text
 
 USER = 4242
 
@@ -49,8 +50,17 @@ def update(message_id=1, **fields):
     )
 
 
+def output_text(world):
+    call = (
+        world.context.bot.edit_message_text.await_args
+        or world.context.bot.send_message.await_args
+    )
+    return message_text(call.kwargs)
+
+
 @pytest.fixture
 def world(monkeypatch):
+    monkeypatch.setattr("condor.telegram.output.writer.UPDATE_INTERVAL", 0.001)
     calls = []
 
     class Client:
@@ -95,15 +105,14 @@ def world(monkeypatch):
     monkeypatch.setattr(Message, "delete", AsyncMock())
     bot = SimpleNamespace(
         send_message=AsyncMock(return_value=status),
-        send_rich_message_draft=AsyncMock(return_value=True),
-        edit_message_text=AsyncMock(),
+        edit_message_text=AsyncMock(return_value=status),
         delete_message=AsyncMock(),
     )
 
     async def send_rich_message(**kwargs):
         payload = dict(kwargs)
-        rich = payload.pop("rich_message", None)
-        payload["text"] = getattr(rich, "markdown", "") or payload.get("text", "")
+        payload["text"] = message_text(payload)
+        payload.pop("rich_message", None)
         return await bot.send_message(**payload)
 
     bot.send_rich_message = send_rich_message
@@ -246,7 +255,7 @@ def test_one_failed_album_file_never_becomes_a_partial_prompt(world):
         assert not world.calls
         assert not conversations.read_transcript(USER, info.conversation_id)
         assert not attachments.attachments_dir(USER, info.conversation_id).exists()
-        assert "send it again" in world.status.edit_text.await_args.kwargs["text"]
+        assert "send it again" in output_text(world)
         await world.finish()
 
     asyncio.run(run())
@@ -339,10 +348,7 @@ def test_text_only_model_receives_no_pixels_and_reports_capability_error(world):
         await world.start()
         await agents.agent_message_handler(update(photo=photo()), world.context)
         assert not world.calls
-        assert (
-            "cannot read images"
-            in world.context.bot.send_message.await_args.kwargs["text"]
-        )
+        assert "cannot read images" in output_text(world)
         await world.finish()
 
     asyncio.run(run())
@@ -587,6 +593,127 @@ def test_cancelled_accepted_turn_keeps_its_recorded_image(world, monkeypatch):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("stage", ["attachment", "acceptance"])
+@pytest.mark.parametrize("shutdown", [False, True], ids=["stop", "stop-then-shutdown"])
+def test_cancelled_preparation_waits_for_file_ownership(
+    world, monkeypatch, stage, shutdown
+):
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+    original = (
+        attachments.save if stage == "attachment" else conversations.Recorder.accept
+    )
+
+    def blocked(*args):
+        result = original(*args)
+        entered.set()
+        assert release.wait(2)
+        return result
+
+    if stage == "attachment":
+        monkeypatch.setattr(attachments, "save", blocked)
+    else:
+        monkeypatch.setattr(conversations.Recorder, "accept", blocked)
+
+    async def run():
+        info = await world.start()
+        task = asyncio.create_task(
+            agents.agent_message_handler(update(photo=photo()), world.context)
+        )
+        closing = None
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            task.cancel()
+            await asyncio.sleep(0)
+            if shutdown:
+                closing = asyncio.create_task(get_ingress().close())
+                await asyncio.sleep(0)
+                assert get_ingress().closed
+                assert task.cancelling() == 1
+                assert not closing.done()
+            release.set()
+            if closing is not None:
+                await asyncio.wait_for(closing, 1)
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 1)
+            assert not world.calls
+            transcript = conversations.read_transcript(USER, info.conversation_id)
+            if stage == "attachment":
+                assert not transcript
+                assert not list(
+                    attachments.attachments_dir(USER, info.conversation_id).iterdir()
+                )
+            else:
+                user = next(turn for turn in transcript if turn.role == "user")
+                assert (
+                    attachments.load(
+                        USER, info.conversation_id, user.attachments[0]["id"]
+                    )[0]
+                    == picture()
+                )
+            assert not get_ingress()._pending
+        finally:
+            release.set()
+            task.cancel()
+            await asyncio.gather(
+                task, *([closing] if closing else []), return_exceptions=True
+            )
+            await world.finish()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("change", ["conversation", "access"])
+def test_change_during_attachment_save_is_rejected_before_runtime_acceptance(
+    world, monkeypatch, change
+):
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+    save = attachments.save
+
+    def blocked_save(*args):
+        attachment = save(*args)
+        entered.set()
+        assert release.wait(2)
+        return attachment
+
+    monkeypatch.setattr(attachments, "save", blocked_save)
+
+    async def run():
+        original = await world.start()
+        task = asyncio.create_task(
+            agents.agent_message_handler(update(photo=photo()), world.context)
+        )
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            current = original
+            if change == "conversation":
+                await runtime.destroy(SessionKey.telegram(USER))
+                current = await world.start()
+                assert current.conversation_id != original.conversation_id
+            else:
+                world.role[0] = config_manager.UserRole.BLOCKED
+            release.set()
+            await asyncio.wait_for(task, 1)
+            assert not world.calls
+            assert not conversations.has_request(USER, f"telegram:{USER}:1")
+            assert not conversations.read_transcript(USER, original.conversation_id)
+            assert not conversations.read_transcript(USER, current.conversation_id)
+            assert not list(
+                attachments.attachments_dir(USER, original.conversation_id).iterdir()
+            )
+            assert "chat or your access changed" in output_text(world)
+        finally:
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await world.finish()
+
+    asyncio.run(run())
+
+
 def test_partial_save_failure_cleans_unaccepted_files(world, monkeypatch):
     save = attachments.save
     saved = []
@@ -618,7 +745,7 @@ def test_partial_save_failure_cleans_unaccepted_files(world, monkeypatch):
             list(attachments.attachments_dir(USER, info.conversation_id).iterdir())
             == []
         )
-        assert "Could not save" in world.status.edit_text.await_args.kwargs["text"]
+        assert "Could not save" in output_text(world)
         await world.finish()
 
     asyncio.run(run())
@@ -654,16 +781,17 @@ def test_late_runtime_duplicate_removes_only_new_unreferenced_attachments(
 def test_reset_uses_own_text_even_when_reply_contains_media(world):
     async def run():
         await world.start()
-        await agents.agent_message_handler(
-            update(
-                2,
-                text="-",
-                reply_to_message=update(photo=photo()).message.model_dump(
-                    exclude_none=True
-                ),
+        incoming = update(
+            2,
+            text="-",
+            reply_to_message=update(photo=photo()).message.model_dump(
+                exclude_none=True
             ),
-            world.context,
         )
+        await agents.agent_message_handler(incoming, world.context)
+        await agents.agent_message_handler(incoming, world.context)
+        assert world.replies.await_count == 1
+        world.context.bot.send_message.assert_not_awaited()
         assert not world.downloads.called
         assert not world.calls
         assert await runtime.get_info(SessionKey.telegram(USER)) is None

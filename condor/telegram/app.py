@@ -2,8 +2,8 @@
 
 :class:`TelegramApp` owns one :class:`aiogram.Bot`, one
 :class:`aiogram.Dispatcher` and the :class:`~condor.telegram.state.UserStateStore`
-behind ``context.user_data``. The dispatcher carries four fixed handlers —
-message, callback query, stopped generation, error — that build a
+behind ``context.user_data``. The dispatcher carries three fixed handlers —
+message, callback query, error — that build a
 :class:`~condor.telegram.update.TgUpdate`/:class:`~condor.telegram.update.TgContext`
 pair and call whatever the current :class:`~condor.telegram.routes.RouteTable`
 names. Handlers therefore keep their ``(update, context)`` signature and a hot
@@ -24,9 +24,7 @@ from typing import Any, Awaitable, Callable, Mapping
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
-from aiogram.types import CallbackQuery, ErrorEvent, Message
-from aiogram.types import MessageGenerationStopped as StoppedGeneration
-from aiogram.types import Update
+from aiogram.types import CallbackQuery, ErrorEvent, Message, Update
 
 from .routes import RouteTable, get_routes
 from .state import UserStateStore
@@ -34,9 +32,8 @@ from .update import TgContext, TgUpdate, command_args, command_name
 
 log = logging.getLogger(__name__)
 
-#: The update kinds the bot asks Telegram for. ``stopped_message_generation``
-#: is what a user's tap on "stop" during a draft arrives as (Bot API 10.3).
-ALLOWED_UPDATES = ["message", "callback_query", "stopped_message_generation"]
+#: The update kinds the bot asks Telegram for.
+ALLOWED_UPDATES = ["message", "callback_query"]
 
 #: Chats whose ordinary messages reach the content router. Channel posts and
 #: anything without a sender never do.
@@ -195,14 +192,6 @@ class TelegramApp:
             if handler is None:
                 return
             update = TgUpdate(callback_query=query, raw=event_update)
-            await handler(update, self._context_for(update))
-
-        @dp.stopped_message_generation()
-        async def _on_stopped(event: StoppedGeneration, event_update: Update) -> None:
-            handler = get_routes().stopped_generation
-            if handler is None:
-                return
-            update = TgUpdate(stopped_message_generation=event, raw=event_update)
             await handler(update, self._context_for(update))
 
         @dp.errors()

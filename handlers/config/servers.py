@@ -1438,7 +1438,7 @@ async def start_share_flow(query, context: Context, server_name: str) -> None:
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        text="✏️ Enter ID manually",
+                        text="✏️ Enter ID Manually",
                         callback_data=f"api_server_share_manual_{server_name}",
                     )
                 ]
@@ -1514,7 +1514,7 @@ async def select_share_user(
     keyboard = [
         [
             InlineKeyboardButton(
-                text="💱 Trader (can trade)",
+                text="💱 Trader (Can Trade)",
                 callback_data=f"api_server_perm_trader_{server_name}",
             )
         ],
@@ -1682,7 +1682,7 @@ async def handle_share_user_id_input(update: Update, context: Context) -> None:
     keyboard = [
         [
             InlineKeyboardButton(
-                text="💱 Trader (can trade)",
+                text="💱 Trader (Can Trade)",
                 callback_data=f"api_server_perm_trader_{server_name}",
             )
         ],

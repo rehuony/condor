@@ -1,5 +1,6 @@
 """Exercise the real aiogram dispatcher and registered Telegram content router."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -7,10 +8,10 @@ import pytest
 import pytest_asyncio
 from aiogram.types import Message
 
-import main
 import utils.auth as auth
 from config_manager import UserRole
 from handlers import agents, bots
+from handlers.routes import register_handlers
 from tests.conftest import patch_agents
 from tests.support.telegram_offline import message_update, offline_app, update_from
 
@@ -86,7 +87,7 @@ async def dispatch(monkeypatch, tmp_path):
     patch_agents(monkeypatch, "agent_message_handler", state.ai)
     monkeypatch.setattr(bots, "handle_config_file_upload", state.upload)
     state.app = offline_app(tmp_path)
-    main.register_handlers(state.app)
+    register_handlers()
 
     async def error_handler(update, context):
         state.errors.append(context.error)
@@ -121,6 +122,23 @@ def prompt_dispatch(dispatch, monkeypatch):
     patch_agents(monkeypatch, "_stream_agent_turn", dispatch.turn)
     patch_agents(monkeypatch, "_handle_pasted_secrets", dispatch.secrets)
     return dispatch
+
+
+def final_reply_text(dispatch):
+    from condor.telegram.format import plain_text
+
+    updates = [
+        fields
+        for method, fields in dispatch.app.bot.session.requests
+        if method in {"sendMessage", "sendRichMessage", "editMessageText"}
+    ]
+    assert updates, "input errors settle the request's editable receipt"
+    final = updates[-1]
+    return (
+        plain_text(json.loads(final["rich_message"])["html"])
+        if "rich_message" in final
+        else final["text"]
+    )
 
 
 @pytest.mark.asyncio
@@ -169,7 +187,8 @@ async def test_rejected_rich_content_does_not_skip_readable_secret_scan(
     prompt_dispatch.secrets.assert_awaited_once()
     assert prompt_dispatch.secrets.await_args.args[2] == secret
     prompt_dispatch.turn.assert_not_awaited()
-    prompt_dispatch.reply.assert_awaited_once()
+    prompt_dispatch.reply.assert_not_awaited()
+    assert "not supported" in final_reply_text(prompt_dispatch)
 
 
 @pytest.mark.asyncio
@@ -238,18 +257,19 @@ async def test_rich_armed_agent_input_receives_flattened_text(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "content",
+    "content, expected",
     [
-        {"rich_message": {"blocks": [_rich_photo_block()]}},
-        _rich("x" * 32769),
+        ({"rich_message": {"blocks": [_rich_photo_block()]}}, "not supported"),
+        (_rich("x" * 32769), "32,768"),
     ],
 )
 async def test_invalid_rich_message_is_refused_before_prompting(
-    prompt_dispatch, content
+    prompt_dispatch, content, expected
 ):
     await prompt_dispatch.send(content)
     prompt_dispatch.turn.assert_not_awaited()
-    prompt_dispatch.reply.assert_awaited_once()
+    prompt_dispatch.reply.assert_not_awaited()
+    assert expected in final_reply_text(prompt_dispatch)
 
 
 @pytest.mark.asyncio
@@ -372,7 +392,7 @@ async def test_commands_keep_their_own_dispatch_and_never_reach_ai(
 ):
     stop = AsyncMock()
     patch_agents(monkeypatch, "stop_command", stop)
-    main.register_handlers(dispatch.app)
+    register_handlers()
     await dispatch.send(
         {
             "text": "/stop",

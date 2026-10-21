@@ -6,7 +6,6 @@ from condor.runtime import (
     secrets,
 )
 from condor.telegram.errors import NetworkFailure
-from condor.telegram.output.runs import bump_chat
 from condor.telegram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -86,7 +85,6 @@ async def _handle_pasted_secrets(update, context, text: str, *, messages=None) -
             )
         )
         await context.bot.send_message(chat_id=update.effective_chat.id, text=notice)
-        bump_chat(update.effective_chat.id)
 
     from condor.preferences import secret_notices_enabled
 
@@ -112,14 +110,13 @@ async def _handle_pasted_secrets(update, context, text: str, *, messages=None) -
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="Stop warning me",
+                            text="Stop Warning Me",
                             callback_data="agent:secret_notices_off",
                         )
                     ]
                 ]
             ),
         )
-        bump_chat(update.effective_chat.id)
 
 
 async def _notice_input_secrets(update, context, text: str, messages=None) -> None:

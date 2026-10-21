@@ -48,7 +48,7 @@ apart) and the line between them is *who writes and when*:
 (``data/code_runs/`` in the ``run_code`` tool description), so folding it into
 ``.condor/`` would open a new split rather than close one. What it did lack was
 a resolver: three of its stores built their path at import from the bare name
-``data``, making it relative to the *working directory*, while ``main.py``'s
+``data``, making it relative to the *working directory*, while the user-state
 pickle and ``code_runs`` were already anchored at the repo. Both now come from
 :func:`data_dir`.
 

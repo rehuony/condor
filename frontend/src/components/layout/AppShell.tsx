@@ -157,6 +157,13 @@ function AppShellBody() {
           <CurrencySelector />
 
           <div className="flex items-center gap-1">
+            {/* Inside the ChatProvider on purpose: the bell reads the same
+                react-query cache the chat socket pushes live notifications
+                into, and the provider opens that socket on every route — not
+                only on the chat workspace — which is what makes the bell
+                update without a reload wherever the user is (FEAT-048). */}
+            <NotificationBell />
+
             <button
               onClick={toggleTheme}
               className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]"
@@ -170,13 +177,6 @@ function AppShellBody() {
                theme === "light" ? <Eye className="h-4 w-4" /> :
                <Moon className="h-4 w-4" />}
             </button>
-
-            {/* Inside the ChatProvider on purpose: the bell reads the same
-                react-query cache the chat socket pushes live notifications
-                into, and the provider opens that socket on every route — not
-                only on the chat workspace — which is what makes the bell
-                update without a reload wherever the user is (FEAT-048). */}
-            <NotificationBell />
           </div>
         </div>
       </header>

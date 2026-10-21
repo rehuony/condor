@@ -5,8 +5,8 @@ subprocess, CLI, cron) drive sessions through these routes instead of importing
 Condor internals, which is what lets the dashboard list and kill a session that
 was started from Telegram.
 
-Note: modules under ``condor/web/routes/`` are not in ``main.py``'s hot-reload
-list, so changes here need a full bot restart.
+Note: modules under ``condor/web/routes/`` are not in the hot-reload list
+(``condor/reload.py``), so changes here need a full bot restart.
 """
 
 from __future__ import annotations

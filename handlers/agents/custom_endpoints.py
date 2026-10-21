@@ -172,7 +172,7 @@ async def _resolve_custom_url(update: Update, context: Context, text: str) -> No
 
 
 async def _handle_custom_no_key(update: Update, context: Context) -> None:
-    """'No API key needed' — validate the pending endpoint unauthenticated."""
+    """'No API Key Needed' — validate the pending endpoint unauthenticated."""
     await _validate_and_save(update, context, api_key="")
 
 
@@ -306,7 +306,7 @@ async def _handle_custom_use(
                 f"'{name}' isn't responding: {e}",
                 reply_markup=_custom_error_keyboard(
                     f"agent:cu_use:{key}",
-                    secondary=("Change API key", f"agent:cu_key:{key}"),
+                    secondary=("Change API Key", f"agent:cu_key:{key}"),
                 ),
             )
             return
@@ -407,10 +407,10 @@ async def _handle_custom_pick(update: Update, context: Context, token: str) -> N
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Change model", callback_data="agent:cu_page:0"
+                    text="Change Model", callback_data="agent:cu_page:0"
                 )
             ],
-            [InlineKeyboardButton(text="Back to agent", callback_data="agent:menu")],
+            [InlineKeyboardButton(text="Back to Agent", callback_data="agent:menu")],
         ]
     )
     await _show(

@@ -7,15 +7,66 @@ before escaping it so every page closes its formatting.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from html import escape
+from html import escape, unescape
 from urllib.parse import quote, urlsplit
+from xml.etree import ElementTree
 
 import markdown
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+from markdown.extensions import Extension
+from markdown.inlinepatterns import InlineProcessor, SimpleTagInlineProcessor
+from markdown.util import AtomicString
 
 MAX_MESSAGE_LEN = 4096
 RICH_MAX_LEN = 32_000
+_PLAIN_LANGUAGES = {"text", "txt", "plain", "plaintext"}
+_LANGUAGE = re.compile(r"[A-Za-z0-9_+#.-]{1,32}\Z", re.ASCII)
+
+
+class _MathTag(InlineProcessor):
+    def handleMatch(self, match, data):
+        node = ElementTree.Element("tg-math")
+        node.text = AtomicString(unescape(match.group(1)))
+        return node, match.start(), match.end()
+
+
+class _RichInline(Extension):
+    """Native inline styles missing from the base Markdown parser."""
+
+    def extendMarkdown(self, md):
+        md.ESCAPED_CHARS = [*md.ESCAPED_CHARS, "~", "|", "="]
+        # Literal backtick code runs first (190); preserve explicit LaTeX tags
+        # before normal Markdown escaping (180) or emphasis can alter them.
+        md.inlinePatterns.register(
+            _MathTag(r"<tg-math>(.*?)</tg-math>"), "tg-math", 185
+        )
+        for priority, (pattern, tag) in enumerate(
+            [
+                (r"(~~)(.+?)(~~)", "s"),
+                (r"(\|\|)(.+?)(\|\|)", "tg-spoiler"),
+                (r"(==)(.+?)(==)", "mark"),
+            ],
+            start=173,
+        ):
+            md.inlinePatterns.register(
+                SimpleTagInlineProcessor(pattern, tag), tag, priority
+            )
+
+
+def _code_language(node: Tag | None) -> str:
+    if node is None:
+        return ""
+    for value in node.get("class", []):
+        if value.startswith("language-"):
+            language = value.removeprefix("language-")
+            if (
+                _LANGUAGE.fullmatch(language)
+                and language.lower() not in _PLAIN_LANGUAGES
+            ):
+                return language
+    return ""
 
 
 def split_text(text: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
@@ -72,12 +123,75 @@ def render_markdown(
     *,
     literal_prefix: str = "",
     max_wire_len: int | None = None,
+    rich: bool = False,
 ) -> list[TelegramText]:
     """Headings, lists, tables, code and links, balanced on every page."""
-    html = markdown.markdown(text, extensions=["fenced_code", "tables", "sane_lists"])
+    extensions = ["fenced_code", "tables", "sane_lists"]
+    if rich:
+        extensions.append(_RichInline())
+    html = markdown.markdown(text, extensions=extensions)
     return render_html(
-        html, max_len, literal_prefix=literal_prefix, max_wire_len=max_wire_len
+        html,
+        max_len,
+        literal_prefix=literal_prefix,
+        max_wire_len=max_wire_len,
+        rich=rich,
     )
+
+
+def render_rich_reply(text: str) -> str | None:
+    """Format one existing reply segment, without creating or dropping pages.
+
+    Long literal blocks use native rich-message disclosure. The caller keeps
+    the original source for plain delivery if formatting cannot fit or fails.
+    """
+    try:
+        pages = render_markdown(text, max_wire_len=RICH_MAX_LEN, rich=True)
+        if len(pages) != 1 or not pages[0].text.strip():
+            return None
+        soup = BeautifulSoup(
+            pages[0].html,
+            "html.parser",
+            preserve_whitespace_tags={"[document]", "pre", "code"},
+        )
+        for block in soup.find_all("pre"):
+            literal = block.get_text()
+            lines = len(literal.splitlines())
+            if lines <= 12 and len(literal.encode("utf-16-le")) // 2 <= 900:
+                continue
+            language = _code_language(block.find("code"))
+            label = language[:1].upper() + language[1:] if language else "Text"
+            details = soup.new_tag("details")
+            summary = soup.new_tag("summary")
+            summary.string = f"{label} · {lines} {'line' if lines == 1 else 'lines'}"
+            details.append(summary)
+            block.replace_with(details)
+            details.append(block)
+        visible_size = len(soup.get_text().encode("utf-16-le")) // 2
+        # Rich HTML collapses source whitespace, unlike Telegram parse_mode
+        # HTML. Express existing line breaks and list indentation explicitly.
+        for node in list(soup.find_all(string=True)):
+            if node.find_parent(["pre", "code", "tg-math"]):
+                continue
+            lines = str(node).split("\n")
+            parts = []
+            for index, line in enumerate(lines):
+                if index:
+                    parts.append(soup.new_tag("br"))
+                line = re.sub(
+                    r"^ {2,}", lambda match: "\N{NO-BREAK SPACE}" * len(match[0]), line
+                )
+                parts.append(NavigableString(line))
+            node.replace_with(*parts)
+        html = str(soup)
+        if (
+            visible_size > MAX_MESSAGE_LEN
+            or len(html.encode("utf-16-le")) // 2 > RICH_MAX_LEN
+        ):
+            return None
+        return html
+    except Exception:
+        return None
 
 
 def render_html(
@@ -86,6 +200,7 @@ def render_html(
     *,
     literal_prefix: str = "",
     max_wire_len: int | None = None,
+    rich: bool = False,
 ) -> list[TelegramText]:
     """Split formatted HTML by visible text, closing tags on every page."""
     soup = BeautifulSoup(
@@ -116,6 +231,15 @@ def render_html(
         if isinstance(node, Comment):
             return
         if isinstance(node, NavigableString):
+            # Ignore serializer whitespace between block/list nodes. Actual
+            # paragraph text and literal code whitespace remain untouched.
+            if (
+                not node.strip()
+                and "\n" in node
+                and node.parent.name
+                in {"[document]", "div", "ul", "ol", "li", "blockquote"}
+            ):
+                return
             runs.append((str(node), wrappers))
             return
         if not isinstance(node, Tag):
@@ -130,6 +254,9 @@ def render_html(
         if name == "img":
             runs.append((f"{node.get('alt', 'Image')} ({node.get('src', '')})", ()))
             return
+        if name in {"ul", "ol"} and node.parent.name == "li":
+            if runs and not runs[-1][0].endswith("\n"):
+                runs.append(("\n", ()))
         if name == "li":
             parent = node.parent
             marker = "• "
@@ -139,7 +266,8 @@ def render_html(
                 except ValueError:
                     first = 1
                 marker = f"{first + len(node.find_previous_siblings('li'))}. "
-            runs.append((marker, ()))
+            depth = sum(parent.name in {"ul", "ol"} for parent in node.parents) - 1
+            runs.append(("  " * max(0, depth) + marker, ()))
         tag = {
             "strong": "b",
             "em": "i",
@@ -150,9 +278,12 @@ def render_html(
         }.get(name, name)
         child_wrappers = wrappers
         if name == "code" and node.has_attr("class"):
-            language = escape(" ".join(node["class"]), quote=True)
-            child_wrappers += ((f'<code class="{language}">', "</code>"),)
-        elif tag in {"b", "i", "s", "u", "pre", "code", "tg-spoiler"}:
+            language = _code_language(node)
+            start = f'<code class="language-{language}">' if language else "<code>"
+            child_wrappers += ((start, "</code>"),)
+        elif tag in {"b", "i", "s", "u", "pre", "code", "tg-spoiler"} or (
+            rich and tag in {"mark", "sub", "sup", "tg-math"}
+        ):
             child_wrappers += ((f"<{tag}>", f"</{tag}>"),)
         elif name == "span" and "tg-spoiler" in node.get("class", []):
             child_wrappers += (("<tg-spoiler>", "</tg-spoiler>"),)
@@ -182,7 +313,9 @@ def render_html(
                 return
         for child in node.children:
             visit(child, child_wrappers)
-        if (
+        if name in {"ul", "ol"} and node.parent.name == "li":
+            runs.append(("\n", ()))
+        elif (
             name in {"p", "div", "ul", "ol", "blockquote", "pre"}
             or name.startswith("h")
             and name[1:].isdigit()
@@ -199,7 +332,8 @@ def render_html(
     for value, wrappers in runs:
         if not wrappers and not value.strip() and "\n" in value:
             if normalized and not normalized[-1][1] and not normalized[-1][0].strip():
-                normalized[-1] = ("\n\n", ())
+                count = min(2, max(value.count("\n"), normalized[-1][0].count("\n")))
+                normalized[-1] = ("\n" * count, ())
             else:
                 normalized.append((value, wrappers))
         else:
@@ -263,4 +397,6 @@ def plain_text(html: str) -> str:
     )
     for link in soup.find_all("a"):
         link.replace_with(f"{link.get_text()} ({link.get('href', '')})")
+    for line_break in soup.find_all("br"):
+        line_break.replace_with("\n")
     return soup.get_text()

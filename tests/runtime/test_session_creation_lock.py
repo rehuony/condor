@@ -194,3 +194,57 @@ def test_fast_path_returns_without_spawning(registry):
     assert registry._pending_creates == {}
     assert registry._creation_locks == {}
     assert registry._creation_lock_refs == {}
+
+
+@pytest.mark.parametrize("stage", ["start", "prompt"])
+def test_cancelled_creation_stops_client_and_releases_slot(
+    registry, monkeypatch, stage
+):
+    key = SessionKey.telegram(42)
+    original = getattr(_SlowClient, stage)
+    monkeypatch.setattr(registry, "build_initial_context", lambda *a, **k: "context")
+
+    async def scenario():
+        entered = asyncio.Event()
+
+        async def block(self, *args):
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(_SlowClient, stage, block)
+        creating = asyncio.create_task(registry.get_or_create_session(_spec(key)))
+        await asyncio.wait_for(entered.wait(), 1)
+        client = _SlowClient.instances[-1]
+        creating.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await creating
+        assert not client.alive
+        assert _SlowClient.stopped == 1
+        assert not registry._sessions and not registry._pending_creates
+        assert not registry._creation_locks and not registry._creation_lock_refs
+
+        monkeypatch.setattr(_SlowClient, stage, original)
+        replacement = await registry.get_or_create_session(_spec(key))
+        assert replacement.client is not client and replacement.client.alive
+
+    asyncio.run(scenario())
+
+
+def test_failed_start_keeps_original_error_when_cleanup_fails(registry, monkeypatch):
+    original = RuntimeError("startup failed")
+
+    async def fail_start(self):
+        raise original
+
+    async def fail_stop(self):
+        self.alive = False
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(_SlowClient, "start", fail_start)
+    monkeypatch.setattr(_SlowClient, "stop", fail_stop)
+    with pytest.raises(RuntimeError) as error:
+        asyncio.run(registry.get_or_create_session(_spec(SessionKey.telegram(42))))
+    assert error.value is original
+    assert not _SlowClient.instances[-1].alive
+    assert not registry._sessions and not registry._pending_creates
+    assert not registry._creation_locks and not registry._creation_lock_refs

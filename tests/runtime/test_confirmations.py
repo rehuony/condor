@@ -7,6 +7,7 @@ non-approval outcome cancels.
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -411,8 +412,100 @@ def test_confirmation_names_the_agent_and_server(registry, monkeypatch):
         async def send_message(self, **kwargs):
             sent.update(kwargs)
 
+    pending = registry.register(
+        str(key), 1, "buy", DANGEROUS, OPTIONS, origin=pending.origin
+    )
     asyncio.run(TelegramChannel(_Bot(), 42).deliver(pending))
     assert "Executor Manager on hb-prod" in sent["text"]
+
+
+def test_request_cancellation_denies_only_its_approvals_and_rejects_late_requests(
+    registry, monkeypatch
+):
+    from condor.runtime import turns
+
+    monkeypatch.setattr(turns, "_turns", {})
+    queue = turns.state(1, "conversation")
+    queue.pending.update(first="tg:1", later="tg:1")
+    queue.active_key, queue.active_request = "tg:1", "first"
+    first = registry.register("tg:1", 1, "first", DANGEROUS, OPTIONS)
+    later = registry.register(
+        "tg:1",
+        1,
+        "later",
+        DANGEROUS,
+        OPTIONS,
+        conversation_id="conversation",
+        request_id="later",
+    )
+    turns.cancel_request(1, "conversation", "first")
+    assert registry.deny_pending_for_request(1, "conversation", "first") == 1
+    assert first.status is ConfirmationStatus.DENIED
+    assert later.status is ConfirmationStatus.PENDING
+    late = registry.register("tg:1", 1, "late", DANGEROUS, OPTIONS)
+    assert late.status is ConfirmationStatus.DENIED
+    assert asyncio.run(build_permission_callback("tg:1", 1)(SAFE, OPTIONS)) == CANCELLED
+
+
+@pytest.mark.parametrize("resolution", ["stop", "resolve", "timeout"])
+def test_telegram_approval_keyboard_is_removed_when_resolution_precedes_send_receipt(
+    registry, resolution
+):
+    from condor.telegram.approvals import TelegramChannel
+
+    async def scenario():
+        sending, receipt = asyncio.Event(), asyncio.Event()
+        edited = []
+
+        class Bot:
+            async def send_message(self, **kwargs):
+                sending.set()
+                await receipt.wait()
+                return SimpleNamespace(message_id=19)
+
+            async def edit_message_reply_markup(self, **kwargs):
+                edited.append(kwargs)
+                return True
+
+        pending = registry.register("tg:1", 1, "buy", DANGEROUS, OPTIONS)
+        delivery = asyncio.create_task(TelegramChannel(Bot(), 1).deliver(pending))
+        await sending.wait()
+        if resolution == "stop":
+            registry.deny_pending_for_session("tg:1")
+        elif resolution == "resolve":
+            await registry.resolve(pending.id, approved=True, by_user_id=1)
+        else:
+            pending.timeout_seconds = 0
+            await registry.wait_for(pending.id)
+        receipt.set()
+        await delivery
+        await registry.drain()
+        assert edited == [{"chat_id": 1, "message_id": 19, "reply_markup": None}]
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_permission_waiter_discards_its_approval(registry):
+    async def scenario():
+        delivered = asyncio.Event()
+
+        class Channel:
+            async def deliver(self, pending):
+                self.pending = pending
+                delivered.set()
+
+        channel = Channel()
+        task = asyncio.create_task(
+            build_permission_callback("tg:1", 1, [channel])(DANGEROUS, OPTIONS)
+        )
+        await delivered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert registry.get(channel.pending.id) is None
+        assert channel.pending.status is ConfirmationStatus.DENIED
+
+    asyncio.run(scenario())
 
 
 def test_origin_is_empty_when_the_session_is_unknown(registry):

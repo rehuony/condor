@@ -77,6 +77,55 @@ def approval(session_key):
     return confirmations.get_registry().register(session_key, USER, "Approve?", {}, [])
 
 
+@pytest.mark.parametrize("stopped", [False, True])
+def test_finished_request_rejects_late_permissions_but_preserves_direct_prompts(
+    chat, stopped
+):
+    async def run():
+        task = asyncio.create_task(collect(chat, "finished"))
+        await chat.client.started.get()
+        if stopped:
+            await runtime.cancel_request(USER, chat.conversation_id, "finished")
+        else:
+            chat.client.releases[0].set()
+        await task
+        assert not turns.is_busy(USER, chat.conversation_id)
+        registry = confirmations.get_registry()
+        pending = approval(str(chat.key))
+        assert pending.request_id == "finished"
+        assert pending.status is confirmations.ConfirmationStatus.DENIED
+        assert not await registry.resolve(pending.id, approved=True, by_user_id=USER)
+        callback = confirmations.build_permission_callback(str(chat.key), USER)
+        options = [{"optionId": "allow", "kind": "allow_once"}]
+        safe = {"tool": "get_market_data", "input": {}}
+        assert await callback(safe, options) == confirmations.CANCELLED
+
+        async def direct_prompt(text):
+            assert (await callback(safe, options))["outcome"]["optionId"] == "allow"
+            return "summary"
+
+        chat.client.prompt = direct_prompt
+        assert await runtime.prompt_once(chat.key, "summarize") == "summary"
+        assert await callback(safe, options) == confirmations.CANCELLED
+
+        next_turn = None
+
+        async def overlapping_prompt(text):
+            nonlocal next_turn
+            next_turn = asyncio.create_task(collect(chat, "next"))
+            await chat.client.started.get()
+            return "summary"
+
+        chat.client.prompt = overlapping_prompt
+        assert await runtime.prompt_once(chat.key, "summarize") == "summary"
+        assert (await callback(safe, options))["outcome"]["optionId"] == "allow"
+        chat.client.releases[1].set()
+        await next_turn
+        assert await callback(safe, options) == confirmations.CANCELLED
+
+    asyncio.run(run())
+
+
 def test_current_request_stops_and_denies_only_its_session_confirmations(chat):
     async def run():
         task = asyncio.create_task(collect(chat, "current"))
@@ -187,6 +236,9 @@ def test_terminal_event_finishes_stop_target_before_consumer_closes_generator(ch
             chat.client.releases[0].set()
             assert (await anext(stream)).stop_reason == "end_turn"
             assert not await runtime.abort_turn(USER, chat.conversation_id, "finished")
+            assert not await runtime.cancel_request(
+                USER, chat.conversation_id, "finished"
+            )
             assert not chat.client.cancelled
         finally:
             await stream.aclose()
@@ -247,5 +299,76 @@ def test_stop_during_refresh_prevents_execution_without_aborting_idle_client(
         resume.set()
         assert (await asyncio.wait_for(task, 1))[-1].stop_reason == "cancelled"
         assert not chat.client.releases
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("policy", ["queue", "steer"])
+def test_cancel_queued_request_wakes_its_consumer_without_cancelling_the_producer(
+    chat, policy
+):
+    async def run():
+        current = asyncio.create_task(collect(chat, "current"))
+        await chat.client.started.get()
+        queued = runtime.prompt(
+            chat.key, PromptRequest(text="queued", request_id="queued"), on_busy=policy
+        )
+        assert (await anext(queued)).type.value == "accepted"
+        if policy == "queue":
+            assert (await anext(queued)).type.value == "queued"
+
+        async def producer():
+            events = [event async for event in queued]
+            return events[-1].stop_reason, "producer continued"
+
+        waiting = asyncio.create_task(producer())
+        assert await runtime.cancel_request(USER, chat.conversation_id, "queued")
+        assert await asyncio.wait_for(waiting, 1) == ("cancelled", "producer continued")
+        assert chat.client.cancelled == set()
+        assert turns.pending_requests(USER, chat.conversation_id) == {"current"}
+        chat.client.releases[0].set()
+        assert (await current)[-1].stop_reason == "end_turn"
+
+    asyncio.run(run())
+    transcript = conversations.read_transcript(USER, chat.conversation_id)
+    assert any(
+        t.request_id == "queued" and t.stop_reason == "cancelled" for t in transcript
+    )
+
+
+def test_batch_cancel_claims_existing_requests_and_preserves_new_input(chat):
+    async def run():
+        first = asyncio.create_task(collect(chat, "first"))
+        await chat.client.started.get()
+        second = runtime.prompt(
+            chat.key, PromptRequest(text="second", request_id="second"), on_busy="queue"
+        )
+        assert (await anext(second)).type.value == "accepted"
+        assert (await anext(second)).type.value == "queued"
+
+        async def finish_second():
+            return [event async for event in second]
+
+        second_task = asyncio.create_task(finish_second())
+        chat.client.abort_release = asyncio.Event()
+        stop = asyncio.create_task(
+            runtime.cancel_requests(
+                [
+                    (USER, chat.conversation_id, "first"),
+                    (USER, chat.conversation_id, "second"),
+                ]
+            )
+        )
+        assert (await asyncio.wait_for(first, 1))[-1].stop_reason == "cancelled"
+        assert (await asyncio.wait_for(second_task, 1))[-1].stop_reason == "cancelled"
+        assert not stop.done()
+
+        later = asyncio.create_task(collect(chat, "later"))
+        assert await asyncio.wait_for(chat.client.started.get(), 1) == 1
+        chat.client.abort_release.set()
+        assert await stop == 2
+        assert chat.client.cancelled == {0}
+        chat.client.releases[1].set()
+        assert (await later)[-1].stop_reason == "end_turn"
 
     asyncio.run(run())

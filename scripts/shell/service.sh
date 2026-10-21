@@ -28,8 +28,8 @@ require_stopped() {
 # Config errors (a bad ADMIN_USER_ID, a mode with no token, a local user config.yml
 # has never heard of) exit in the first second. It is turned back off once the boot
 # is confirmed: a crash hours later must still take the session with it, or
-# `make status` would report a dead Condor as running. main.py does the same after
-# its own startup (utils.updater.set_tmux_remain_on_exit).
+# `make status` would report a dead Condor as running. main.py does the
+# same after its own startup (utils.updater.set_tmux_remain_on_exit).
 start() {
     require_stopped
     bash "$REPO_ROOT/scripts/shell/build-frontend.sh" || exit 1

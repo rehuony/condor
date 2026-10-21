@@ -135,6 +135,11 @@ def test_blocked_call_is_not_also_reported_completed():
     blocked = _statuses(events, "blocked")
     assert len(blocked) == 1
     assert not _statuses(events, "completed")
+    calls = [event for event in events if isinstance(event, ToolCallEvent)]
+    assert [(event.tool_call_id, event.name, event.status) for event in calls] == [
+        ("call-1", "create_grid_executor", "pending"),
+        ("call-1", "create_grid_executor", "blocked"),
+    ]
 
 
 def test_approved_call_still_executes():

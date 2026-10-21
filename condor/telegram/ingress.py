@@ -51,6 +51,11 @@ class _Pending:
     sealed: bool = False
     error: InputError | None = None
     admission: Admission | None = None
+    acquire: asyncio.Task | None = field(default=None, repr=False)
+    lock: asyncio.Lock | None = field(default=None, repr=False)
+    accepted: bool = False
+    finished: bool = False
+    waiting: bool = False
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,10 @@ class TelegramIngress:
         self._recent: OrderedDict[str, _Recent] = OrderedDict()
         self._closed = False
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
     def _prune_recent(self, now: float) -> None:
         while self._recent:
             key, recent = next(iter(self._recent.items()))
@@ -119,9 +128,10 @@ class TelegramIngress:
         if pending.error is not None:
             raise pending.error
 
-    @asynccontextmanager
-    async def receive(self, update: TgUpdate) -> AsyncIterator[Admission | None]:
-        """Reserve one turn, or yield ``None`` for a replay or album follower.
+    def reserve(self, update: TgUpdate) -> _Pending | None:
+        """Register identity and FIFO order without waiting for preparation.
+
+        Return ``None`` for a replay or album follower.
 
         Authorization and routing to configuration flows belong to the caller.
         Failed ordinary inputs can be retried. Albums retain a small
@@ -149,8 +159,7 @@ class TelegramIngress:
                 message_id not in recent.message_ids or not recent.accepted
             ):
                 raise _late_album()
-            yield None
-            return
+            return None
         pending = self._pending.get(request_id)
         if pending is not None:
             if message_id not in pending.messages:
@@ -165,8 +174,7 @@ class TelegramIngress:
                     pending.messages[message_id] = message
                     pending.last_seen = now
                 pending.changed.set()
-            yield None
-            return
+            return None
         if (
             len(self._pending) >= self._global_limit
             or self._chat_counts.get(chat_id, 0) >= self._per_chat_limit
@@ -181,51 +189,73 @@ class TelegramIngress:
         pending = _Pending(
             chat_id, request_id, task, {message_id: message}, now, now, bool(group)
         )
+        pending.waiting = any(
+            previous.chat_id == chat_id
+            and (previous.admission is None or previous.admission._lock is not None)
+            for previous in self._pending.values()
+        )
         self._pending[request_id] = pending
         self._chat_counts[chat_id] = self._chat_counts.get(chat_id, 0) + 1
-        lock = self._locks.setdefault(chat_id, asyncio.Lock())
-        admission = None
-        acquired = False
+        pending.lock = self._locks.setdefault(chat_id, asyncio.Lock())
+        # Schedule acquisition now, before a presenter or caller can await IO.
+        # Tasks start in reservation order, preserving asyncio.Lock's FIFO queue.
+        pending.acquire = asyncio.create_task(pending.lock.acquire())
+        return pending
+
+    @asynccontextmanager
+    async def admit(self, pending: _Pending) -> AsyncIterator[Admission]:
+        """Wait for an already registered turn and assemble its complete input."""
         try:
-            # The reservation precedes album debounce as well as expensive I/O,
-            # so a following text message cannot overtake an earlier image.
-            await lock.acquire()
-            acquired = True
+            assert pending.acquire is not None
+            await asyncio.shield(pending.acquire)
             if pending.album:
                 await self._collect_album(pending)
             else:
                 pending.sealed = True
-            admission = Admission(
+            pending.admission = Admission(
                 messages=tuple(
                     pending.messages[key] for key in sorted(pending.messages)
                 ),
-                request_id=request_id,
-                _lock=lock,
+                request_id=pending.request_id,
+                _lock=pending.lock,
             )
-            pending.admission = admission
-            yield admission
+            yield pending.admission
         finally:
-            if admission is not None:
-                admission.release()
-            elif acquired:
-                lock.release()
-            accepted = admission is not None and admission.accepted
-            if accepted or pending.album:
-                finished = time.monotonic()
-                self._recent[request_id] = _Recent(
-                    finished + self._recent_ttl,
-                    frozenset(pending.messages),
-                    pending.album,
-                    accepted,
-                )
-                self._prune_recent(finished)
-            self._pending.pop(request_id, None)
-            remaining = self._chat_counts[chat_id] - 1
-            if remaining:
-                self._chat_counts[chat_id] = remaining
+            self.release(pending)
+
+    def release(self, pending: _Pending) -> None:
+        """Release a ticket, including cancellation before admission begins."""
+        if pending.finished:
+            return
+        pending.finished = True
+        if pending.admission is not None:
+            pending.admission.release()
+        elif pending.acquire is not None:
+            if pending.acquire.done() and not pending.acquire.cancelled():
+                if pending.acquire.result():
+                    assert pending.lock is not None
+                    pending.lock.release()
             else:
-                self._chat_counts.pop(chat_id)
-                self._locks.pop(chat_id)
+                pending.acquire.cancel()
+        accepted = pending.accepted or bool(
+            pending.admission and pending.admission.accepted
+        )
+        if accepted or pending.album:
+            finished = time.monotonic()
+            self._recent[pending.request_id] = _Recent(
+                finished + self._recent_ttl,
+                frozenset(pending.messages),
+                pending.album,
+                accepted,
+            )
+            self._prune_recent(finished)
+        self._pending.pop(pending.request_id, None)
+        remaining = self._chat_counts[pending.chat_id] - 1
+        if remaining:
+            self._chat_counts[pending.chat_id] = remaining
+        else:
+            self._chat_counts.pop(pending.chat_id)
+            self._locks.pop(pending.chat_id)
 
     def cancel(self, chat_id: int) -> bool:
         """Cancel preparation for this chat; accepted turns belong to runtime."""
@@ -234,12 +264,15 @@ class TelegramIngress:
             if pending.chat_id == chat_id and not (
                 pending.admission and pending.admission.accepted
             ):
-                pending.task.cancel()
+                # A repeated Stop must not interrupt the first cancellation's
+                # attachment or durable-acceptance cleanup.
+                if not pending.task.cancelling():
+                    pending.task.cancel()
                 cancelled = True
         return cancelled
 
     async def close(self) -> None:
-        """Cancel and join all receive owners before application shutdown."""
+        """Close admission, then cancel and join request owners exactly once."""
         self._closed = True
         current = asyncio.current_task()
         tasks = {
@@ -248,7 +281,8 @@ class TelegramIngress:
             if pending.task is not current
         }
         for task in tasks:
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._recent.clear()

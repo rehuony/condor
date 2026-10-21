@@ -34,6 +34,8 @@ conversation it belongs to, and the line to show. Do not generalise further.
 from __future__ import annotations
 
 import logging
+import uuid
+from contextlib import aclosing
 from typing import Awaitable, Callable, Protocol
 
 from condor.runtime.events import RuntimeEvent
@@ -309,21 +311,29 @@ async def resume_session(
         return False
     key, info = found
 
+    request = PromptRequest(text=text, user_kind=kind, request_id=uuid.uuid4().hex)
     sink = _build_sink(key, info.user_id)
+    bind_request = getattr(sink, "bind_request", None)
+    if callable(bind_request):
+        bind_request(conversation_id, request.request_id)
     if sink is not None and not await _guard(sink.open(), "open"):
         sink = None
 
     _in_flight[conversation_id] = _in_flight.get(conversation_id, 0) + 1
     try:
+        is_stopped = getattr(sink, "is_stopped", None)
+        if callable(is_stopped) and is_stopped():
+            return False
         # ``queue`` and never ``steer``: a wake must not take a slot away from
         # the human. A user message sent during a wake turn steers it aside and
         # the human wins, which is the correct precedence.
-        stream = client.prompt(
-            key, PromptRequest(text=text, user_kind=kind), on_busy="queue"
-        )
-        async for event in stream:
-            if sink is not None and not await _guard(sink.on_event(event), "render"):
-                sink = None
+        stream = client.prompt(key, request, on_busy="queue")
+        async with aclosing(stream):
+            async for event in stream:
+                if sink is not None and not await _guard(
+                    sink.on_event(event), "render"
+                ):
+                    sink = None
         return True
     finally:
         remaining = _in_flight.get(conversation_id, 0) - 1

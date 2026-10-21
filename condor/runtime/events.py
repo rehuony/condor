@@ -115,6 +115,7 @@ class RuntimeEvent(BaseModel):
                 data={
                     "tool_call_id": event.tool_call_id,
                     "title": event.title,
+                    "name": event.name,
                     "status": event.status,
                     "kind": event.kind,
                     "input": serialize(event.input),
@@ -136,6 +137,7 @@ class RuntimeEvent(BaseModel):
                     "tool_call_id": event.tool_call_id,
                     "status": event.status,
                     "title": event.title,
+                    "name": event.name,
                     "output": event.output,
                     "input": serialize(event.input),
                 },

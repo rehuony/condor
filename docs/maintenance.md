@@ -10,9 +10,9 @@ provenance is recorded in the [README](../README.md); usage is in the
 
 ## Repository layout
 
-Product code lives in `main.py`, `config_manager.py` and the `condor/`, `handlers/`,
-`routines/`, `agents/`, `mcp_servers/`, `utils/` and `frontend/` trees. Operational
-scripts live under [`scripts/shell/`](../scripts/README.md): the Makefile only
+Product code lives in `main.py`, `config_manager.py` and the `condor/`,
+`handlers/`, `routines/`, `agents/`, `mcp_servers/`, `utils/` and `frontend/` trees.
+Operational scripts live under [`scripts/shell/`](../scripts/README.md): the Makefile only
 dispatches to them, so a target's behavior is read in one script, and the default
 target is `make help`. Files copied into a new installation live in `templates/`.
 Runtime state (`.env`, `config.yml`, `data/`, `reports/`, `.condor/`) is ignored by Git.

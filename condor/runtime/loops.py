@@ -459,7 +459,7 @@ class LoopSupervisor:
         return True
 
 
-# Process-global supervisor. Not in main.py's reload list: it holds live engines.
+# Process-global supervisor. Not in the hot-reload list: it holds live engines.
 _supervisor = LoopSupervisor()
 
 

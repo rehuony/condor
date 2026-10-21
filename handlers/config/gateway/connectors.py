@@ -580,14 +580,14 @@ def _build_connector_config_message(
 
     if is_empty:
         # Show "Keep empty" for empty values
-        button_text = "Keep empty"
+        button_text = "Keep Empty"
     elif (
         "key" in current_field.lower()
         or "secret" in current_field.lower()
         or "password" in current_field.lower()
     ):
         # Don't show the actual value if it's sensitive
-        button_text = "Keep current: ***"
+        button_text = "Keep Current: ***"
     else:
         # Truncate long values
         display_val = str(current_val)

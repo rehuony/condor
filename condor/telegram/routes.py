@@ -2,7 +2,7 @@
 
 The dispatcher registers a handful of trampolines once (see
 :mod:`condor.telegram.app`); what they call is read from the current
-:class:`RouteTable` at dispatch time. ``main.register_handlers`` builds a new
+:class:`RouteTable` at dispatch time. ``handlers.routes.register_handlers`` builds a new
 table from freshly imported handler modules and installs it with
 :func:`set_routes`, which is all a hot reload needs: no router to re-include,
 no handler object holding a stale function.
@@ -26,7 +26,6 @@ class RouteTable:
     #: the first match wins, as it did when each pattern was its own handler.
     callbacks: list[tuple[re.Pattern[str], Handler]] = field(default_factory=list)
     message: Handler | None = None
-    stopped_generation: Handler | None = None
 
     def command(self, name: str, handler: Handler) -> None:
         self.commands[name.lower()] = handler

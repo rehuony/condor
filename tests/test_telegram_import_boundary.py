@@ -1,4 +1,4 @@
-"""Only ``condor/telegram`` and ``main.py`` may import the Telegram library.
+"""Only ``condor/telegram`` may import the Telegram library.
 
 Everything else goes through ``condor.telegram.types``, ``.errors`` and
 ``.transport`` so the library stays swappable behind that seam.
@@ -8,7 +8,14 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCANNED = ["handlers", "condor", "routines", "agents", "utils", "mcp_servers"]
+SCANNED = [
+    "handlers",
+    "condor",
+    "routines",
+    "agents",
+    "utils",
+    "mcp_servers",
+]
 ALLOWED = {ROOT / "condor" / "telegram"}
 
 
@@ -28,7 +35,7 @@ def _library_imports(path: Path) -> list[str]:
 
 
 def test_only_the_seam_imports_the_telegram_library():
-    offenders = []
+    offenders = _library_imports(ROOT / "main.py")
     for folder in SCANNED:
         for path in sorted((ROOT / folder).rglob("*.py")):
             if any(parent in ALLOWED for parent in path.parents):

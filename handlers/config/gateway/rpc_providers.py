@@ -241,7 +241,7 @@ async def show_provider_details(query, context: Context, provider_key: str) -> N
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            text="⬜ Deactivate (use custom URL)",
+                            text="⬜ Deactivate (Use Custom URL)",
                             callback_data=f"gateway_rpc_deactivate_{provider_key}",
                         )
                     ]
@@ -538,13 +538,13 @@ async def _handle_url_input(update: Update, context: Context, input_type: str) -
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="✅ Yes, use new URL",
+                        text="✅ Yes, Use New URL",
                         callback_data=f"gateway_rpc_url_activate_{network_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text=f"Keep using {current_rpc}",
+                        text=f"Keep Using {current_rpc}",
                         callback_data="gateway_rpc_url_menu",
                     )
                 ],

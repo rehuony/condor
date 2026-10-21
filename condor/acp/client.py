@@ -107,6 +107,22 @@ def normalize_tool_call(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def tool_name_from_update(payload: dict[str, Any]) -> str:
+    """Keep tool identity separate from a display title or operation category."""
+    for key in ("tool", "name"):
+        name = normalize_tool_title(payload.get(key))
+        if name:
+            return name
+    title = normalize_tool_title(payload.get("title"))
+    return (
+        title
+        if re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_-]*(?:[.:][A-Za-z_][A-Za-z0-9_-]*)*", title
+        )
+        else ""
+    )
+
+
 def _descendants_in(root: int, children: dict[int, list[int]]) -> set[int]:
     """Every transitive child of ``root`` in an already-built ``children`` map.
 
@@ -424,6 +440,7 @@ class ToolCallEvent:
     status: str  # pending, in_progress, completed, failed
     kind: str = "other"
     input: dict | None = None
+    name: str = ""
 
 
 @dataclass
@@ -443,6 +460,7 @@ class ToolCallUpdate:
     #: ACP-bridged call was dropped, which is why the action log read
     #: "(arguments could not be read)" for a tick that deployed a live fleet.
     input: dict | None = None
+    name: str = ""
 
 
 @dataclass
@@ -477,6 +495,9 @@ def fold_tool_call_event(
     supplies the real ones on a later update, so a later event must be able to
     *fill* the field — but an update that carries no arguments must never erase
     the ones an earlier event already supplied.
+
+    ``name`` retains the existing display-title contract for journal consumers.
+    The optional canonical identity is kept separately as ``tool_name``.
     """
     if isinstance(event, ToolCallEvent):
         tc = tc_map.get(event.tool_call_id)
@@ -489,6 +510,8 @@ def fold_tool_call_event(
             }
             if event.input:
                 tc["input"] = event.input
+            if event.name:
+                tc["tool_name"] = event.name
             tc_map[event.tool_call_id] = tc
             return tc
         tc["status"] = event.status
@@ -496,6 +519,8 @@ def fold_tool_call_event(
             tc["name"] = event.title
         if event.input:
             tc["input"] = event.input
+        if event.name:
+            tc["tool_name"] = event.name
     else:  # ToolCallUpdate
         tc = tc_map.get(event.tool_call_id)
         if tc is not None:
@@ -507,6 +532,8 @@ def fold_tool_call_event(
                 tc["output"] = event.output
             if event.input:
                 tc["input"] = event.input
+            if event.name:
+                tc["tool_name"] = event.name
     return None
 
 
@@ -1297,6 +1324,7 @@ class ACPClient:
                     status=update.get("status", "pending"),
                     kind=update.get("kind", "other"),
                     input=call["input"],
+                    name=tool_name_from_update(update),
                 )
             )
         elif kind == "tool_call_update":
@@ -1317,6 +1345,7 @@ class ACPClient:
                     # an update ("Update the raw input") and claude-agent-acp is
                     # where a call's arguments actually become complete.
                     input=normalize_tool_call(update)["input"],
+                    name=tool_name_from_update(update),
                 )
             )
 
@@ -1365,6 +1394,10 @@ class ACPClient:
         **kw: Any,
     ) -> dict[str, Any]:
         options = options or []
+        # A locally stopped turn may still ask for tools while the next prompt
+        # waits for its settlement. It must not borrow that prompt's approval.
+        if self._unsettled_req is not None:
+            return {"outcome": {"outcome": "cancelled"}}
 
         # If we have a permission callback, delegate to it. The wire shape is
         # translated first (SEC-093) so the gate sees the arguments it decides

@@ -566,7 +566,7 @@ def get_backtest_store() -> BacktestStore:
 
 
 def migrate_backtest_archive() -> int:
-    """Entry point for the boot-time background migration (``main.py``)."""
+    """Entry point for the boot-time background migration (``main.startup``)."""
     try:
         return get_backtest_store().migrate()
     except Exception:

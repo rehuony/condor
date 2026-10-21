@@ -54,7 +54,7 @@ log = logging.getLogger(__name__)
 def bind_chat_to_agent(user_data: dict | None, agent_slug: str) -> None:
     """Record (or clear) the specialist this chat talks to.
 
-    Written by the "Talk to" picker and read by every path that spawns a session
+    Written by the "Talk To" picker and read by every path that spawns a session
     for the chat, which is what makes the choice outlive the subprocess that
     served it (CORR-090). An empty slug means Condor was picked, i.e. unbound.
 
@@ -73,7 +73,7 @@ def stale_binding_notice(slug: str) -> str:
     """Told once, when a bound Agent's directory is gone by the time we respawn."""
     return (
         f"The agent '{slug}' no longer exists, so this chat is back to Condor. "
-        "Use /agent → Talk to if you want to bind it to another one."
+        "Use /agent → Talk To if you want to bind it to another one."
     )
 
 

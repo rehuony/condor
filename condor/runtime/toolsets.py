@@ -37,7 +37,7 @@ def _bot_token() -> str:
     """This bot's Telegram token, read at call time.
 
     Goes through ``utils.config`` for its ``load_dotenv()`` side effect, so the
-    marker built here is derived from the same token ``main.py`` hands the
+    marker built here is derived from the same token ``main`` hands the
     reaper — a mismatch would silently strand orphaned subprocess trees.
     """
     import utils.config  # noqa: F401  (imported for load_dotenv())

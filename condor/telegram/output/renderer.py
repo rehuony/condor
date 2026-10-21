@@ -1,46 +1,37 @@
-"""Stream an agent turn as native rich-message drafts, then one final message.
-
-Private chats get ``send_rich_message_draft`` while the model runs (native stop,
-~1 s refresh so the bubble does not vanish) and ``send_rich_message`` at the
-end. Groups and any chat that cannot take a draft skip progress and only send
-the final. See ``docs/telegram-reply-delivery.md``.
-"""
+"""One request's lifecycle, stable message segments and delivery settlement."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-from dataclasses import dataclass, field
-
-from aiogram.types import InputRichMessage
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 
 from condor.runtime.events import EventType, RuntimeEvent
-from condor.telegram.errors import OperationResult, RateLimited, classify, retry_delay
-from condor.telegram.format import RICH_MAX_LEN
-from condor.telegram.format import split_text as _split_text
-from condor.telegram.output.lease import OutputLease
-from condor.telegram.output.runs import (
-    RunTarget,
-    allocate_draft_id,
-    register_run,
-    unregister_run,
+from condor.telegram.output.presentation import (
+    SegmentBuffer,
+    final_payload,
+    render_preview,
+    tool_action,
+    tool_inputs,
 )
-from condor.telegram.transport import message_id_of, telegram_call
-from condor.telegram.types import NO_LINK_PREVIEW
+from condor.telegram.output.runs import RunTarget, register_run, unregister_run
+from condor.telegram.output.timing import ReplyTiming
+from condor.telegram.output.writer import MessageUpdate, chat_writer
+from condor.telegram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 log = logging.getLogger(__name__)
-
-DRAFT_INTERVAL = 1.0
-QUEUED_LABEL = "⏳ Queued — waiting for the current answer to finish."
 STOPPED_LABEL = "⏹ Stopped generating."
-TERMINAL_TOOLS = {
+_live: set[RichReplyStreamer] = set()
+_TOOL_TERMINAL = {
     "completed",
     "failed",
     "blocked",
     "denied",
+    "rejected",
     "cancelled",
-    "disconnected",
+    "canceled",
+    "error",
 }
 
 
@@ -52,8 +43,35 @@ class DeliveryResult:
     confirmed: int = 0
 
 
+@dataclass
+class _Page:
+    message_id: int | None = None
+    sent: MessageUpdate | None = None
+    plain_only: bool = False
+    unknown: bool = False
+    uncertain_edit: bool = False
+
+
+@dataclass
+class _Tool:
+    status: str = "pending"
+    kind: str = ""
+    name: str = ""
+    title: str = ""
+    arguments: dict = field(default_factory=dict)
+
+    def label(self) -> str:
+        return tool_action(
+            self.title,
+            self.kind,
+            self.name,
+            arguments=self.arguments,
+            status=self.status,
+        )
+
+
 class RichReplyStreamer:
-    """One run owns its draft id, worker, and final delivery task."""
+    """Own a request independently of menu selection and runtime execution."""
 
     def __init__(
         self,
@@ -68,279 +86,354 @@ class RichReplyStreamer:
         input_message_id: int | None = None,
         agent_slug: str = "",
         private: bool | None = None,
+        timing: ReplyTiming | None = None,
     ):
         self._bot, self._chat_id = bot, chat_id
-        self._status_message_id = message_id
-        self._prefix = prefix
-        self._buffer = ""
-        self._chat_ref = hashlib.sha256(str(chat_id).encode()).hexdigest()[:12]
-        self._uses_draft = chat_id > 0 if private is None else private
-        self.draft_id = allocate_draft_id() if self._uses_draft else 0
+        self._progress = chat_id > 0 if private is None else private
         self.target = RunTarget(
-            chat_id,
-            user_id,
-            conversation_id,
-            request_id,
-            agent_slug,
-            draft_id=self.draft_id,
+            chat_id, user_id, conversation_id, request_id, agent_slug
         )
-        self.target.nudge = self.nudge
+        self.target.on_stop = self._stop_display
+        self.target.changed = self._changed
         self.input_message_id = input_message_id
-        self.state = "queued"
-        self.tools: dict[str, str] = {}
-        self._started = False
+        self.timing = timing or ReplyTiming(request_id)
+        self.timing.mark("received")
+        self.body = SegmentBuffer()
+        self._prefix = prefix
+        self._prefix_end = 0
+        self._pages = [_Page(message_id)]
+        self._final_payloads: list[tuple[str, str | None]] = []
+        if message_id is not None:
+            self.target.message_ids.add(message_id)
+        self._phase = "Received. Preparing your request…"
+        self.state = "received"
+        self.tools: dict[str, _Tool] = {}
+        self._response_phase = "Preparing response…"
         self._queued = False
         self._done = False
         self._closed = False
         self._failed = False
         self._error_code = ""
+        self._input_error = ""
         self._stop_reason = ""
+        self._frozen = False
         self._wake = asyncio.Event()
-        self._interrupted = False
         self._edit_task: asyncio.Task | None = None
         self._final_task: asyncio.Task | None = None
-        self._lease: OutputLease | None = None
-        self._next_edit = 0.0
-        self._last_status = ""
-        self._progress_disabled = False
-        self._rate_rejections = 0
-        self._plain_only = False
         self.delivery = DeliveryResult()
+        _live.add(self)
 
-    def nudge(self) -> None:
-        """Another bot message hid this draft; resend it on the next tick."""
-        self._interrupted = True
+    def _changed(self) -> None:
         self._wake.set()
 
-    def _reserve_output(self):
-        if self._lease is None:
-            self._lease = OutputLease(self._chat_id)
+    def _stop_display(self) -> None:
+        self._frozen = True
+        self.state = "stopping"
+        self._wake.set()
+
+    def begin_preparation(self, label: str, cancel: Callable[[], None]) -> None:
+        self.set_phase(label)
+        self.target.cancel_preparation = cancel
+        register_run(self.target)
+        self.start_edit_loop()
+
+    def set_phase(self, label: str) -> None:
+        if not self._done and not self._frozen:
+            self._phase = label or "Preparing your request…"
+            self.state = "preparing"
+            self._wake.set()
+
+    def bind_input(self, *, conversation_id: str, prefix: str = "") -> None:
+        if (
+            self.target.conversation_id
+            and self.target.conversation_id != conversation_id
+        ):
+            raise ValueError("A Telegram request cannot change conversations")
+        self.target.conversation_id = conversation_id
+        self._prefix = prefix
+
+    def _append(self, text: str) -> None:
+        if text and not self.body.body and self._prefix:
+            self.body.append(self._prefix + "\n\n")
+            self._prefix_end = len(self.body.body)
+        self.body.append(text)
 
     async def process_event(self, event: RuntimeEvent) -> None:
         if self._closed or self._done or self._final_task is not None:
             return
         if event.session_key and event.session_key != f"tg:{self._chat_id}":
             return
+        if event.type in {
+            EventType.TEXT,
+            EventType.THOUGHT,
+            EventType.TOOL_CALL,
+            EventType.TOOL_UPDATE,
+        }:
+            self.timing.mark("execution_started")
         if event.type == EventType.ACCEPTED:
             self.target.request_id = event.field("request_id", self.target.request_id)
-            self.target.conversation_id = event.field(
-                "conversation_id", self.target.conversation_id
+            self.timing.request_id = self.target.request_id
+            self.timing.mark("accepted")
+            self.bind_input(
+                conversation_id=event.field(
+                    "conversation_id", self.target.conversation_id
+                ),
+                prefix=self._prefix,
             )
             self.target.agent_slug = event.field("agent_slug", self.target.agent_slug)
-            return
-        if event.type == EventType.QUEUED:
-            self._queued = True
-            self.state = "queued"
-            self._wake.set()
-            return
-        if event.type == EventType.DONE:
+            self.target.accepted = True
+            self.target.cancel_preparation = None
+            self._phase = ""
+            register_run(self.target)
+        elif event.type == EventType.DONE:
+            self.timing.mark("execution_done")
             self._stop_reason = event.stop_reason
             self._done = True
             unregister_run(self.target)
-            self._reserve_output()
-        else:
+        elif event.type == EventType.QUEUED:
+            self._queued = True
+            self._phase = ""
+        elif event.type == EventType.THOUGHT and self._queued:
+            # A provider thought proves execution has started, but its text
+            # remains private. Heartbeats alone cannot establish this boundary.
             self._queued = False
-            self._started = True
-            self._reserve_output()
-            register_run(self.target)
-            if event.type == EventType.TEXT:
-                if event.field("is_error", False):
-                    self._failed = True
-                else:
-                    self._buffer += event.text
-            elif event.type in (EventType.TOOL_CALL, EventType.TOOL_UPDATE):
-                key = str(event.field("tool_call_id") or "")
-                self.tools[key] = str(
-                    event.field("status") or self.tools.get(key, "pending")
-                )
-            elif event.type == EventType.ERROR:
+        elif event.type == EventType.TEXT:
+            if event.field("is_error", False):
                 self._failed = True
-                self._error_code = str(event.field("code", ""))
+            elif event.text and not self._frozen:
+                self.timing.mark("first_text")
+                self._phase = ""
+                self._queued = False
+                self._append(event.text)
+                self._response_phase = "Writing response…"
+        elif event.type in (EventType.TOOL_CALL, EventType.TOOL_UPDATE):
+            key = str(event.field("tool_call_id") or "")
+            tool = self.tools.get(key)
+            previous = (tool.status, tool.label()) if tool else None
+            tool = tool or _Tool()
+            for attribute, event_field in (
+                ("status", "status"),
+                ("kind", "kind"),
+                ("name", "name"),
+                ("title", "title"),
+            ):
+                value = event.field(event_field)
+                if isinstance(value, str) and value.strip():
+                    if (
+                        attribute == "status"
+                        and tool.status in _TOOL_TERMINAL
+                        and value not in _TOOL_TERMINAL
+                    ):
+                        continue
+                    setattr(tool, attribute, value)
+            tool.arguments.update(tool_inputs(event.field("input")))
+            # Only a changed visible action advances recency. Heartbeats and
+            # output-only updates must not steal focus from another active tool.
+            if previous != (tool.status, tool.label()):
+                self.tools.pop(key, None)
+                self.tools[key] = tool
+                self._phase = ""
+                self._queued = False
+                if tool.status in _TOOL_TERMINAL and (
+                    previous is None or previous[0] not in _TOOL_TERMINAL
+                ):
+                    self._response_phase = "Processing tool results…"
+        elif event.type == EventType.ERROR:
+            self._phase = ""
+            self._queued = False
+            self._failed = True
+            self._error_code = str(event.field("code", ""))
+            if self._error_code == "telegram_input":
+                self._input_error = str(event.field("message", ""))
         self._wake.set()
+
+    def _status(self) -> str:
+        if self._frozen or self.target.stopped:
+            self.state = "stopping"
+            return "Stopping and clearing queued requests…"
+        if any(
+            getattr(p.status, "value", p.status) == "pending"
+            for p in self.target.approvals
+        ):
+            self.state = "waiting_approval"
+            return "Waiting for your confirmation…"
+        if self._phase:
+            self.state = "preparing"
+            return self._phase
+        if self._queued:
+            self.state = "queued"
+            return "Waiting for the previous request…"
+        self.state = "running"
+        for tool in reversed(tuple(self.tools.values())):
+            if tool.status not in _TOOL_TERMINAL:
+                return tool.label()
+        return self._response_phase
+
+    def _button(self):
+        if self.target.stopped or not self.target.request_id:
+            return None
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Stop and Clear Queue",
+                        callback_data=f"agent:stop_run:{self.target.token}",
+                    )
+                ]
+            ]
+        )
+
+    def _final_payload(self, segment):
+        # Transcriptions are literal user content, not model-authored Markdown.
+        if segment.start < self._prefix_end:
+            return segment.text, None
+        return final_payload(segment, self.body.body)
+
+    def _updates(self, final: bool):
+        segments = self.body.segments
+        count = len(segments) or 1
+        while len(self._pages) < count:
+            self._pages.append(_Page())
+        for index in range(count):
+            page = self._pages[index]
+            if page.unknown:
+                return
+            segment = segments[index] if segments else None
+            active = index == count - 1
+            html = None
+            if final:
+                text, html = self._final_payloads[index]
+                if page.plain_only:
+                    html = None
+                mode = "rich" if html is not None else None
+                markup = None
+            else:
+                text = segment.text if segment else ""
+                if active:
+                    text = render_preview(text, self._status())
+                mode = None
+                markup = self._button() if active else None
+            update = MessageUpdate(
+                text,
+                page.message_id,
+                mode,
+                markup,
+                self.input_message_id if index == 0 else None,
+                rich_html=html,
+            )
+            # Compare with the acknowledged message id, including sends.
+            if update != page.sent:
+                yield index, update
+
+    async def _deliver(self, final: bool) -> bool:
+        """Drain latest snapshots; failures never re-enter the model runtime."""
+        failures = 0
+        while not self._closed:
+            selected = None
+            has_body = False
+
+            def latest():
+                nonlocal selected, has_body
+                if self._closed or (not final and self._done):
+                    return None
+                selected = next(self._updates(final), None)
+                has_body = bool(selected and self.body.segments)
+                return selected[1] if selected else None
+
+            update, result = await chat_writer(self._chat_id).write(
+                self._bot,
+                latest,
+                request_id=self.target.request_id,
+                on_attempt=lambda: self.timing.mark("first_send_attempt"),
+            )
+            if update is None:
+                return True
+            index = selected[0]
+            page = self._pages[index]
+            if result.status == "confirmed":
+                self.timing.mark("first_send_ack")
+                if has_body:
+                    self.timing.mark("first_body_ack")
+                page.uncertain_edit = False
+                page.message_id = result.message_id
+                self.target.message_ids.add(result.message_id)
+                page.sent = replace(update, message_id=page.message_id)
+                failures = 0
+                if final and index == len(self._pages) - 1:
+                    self.timing.mark("final_ack")
+                continue
+            if result.status == "unknown" and update.message_id is not None:
+                page.uncertain_edit = True
+            failures += 1
+            if result.reason == "parse" and update.mode:
+                page.plain_only = True
+            elif result.reason == "missing" and update.message_id is not None:
+                self.target.message_ids.discard(page.message_id)
+                page.message_id = None
+                page.sent = None
+            elif result.status == "unknown" and update.message_id is None:
+                page.unknown = True
+                self.delivery.status = "delivery_unknown"
+                return False
+            elif result.reason not in {"connect", "rate_limit"} and not (
+                result.status == "unknown" and update.message_id is not None
+            ):
+                return False
+            if failures >= 3:
+                return False
+        return False
 
     def start_edit_loop(self) -> asyncio.Task:
         if self._edit_task is None:
+            register_run(self.target)
             self._edit_task = asyncio.create_task(
-                self._draft_loop(), name="telegram-agent-progress"
+                self._edit_loop(), name="telegram-agent-progress"
             )
         return self._edit_task
 
-    def _waiting_approval(self) -> bool:
-        return any(
-            getattr(p.status, "value", p.status) == "pending"
-            for p in self.target.approvals
-        )
-
-    def _status(self) -> str:
-        if self._queued:
-            self.state = "queued"
-            return QUEUED_LABEL
-        if self._waiting_approval():
-            self.state = "waiting_approval"
-            return "Waiting for your approval."
-        self.state = "failed" if self._failed else "running"
-        if self._failed:
-            return "The turn encountered an error. Finishing delivery…"
-        if any(status not in TERMINAL_TOOLS for status in self.tools.values()):
-            return "Working on an operation…"
-        if self.tools and all(status == "completed" for status in self.tools.values()):
-            return "Operations returned. Preparing the response…"
-        if self.tools:
-            return "An operation did not complete successfully. Preparing the response…"
-        return "Processing…"
-
-    def _peer_owns_chat(self) -> bool:
-        from condor.telegram.output.runs import _runs
-
-        return any(
-            target is not self.target and target.chat_id == self._chat_id
-            for target in _runs.values()
-        )
-
-    async def _draft_loop(self):
+    async def _edit_loop(self):
         try:
             while not self._done and not self._closed:
                 self._wake.clear()
-                if (self._queued or self._started) and self._uses_draft:
-                    if self._queued and self._peer_owns_chat():
-                        pass
-                    else:
-                        self._reserve_output()
-                        await self._lease.acquire()
-                        if self._done or self._closed:
-                            break
-                        now = asyncio.get_running_loop().time()
-                        if self._interrupted or now >= self._next_edit:
-                            await self._flush_draft()
-                            self._interrupted = False
-                            self._next_edit = now + DRAFT_INTERVAL
-                try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=0.25)
-                except asyncio.TimeoutError:
-                    pass
+                if self._progress:
+                    await self._deliver(False)
+                if not self._done and not self._closed:
+                    await self._wake.wait()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._log_failure("progress", exc)
+            log.warning("Telegram progress failed error_type=%s", type(exc).__name__)
 
-    async def stop_edit_loop(self):
-        self._closed = True
-        unregister_run(self.target)
-        if self._edit_task and not self._edit_task.done():
-            self._edit_task.cancel()
-            await asyncio.gather(self._edit_task, return_exceptions=True)
-        if (
-            self._final_task is not None
-            and self._final_task is not asyncio.current_task()
-            and not self._final_task.done()
-        ):
-            self._final_task.cancel()
-            await asyncio.gather(self._final_task, return_exceptions=True)
-        if self._lease is not None and (
-            self._final_task is None or self._final_task.done()
-        ):
-            self._lease.release()
-
-    def _build_text(self, final: bool) -> str:
-        if not final:
-            status = self._status()
-            if self._buffer.strip() and self.state not in {
-                "queued",
-                "waiting_approval",
-            }:
-                return self._buffer
-            return status
-        body = self._buffer
-        if self._failed or self._stop_reason not in {"end_turn", "cancelled"}:
+    def _settle_body(self) -> None:
+        notice = ""
+        if self._stop_reason == "cancelled" or self.target.stopped:
+            self.state = "cancelled"
+            notice = STOPPED_LABEL if self.body.body else "Stopped before answering."
+        elif self._stop_reason == "duplicate":
+            self.state = "completed"
+            notice = "This request was already received."
+        elif self._failed or self._stop_reason != "end_turn":
             self.state = "failed"
-            reason = {
+            notice = {
                 "timeout": "The agent timed out.",
                 "disconnected": "The agent disconnected.",
                 "access_denied": "Your access changed; the agent did not execute this request.",
             }.get(self._stop_reason, "Could not finish this turn.")
-            if self._error_code == "images_unsupported":
-                reason = (
-                    "This model cannot read images. Switch the model, or "
-                    "describe what is in the picture."
-                )
-            body = f"{reason}\n\nPartial result:\n{body}" if body else reason
-        elif self._stop_reason == "cancelled":
-            self.state = "cancelled"
-            body = (
-                f"{STOPPED_LABEL}\n\nPartial result:\n{body}"
-                if body
-                else "Stopped before answering."
-            )
+            if self._input_error:
+                notice = self._input_error
+            elif self._error_code == "images_unsupported":
+                notice = "This model cannot read images. Switch the model, or describe what is in the picture."
         else:
             self.state = "completed"
-            if not body.strip():
-                body = "No response was returned."
-                if self.tools:
-                    body = (
-                        "No answer was returned. Check the saved conversation "
-                        "for operation results."
-                    )
-        return body
-
-    def _pages(self, body, literal_prefix=""):
-        source = "\n\n".join(part for part in (literal_prefix, body) if part)
-        try:
-            mode = None if self._plain_only else "rich"
-            return [(chunk, mode) for chunk in _split_text(source, RICH_MAX_LEN)]
-        except Exception as exc:
-            log.warning("Telegram rendering failed error_type=%s", type(exc).__name__)
-            return [(chunk, None) for chunk in _split_text(source)]
-
-    async def _flush(self, final: bool = False):
-        if final:
-            return await self.finalize()
-        return await self._flush_draft()
-
-    async def _flush_draft(self) -> None:
-        if (
-            self._done
-            or self._closed
-            or self._progress_disabled
-            or not self._uses_draft
-            or (self._queued and self._peer_owns_chat())
-        ):
-            return
-        if self.target.stopped:
-            self._progress_disabled = True
-            return
-        text = self._build_text(False)
-        self._last_status = self._status()
-        if len(text) > RICH_MAX_LEN:
-            text = text[:RICH_MAX_LEN]
-        try:
-            result = await self._draft_io(text)
-        except RateLimited as exc:
-            self._rate_rejections += 1
-            self._next_edit = asyncio.get_running_loop().time() + max(
-                DRAFT_INTERVAL, retry_delay(exc)
-            )
-            if self._rate_rejections >= 3:
-                self._progress_disabled = True
-            return
-        if result.status != "confirmed":
-            self._progress_disabled = True
-            return
-        self._rate_rejections = 0
-        await self._drop_status_message()
-
-    async def _drop_status_message(self) -> None:
-        if self._status_message_id is None:
-            return
-        message_id, self._status_message_id = self._status_message_id, None
-        try:
-            await telegram_call(
-                self._bot.delete_message,
-                chat_id=self._chat_id,
-                message_id=message_id,
-                retry_rate_limits=False,
-            )
-        except Exception as exc:
-            self._log_failure("cleanup", exc)
+            if not self.body.body.strip():
+                notice = (
+                    "No answer was returned. Check the saved conversation for operation results."
+                    if self.tools
+                    else "No response was returned."
+                )
+        if notice:
+            self._append(("\n\n" if self.body.body else "") + notice)
+        self.body.finalize()
 
     async def finalize(self) -> DeliveryResult:
         if self._final_task is None:
@@ -350,127 +443,75 @@ class RichReplyStreamer:
         return await asyncio.shield(self._final_task)
 
     async def _finalize(self):
+        self.timing.mark("finalize_start")
         self._done = True
-        self._reserve_output()
+        unregister_run(self.target)
+        self._wake.set()
         try:
-            await self.stop_edit_loop()
-            self.state = "finalizing"
-            self.delivery.payloads = self._pages(self._build_text(True), self._prefix)
-            await self._lease.acquire()
-            await self._drop_status_message()
-            while self.delivery.confirmed < len(self.delivery.payloads):
-                index = self.delivery.confirmed
-                text, mode = self.delivery.payloads[index]
-                result = await self._final_io(text, mode, quiet=index > 0)
-                if result.status == "failed" and result.reason == "connect":
-                    result = await self._final_io(text, mode, quiet=index > 0)
-                if result.reason == "too_long" and len(text) > 1:
-                    self.delivery.payloads[index : index + 1] = [
-                        (chunk, mode)
-                        for chunk in _split_text(text, max(1, len(text) // 2))
-                    ]
-                    continue
-                if result.reason == "parse" and mode:
-                    self.delivery.payloads[index : index + 1] = [
-                        (chunk, None) for chunk in _split_text(text)
-                    ]
-                    self._plain_only = True
-                    continue
-                if result.status != "confirmed":
-                    self.delivery.status = (
-                        "delivery_unknown"
-                        if result.status == "unknown"
-                        else ("partial" if index else "failed")
-                    )
-                    await self._retain_progress()
-                    return self.delivery
-                self.delivery.message_ids.append(result.message_id)
-                self.delivery.confirmed += 1
-            self.delivery.status = "complete"
+            # An in-flight edit must settle before any terminal edit starts.
+            if self._edit_task:
+                await self._edit_task
+            self._settle_body()
+            self._final_payloads = [
+                self._final_payload(segment) for segment in self.body.segments
+            ]
+            complete = await self._deliver(True)
+            self.delivery.payloads = [
+                (text, "rich" if html is not None and not page.plain_only else None)
+                for (text, html), page in zip(self._final_payloads, self._pages)
+            ]
+            self.delivery.message_ids = [
+                p.message_id for p in self._pages if p.message_id is not None
+            ]
+            self.delivery.confirmed = sum(
+                p.sent is not None
+                and p.sent.text == text
+                and p.sent.mode == mode
+                and p.sent.reply_markup is None
+                for p, (text, mode) in zip(self._pages, self.delivery.payloads)
+            )
+            if any(p.unknown or p.uncertain_edit for p in self._pages):
+                self.delivery.status = "delivery_unknown"
+            else:
+                self.delivery.status = (
+                    "complete"
+                    if complete
+                    else ("partial" if self.delivery.confirmed else "failed")
+                )
+            if self.delivery.status != "complete":
+                log.warning(
+                    "Telegram final delivery status=%s confirmed=%d total=%d",
+                    self.delivery.status,
+                    self.delivery.confirmed,
+                    len(self.delivery.payloads),
+                )
             return self.delivery
         except asyncio.CancelledError:
-            if self.delivery.status != "complete":
-                self.delivery.status = "delivery_unknown"
+            self.delivery.status = "delivery_unknown"
             raise
         finally:
-            self._lease.release()
-            unregister_run(self.target)
+            self.timing.mark("delivery_finished")
+            _live.discard(self)
 
-    async def _retain_progress(self):
-        log.warning(
-            "Telegram final delivery status=%s chat_ref=%s confirmed=%d total=%d",
-            self.delivery.status,
-            self._chat_ref,
-            self.delivery.confirmed,
-            len(self.delivery.payloads),
-        )
-
-    async def _draft_io(self, markdown: str) -> OperationResult:
-        try:
-            result = await telegram_call(
-                self._bot.send_rich_message_draft,
-                chat_id=self._chat_id,
-                draft_id=self.draft_id,
-                rich_message=InputRichMessage(markdown=markdown),
-                can_stop=True,
-                keep_on_stop=True,
-                retry_rate_limits=False,
-            )
-            if result is True or result is False:
-                return OperationResult("confirmed")
-            return OperationResult("confirmed")
-        except RateLimited:
-            raise
-        except Exception as exc:
-            outcome = classify(exc, operation="send", parse_mode="Markdown")
-            if outcome.reason not in {"parse"}:
-                self._log_failure("draft", exc)
-            return outcome
-
-    async def _final_io(
-        self, text: str, mode: str | None, *, quiet: bool
-    ) -> OperationResult:
-        try:
-            if mode == "rich":
-                result = await telegram_call(
-                    self._bot.send_rich_message,
-                    chat_id=self._chat_id,
-                    rich_message=InputRichMessage(markdown=text),
-                    disable_notification=quiet,
-                )
-            else:
-                result = await telegram_call(
-                    self._bot.send_message,
-                    chat_id=self._chat_id,
-                    text=text,
-                    disable_notification=quiet,
-                    link_preview_options=NO_LINK_PREVIEW,
-                )
-            confirmed_id = message_id_of(result)
-            if confirmed_id is None:
-                return OperationResult("unknown")
-            return OperationResult("confirmed", confirmed_id)
-        except RateLimited:
-            return OperationResult("failed", reason="rate_limit")
-        except Exception as exc:
-            error = str(exc).lower()
-            if "too_long" in error or "too long" in error:
-                return OperationResult("failed", reason="too_long")
-            outcome = classify(
-                exc, operation="send", parse_mode="Markdown" if mode == "rich" else None
-            )
-            if outcome.reason not in {"parse"}:
-                self._log_failure("send", exc)
-            return outcome
-
-    def _log_failure(self, operation, exc):
-        log.warning(
-            "Telegram delivery failed operation=%s chat_ref=%s error_type=%s",
-            operation,
-            self._chat_ref,
-            type(exc).__name__,
-        )
+    async def stop_edit_loop(self):
+        self._closed = True
+        unregister_run(self.target)
+        self._wake.set()
+        tasks = [
+            task
+            for task in (self._edit_task, self._final_task)
+            if task and task is not asyncio.current_task() and not task.done()
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        _live.discard(self)
 
 
-# The name tests and handlers still patch.
+async def close_presenters() -> None:
+    """Close delivery workers while the bot transport is still available."""
+    await asyncio.gather(*(presenter.stop_edit_loop() for presenter in tuple(_live)))
+
+
 TelegramStreamer = RichReplyStreamer

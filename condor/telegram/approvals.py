@@ -16,10 +16,12 @@ from typing import Any, Awaitable, Callable, Protocol
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from condor.runtime.confirmations import (
+    ConfirmationStatus,
     PendingConfirmation,
     build_permission_callback,
     get_registry,
 )
+from condor.telegram.transport import message_id_of, telegram_call
 
 APPROVE_PREFIX = "confirm_trade:"
 REJECT_PREFIX = "reject_trade:"
@@ -27,6 +29,8 @@ REJECT_PREFIX = "reject_trade:"
 
 class MessageSender(Protocol):
     async def send_message(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def edit_message_reply_markup(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class TelegramChannel:
@@ -37,9 +41,11 @@ class TelegramChannel:
         self._chat_id = chat_id
 
     async def deliver(self, pending: PendingConfirmation) -> None:
-        from condor.telegram.output.runs import bump_chat, note_approval
+        from condor.telegram.output.runs import note_approval
 
         note_approval(self._chat_id, pending)
+        if pending.status is not ConfirmationStatus.PENDING:
+            return
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -61,7 +67,7 @@ class TelegramChannel:
         # What the call leaves behind (a controller overwrite's impact), sent
         # as plain text like the summary: no parse mode, nothing to escape.
         detail = f"\n\n{pending.detail}" if pending.detail else ""
-        await self._bot.send_message(
+        result = await self._bot.send_message(
             chat_id=self._chat_id,
             text=(
                 f"Trade Confirmation\n{asked_by}\n"
@@ -70,7 +76,19 @@ class TelegramChannel:
             reply_markup=keyboard,
             disable_notification=False,
         )
-        bump_chat(self._chat_id)
+        message_id = message_id_of(result)
+        if message_id is not None:
+
+            async def clear_keyboard(_pending):
+                await telegram_call(
+                    self._bot.edit_message_reply_markup,
+                    chat_id=self._chat_id,
+                    message_id=message_id,
+                    reply_markup=None,
+                    retry_rate_limits=False,
+                )
+
+            get_registry().on_resolved(pending, clear_keyboard)
 
 
 def approval_callback(request_id: str, approved: bool) -> str:

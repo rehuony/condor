@@ -17,7 +17,7 @@ dashboard hides the panel from non-admins, but that is cosmetic — hiding a
 control is not a gate, so each handler asks again and answers 403 whatever the
 client believes it is.
 
-**This module is not hot-reloaded**: ``main.py``'s reload list does not cover
+**This module is not hot-reloaded**: ``condor/reload.py`` does not cover
 ``condor/web/routes/*.py``, so a change here needs a full bot restart. The route
 logic is pinned by ``tests/test_admin_people_routes.py`` for exactly that reason.
 """

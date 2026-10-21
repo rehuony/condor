@@ -1,6 +1,6 @@
 """The admin people panel's server-side contract (FEAT-088).
 
-This module is not hot-reloaded — ``main.py``'s reload list does not cover
+This module is not hot-reloaded — ``condor/reload.py`` does not cover
 ``condor/web/routes/*.py`` — so clicking through the dashboard is a poor way to
 learn whether a rule holds. These tests are where the rules are checked.
 

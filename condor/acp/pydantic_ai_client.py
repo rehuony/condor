@@ -824,7 +824,7 @@ class PydanticAIClient:
             await asyncio.wait_for(
                 self._ready_event.wait(), timeout=TIMEOUTS.agent_handshake
             )
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
             task, self._mcp_task = self._mcp_task, None
             if task is not None:
                 task.cancel()
@@ -832,6 +832,8 @@ class PydanticAIClient:
                     await task
             self._mcp_servers.clear()
             self._agent = None
+            if isinstance(exc, asyncio.CancelledError):
+                raise
             raise TimeoutError(
                 f"MCP servers for {self.model_name} did not become ready within "
                 f"{TIMEOUTS.agent_handshake}s; the agent was not started."
@@ -1515,6 +1517,7 @@ class PydanticAIClient:
                 tool_call_id=part.tool_call_id or "",
                 status="failed" if isinstance(part, RetryPromptPart) else "completed",
                 output=content if isinstance(content, str) else str(content),
+                name=part.tool_name or "",
             )
 
     async def _response_events(
@@ -1530,13 +1533,16 @@ class PydanticAIClient:
 
         for part in node.model_response.parts:
             if isinstance(part, ToolCallPart):
+                tool_id = part.tool_call_id or uuid.uuid4().hex[:12]
+                yield self._tool_event(part, "pending", tool_id)
                 approved = True
                 if self.permission_callback:
                     approved, _reason = await self._authorize(part)
                     if not approved and part.tool_call_id:
                         blocked_ids.add(part.tool_call_id)
-                for event in self._tool_events(part, approved):
-                    yield event
+                yield self._tool_event(
+                    part, "in_progress" if approved else "blocked", tool_id
+                )
 
     async def _authorize(self, part: Any) -> tuple[bool, str]:
         """Decide whether a tool call may run, and record the decision.
@@ -1594,35 +1600,20 @@ class PydanticAIClient:
             part.tool_call_id, tool_name, approved, reason
         )
 
-    def _tool_events(self, part: Any, approved: bool) -> list[ACPEvent]:
+    def _tool_event(self, part: Any, status: str, tool_id: str) -> ToolCallEvent:
         """Project one tool call into the events the UI shows.
 
         A refused call gets a terminal ``blocked`` event. Approved calls remain
         ``in_progress`` until the next request carries their actual results.
         """
-        tool_id = part.tool_call_id or uuid.uuid4().hex[:12]
-        args = _tool_args_to_dict(part.args)
-
-        if not approved:
-            return [
-                ToolCallEvent(
-                    tool_call_id=tool_id,
-                    title=part.tool_name,
-                    status="blocked",
-                    kind="mcp",
-                    input=args,
-                )
-            ]
-
-        return [
-            ToolCallEvent(
-                tool_call_id=tool_id,
-                title=part.tool_name,
-                status="in_progress",
-                kind="mcp",
-                input=args,
-            ),
-        ]
+        return ToolCallEvent(
+            tool_call_id=tool_id,
+            title=part.tool_name,
+            status=status,
+            kind="mcp",
+            input=_tool_args_to_dict(part.args),
+            name=part.tool_name,
+        )
 
     def _format_error(self, e: Exception) -> str:
         """Translate provider HTTP errors into actionable user-facing text.

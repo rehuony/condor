@@ -30,6 +30,8 @@ class ConversationTurns:
     active_key: str = ""
     active_request: str = ""
     cancelled: set[str] = field(default_factory=set)
+    cancel_events: dict[str, asyncio.Event] = field(default_factory=dict)
+    completed: set[str] = field(default_factory=set)
 
 
 _turns: dict[tuple[int | None, str], ConversationTurns] = {}
@@ -81,7 +83,10 @@ def cancel_current(
     ):
         return ""
     request = current.active_request or next(iter(current.pending))
+    if request in current.completed:
+        return ""
     current.cancelled.add(request)
+    current.cancel_events.setdefault(request, asyncio.Event()).set()
     return current.pending[request]
 
 
@@ -94,12 +99,56 @@ def is_cancelled(user_id: int | None, conversation_id: str, session_key: str) ->
     )
 
 
+def cancel_request(
+    user_id: int | None, conversation_id: str, request_id: str
+) -> tuple[str, bool] | None:
+    """Claim one pending request synchronously; return its key and active state."""
+    current = _turns.get((user_id, conversation_id))
+    if (
+        current is None
+        or request_id not in current.pending
+        or request_id in current.cancelled
+        or request_id in current.completed
+    ):
+        return None
+    current.cancelled.add(request_id)
+    current.cancel_events.setdefault(request_id, asyncio.Event()).set()
+    return current.pending[request_id], current.active_request == request_id
+
+
+def request_is_open(user_id: int | None, conversation_id: str, request_id: str) -> bool:
+    current = _turns.get((user_id, conversation_id))
+    return bool(
+        current
+        and request_id in current.pending
+        and request_id not in current.cancelled
+        and request_id not in current.completed
+    )
+
+
+def active_request(
+    user_id: int, session_key: str, conversation_id: str | None = None
+) -> tuple[str, str] | None:
+    """Capture the request that owns a session when it asks for permission."""
+    for (owner, queue_id), current in _turns.items():
+        if (
+            owner == user_id
+            and (conversation_id is None or queue_id == conversation_id)
+            and current.active_key == session_key
+            and current.active_request
+        ):
+            return queue_id, current.active_request
+    return None
+
+
 def release(user_id: int | None, conversation_id: str, request_id: str) -> None:
     key = (user_id, conversation_id)
     current = _turns.get(key)
     if current:
         current.pending.pop(request_id, None)
         current.cancelled.discard(request_id)
+        current.cancel_events.pop(request_id, None)
+        current.completed.discard(request_id)
         if not current.pending and not current.lock.locked():
             _turns.pop(key, None)
 

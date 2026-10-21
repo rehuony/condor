@@ -51,18 +51,17 @@ def _reset_gecko_throttle():
 
 
 @pytest.fixture(autouse=True)
-def _reset_telegram_output():
-    """Output leases and run targets are process-local; tests use many loops."""
-    from condor.telegram.output import lease as output_lease
+def _reset_telegram_output(monkeypatch):
+    """Writers and run targets are process-local; tests use many loops."""
     from condor.telegram.output import runs as output_runs
+    from condor.telegram.output import writer as output_writer
 
-    output_lease._tails = {}
+    monkeypatch.setattr(output_writer, "UPDATE_INTERVAL", 0.0)
+    output_writer._writers = {}
     output_runs._runs = {}
-    output_runs._by_draft = {}
     yield
-    output_lease._tails = {}
+    output_writer._writers = {}
     output_runs._runs = {}
-    output_runs._by_draft = {}
 
 
 @pytest.fixture(autouse=True)

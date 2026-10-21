@@ -88,6 +88,7 @@ def test_an_announced_call_reads_as_its_kind_rather_than_as_a_lie(title):
 
     assert isinstance(event, ToolCallEvent)
     assert event.title == "fetch"
+    assert event.name == ""
 
 
 def test_an_announced_call_prefers_a_tool_name_to_a_kind():
@@ -102,6 +103,7 @@ def test_an_announced_call_prefers_a_tool_name_to_a_kind():
     )
 
     assert event.title == "WebSearch"
+    assert event.name == "WebSearch"
 
 
 @pytest.mark.parametrize("title", MALFORMED)
@@ -124,6 +126,7 @@ def test_an_update_that_names_nothing_stays_empty(title):
 
     assert isinstance(event, ToolCallUpdate)
     assert event.title == ""
+    assert event.name == ""
 
 
 def test_the_gate_still_dispatches_on_the_wire_name():
@@ -134,6 +137,54 @@ def test_the_gate_still_dispatches_on_the_wire_name():
 
     assert normalized["tool"] == "mcp__mcp-hummingbot__manage_bots"
     assert normalize_tool_call({"toolCallId": "1", "kind": "fetch"})["tool"] == ""
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("mcp__condor__run_code", "mcp__condor__run_code"),
+        ("Read /tmp/result.py", ""),
+        ("Reading files…", ""),
+        ("Reading...", ""),
+    ],
+)
+def test_only_identifier_titles_can_supply_a_missing_tool_name(title, expected):
+    event = _drive({"sessionUpdate": "tool_call", "toolCallId": "1", "title": title})
+    assert event.name == expected
+
+
+def test_canonical_name_survives_runtime_projection_and_transcript_updates(conv_root):
+    event = _drive(
+        {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "1",
+            "title": "Read project instructions",
+            "tool": "read_file",
+            "kind": "read",
+        }
+    )
+    projected = RuntimeEvent.from_acp(event)
+    assert projected.to_wire()["data"]["name"] == "read_file"
+    meta = new_conversation(USER, WEB)
+    rec = Recorder(USER, meta.id, "Read the instructions")
+    rec.observe(projected)
+    rec.observe(
+        RuntimeEvent.from_acp(
+            _drive(
+                {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "1",
+                    "title": "Read complete",
+                    "status": "completed",
+                }
+            )
+        )
+    )
+    rec.flush()
+    call = read_transcript(USER, meta.id)[-1].tool_calls[0]
+    assert call["title"] == "Read complete"
+    assert call["name"] == "read_file"
+    assert call["kind"] == "read"
 
 
 # ── Nothing malformed reaches disk ──

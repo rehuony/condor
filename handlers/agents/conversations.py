@@ -114,7 +114,7 @@ async def _handle_conversation_pick(
         info = await _create_tg_session(
             chat_id=chat_id,
             # A bound Agent brings its own configured model, exactly as it does
-            # when the binding is made in the "Talk to" picker.
+            # when the binding is made in the "Talk To" picker.
             agent_key="" if agent_slug else agent_key,
             user_id=user_id,
             permission_callback=_perm_cb,

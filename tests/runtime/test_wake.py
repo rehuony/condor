@@ -267,6 +267,36 @@ def test_a_sink_that_blows_up_does_not_kill_the_turn(registry):
     assert [t.role for t in _turns(conv_id)] == ["system", "assistant"]
 
 
+def test_wake_binds_identity_before_open_and_stops_without_cancelling_producer(
+    registry,
+):
+    class StoppedSink(_RecordingSink):
+        def bind_request(self, conversation_id, request_id):
+            self.identity = conversation_id, request_id
+
+        async def open(self):
+            assert self.identity[0] and self.identity[1]
+            await super().open()
+
+        def is_stopped(self):
+            return True
+
+    async def scenario():
+        client, conv_id = await _open_session()
+        sink = StoppedSink()
+        wake.register_sink_factory("tg", lambda key, user_id: sink)
+        assert not await wake.resume_session(
+            session_key=str(KEY), conversation_id=conv_id, text="done", kind="resume"
+        )
+        assert client.prompts == []
+        assert sink.identity[0] == conv_id
+        assert sink.opened == sink.closed == 1
+        assert not asyncio.current_task().cancelling()
+        assert not wake.is_waking(conv_id)
+
+    asyncio.run(scenario())
+
+
 def test_no_sink_registered_still_runs_and_records_the_turn(registry):
     """Nobody attached is not a failure -- the dashboard picks it up on reload."""
 

@@ -15,14 +15,14 @@ import importlib
 import importlib.util
 from pathlib import Path
 
-import main
+from condor import reload
 
-HANDLERS_ROOT = Path(main.__file__).parent / "handlers"
+HANDLERS_ROOT = Path(__file__).resolve().parents[1] / "handlers"
 
 
 def test_every_handler_module_on_disk_is_discovered():
     """No module under handlers/ is left out of the reload list."""
-    discovered = set(main._discover_handler_modules())
+    discovered = set(reload._discover_handler_modules())
 
     on_disk = set()
     for path in HANDLERS_ROOT.rglob("*.py"):
@@ -40,7 +40,7 @@ def test_every_handler_module_on_disk_is_discovered():
 
 def test_the_dex_modules_the_old_list_missed_are_covered():
     """Regression: these six exist and were absent from the hand-written list."""
-    discovered = set(main._discover_handler_modules())
+    discovered = set(reload._discover_handler_modules())
     for name in (
         "handlers.dex.router",
         "handlers.dex.swap",
@@ -58,7 +58,7 @@ def test_no_module_in_the_reload_set_is_a_dead_name():
     The old list carried handlers.dex.swap_quote / swap_execute / swap_history,
     none of which exist. A dead name never raises — it is simply skipped.
     """
-    names = [*main._EXTRA_RELOAD_MODULES, *main._discover_handler_modules()]
+    names = [*reload._EXTRA_RELOAD_MODULES, *reload._discover_handler_modules()]
     dead = [n for n in names if importlib.util.find_spec(n) is None]
     assert not dead, f"names that resolve to nothing: {dead}"
 
@@ -73,7 +73,7 @@ def test_every_module_in_the_reload_set_actually_imports():
     rode the derived reload list as 1,323 lines of code no reload could ever
     touch. Importing for real is what makes such a module visible (READ-254).
     """
-    names = [*main._EXTRA_RELOAD_MODULES, *main._discover_handler_modules()]
+    names = [*reload._EXTRA_RELOAD_MODULES, *reload._discover_handler_modules()]
     broken = {}
     for name in names:
         try:
@@ -92,7 +92,7 @@ def test_children_reload_before_their_parents():
     was refreshed first, the package re-binds the stale object and the edit is
     lost.
     """
-    order = main._discover_handler_modules()
+    order = reload._discover_handler_modules()
     position = {name: i for i, name in enumerate(order)}
 
     for name, index in position.items():
@@ -112,5 +112,5 @@ def test_the_runtime_is_never_reloaded():
     Re-executing those modules resets the registry and silently orphans every
     running agent, so the derivation must not be able to reach them.
     """
-    names = [*main._EXTRA_RELOAD_MODULES, *main._discover_handler_modules()]
+    names = [*reload._EXTRA_RELOAD_MODULES, *reload._discover_handler_modules()]
     assert not [n for n in names if n.startswith("condor.runtime")]

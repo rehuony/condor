@@ -1,1 +1,1 @@
-"""Ordered Telegram output: per-chat leases and the active-run registry."""
+"""Request presentation, per-chat delivery and active Stop registration."""

@@ -168,6 +168,9 @@ class AgentSession:
     fingerprint: dict[str, str] = field(default_factory=dict)
     spec: SessionSpec | None = None
     permission_callback: PermissionCallback | None = None
+    # Keep the last managed request after DONE so late permission calls cannot
+    # fall back to an unowned approval. Direct prompt_once calls suspend it.
+    permission_request_id: str | None = field(default=None, init=False, repr=False)
     user_data: dict | None = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _abort_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -824,9 +827,9 @@ async def _spawn_session(
         strict_custom_endpoint=True,
     )
 
-    await client.start()
-
     try:
+        await client.start()
+
         # Build initial context about server and permissions. A bound
         # specialist opens with its OWN identity and domain memory instead of
         # the chat's — that is what makes it a different brain, not a skin.
@@ -935,9 +938,17 @@ async def _spawn_session(
             permission_callback=permission_callback,
             user_data=user_data,
         )
-    except Exception:
-        # Something failed after start -- stop client to prevent orphan subprocess
-        await client.stop()
+    except BaseException:
+        # Until registration, this caller owns startup and context resources,
+        # including when Stop cancels preparation before the first prompt.
+        try:
+            await client.stop()
+        except Exception as exc:
+            log.warning(
+                "Failed to stop unregistered session %s error_type=%s",
+                raw_key,
+                type(exc).__name__,
+            )
         raise
 
     _sessions[raw_key] = session

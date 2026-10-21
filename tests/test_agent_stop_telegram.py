@@ -1,9 +1,4 @@
-"""Stopping and queueing on the Telegram surface.
-
-The dashboard has had a real Stop since FEAT-029 — a WS ``abort_prompt`` that
-lands on the agent as ``session/cancel`` and leaves the session standing.
-``/stop`` is the command half; the client's composer stop is the native half.
-"""
+"""Chat Stop freezes its existing requests and never reaches later input."""
 
 import asyncio
 from types import SimpleNamespace
@@ -11,18 +6,22 @@ from types import SimpleNamespace
 import pytest
 
 import utils.auth as auth_module
-from condor.runtime import SessionKey
 from condor.runtime import client as runtime
-from condor.runtime.events import EventType, RuntimeEvent
-from handlers.agents import stop_command
-from handlers.agents.stream import QUEUED_LABEL, STOPPED_LABEL, TelegramStreamer
+from condor.telegram.output import runs
+from condor.telegram.output.runs import RunTarget, register_run
+from handlers.agents.stop import handle_stop_callback, stop_command
 
 CHAT_ID = 4242
+USER_ID = 7
+
+
+@pytest.fixture(autouse=True)
+def isolated_runs(monkeypatch):
+    monkeypatch.setattr(runs, "_runs", {})
 
 
 @pytest.fixture
 def approved_user(monkeypatch):
-    """Make @restricted see an admin so the handler body actually runs."""
     from config_manager import UserRole
 
     monkeypatch.setattr(
@@ -32,198 +31,132 @@ def approved_user(monkeypatch):
     )
 
 
-def _message_update(replies: list):
-    async def answer(text, **kwargs):
+def update(replies, *, token=None, message_id=19, user_id=USER_ID):
+    async def answer(text="", **kwargs):
         replies.append(text)
-        return SimpleNamespace(message_id=1)
 
     return SimpleNamespace(
         message=SimpleNamespace(text="/stop", answer=answer),
         effective_chat=SimpleNamespace(id=CHAT_ID, type="private"),
-        effective_user=SimpleNamespace(id=7, username="tester"),
-        callback_query=None,
+        effective_user=SimpleNamespace(id=user_id, username="tester"),
+        callback_query=(
+            SimpleNamespace(
+                data=f"agent:stop_run:{token}",
+                message=SimpleNamespace(message_id=message_id),
+                answer=answer,
+            )
+            if token is not None
+            else None
+        ),
     )
 
 
-def _run_stop(monkeypatch, info):
-    """Drive /stop against a session snapshot; report what the runtime saw."""
-    calls = {"abort": [], "destroy": []}
-    replies: list[str] = []
-
-    async def fake_get_info(key):
-        return info
-
-    async def fake_abort(key):
-        calls["abort"].append(str(key))
-        return True
-
-    async def fake_destroy(key):
-        calls["destroy"].append(str(key))
-        return True
-
-    monkeypatch.setattr(runtime, "get_info", fake_get_info)
-    monkeypatch.setattr(runtime, "abort", fake_abort)
-    monkeypatch.setattr(runtime, "destroy", fake_destroy)
-
-    asyncio.run(stop_command(_message_update(replies), SimpleNamespace(user_data={})))
-    return calls, replies
+def target(request_id, *, conversation="conversation", accepted=True):
+    result = RunTarget(CHAT_ID, USER_ID, conversation, request_id, accepted=accepted)
+    result.message_ids.add(19)
+    register_run(result)
+    return result
 
 
-def _session(*, alive=True, is_busy=True):
-    return SimpleNamespace(alive=alive, is_busy=is_busy)
+def test_stop_snapshots_preparing_queued_and_running_across_conversations(
+    approved_user, monkeypatch
+):
+    current = target("current")
+    queued = target("queued", conversation="another-conversation")
+    preparing = target("preparing", conversation="", accepted=False)
+    unrelated = RunTarget(99, USER_ID, "elsewhere", "unrelated", accepted=True)
+    register_run(unrelated)
+    stopped, cancelled, snapshots, replies = [], [], [], []
+    for item in (current, queued, preparing):
+        item.on_stop = lambda item=item: stopped.append(item.request_id)
+        item.cancel_preparation = lambda item=item: cancelled.append(item.request_id)
 
+    async def cancel_requests(requests):
+        snapshots.append(tuple(requests))
+        assert stopped == ["current", "queued", "preparing"]
+        assert cancelled == ["preparing"]
+        target("later")
+        await asyncio.sleep(0)
+        return 2
 
-def test_stop_aborts_the_turn_and_keeps_the_session(approved_user, monkeypatch):
-    calls, replies = _run_stop(monkeypatch, _session())
+    monkeypatch.setattr(runtime, "cancel_requests", cancel_requests)
+    asyncio.run(stop_command(update(replies), SimpleNamespace(user_data={})))
 
-    assert calls["abort"] == [str(SessionKey.telegram(CHAT_ID))]
-    assert calls["destroy"] == []
-    assert replies and "Stopped" in replies[0]
-
-
-def test_stop_on_an_idle_session_aborts_nothing(approved_user, monkeypatch):
-    """Nothing is generating: a stray /stop must not disturb the session."""
-    calls, replies = _run_stop(monkeypatch, _session(is_busy=False))
-
-    assert calls["abort"] == []
-    assert replies and "idle" in replies[0]
-
-
-def test_stop_without_a_session_says_so(approved_user, monkeypatch):
-    calls, replies = _run_stop(monkeypatch, None)
-
-    assert calls["abort"] == []
-    assert replies == ["No active session."]
-
-
-def test_stop_is_private_chat_only(approved_user, monkeypatch):
-    replies: list[str] = []
-    update = _message_update(replies)
-    update.effective_chat = SimpleNamespace(id=CHAT_ID, type="supergroup")
-
-    aborted = []
-    monkeypatch.setattr(runtime, "abort", lambda key: aborted.append(key))
-
-    asyncio.run(stop_command(update, SimpleNamespace(user_data={})))
-
-    assert aborted == []
-    assert replies and "private chats" in replies[0]
-
-
-class _RecordingBot:
-    def __init__(self):
-        self.drafts: list[str] = []
-        self.sent = []
-
-    async def send_rich_message_draft(self, **kw):
-        self.drafts.append(getattr(kw.get("rich_message"), "markdown", ""))
-        return True
-
-    async def send_rich_message(self, **kw):
-        self.sent.append(getattr(kw.get("rich_message"), "markdown", ""))
-        return SimpleNamespace(message_id=99)
-
-    async def send_message(self, **kw):
-        self.sent.append(kw["text"])
-        return SimpleNamespace(message_id=99)
-
-    async def delete_message(self, **kw):
-        return True
-
-
-def _streamer():
-    bot = _RecordingBot()
-    return bot, TelegramStreamer(bot=bot, chat_id=CHAT_ID, message_id=1)
-
-
-def test_a_queued_turn_says_it_is_waiting(monkeypatch):
-    bot, streamer = _streamer()
-
-    async def drive():
-        await streamer.process_event(RuntimeEvent.queued())
-        await streamer._flush(final=False)
-
-    asyncio.run(drive())
-
-    assert bot.drafts == [QUEUED_LABEL]
-    assert "Thinking" not in bot.drafts[-1]
-
-
-def test_the_queued_notice_gives_way_to_the_answer():
-    bot, streamer = _streamer()
-
-    async def drive():
-        await streamer.process_event(RuntimeEvent.queued())
-        await streamer._flush(final=False)
-        await streamer.process_event(
-            RuntimeEvent(type=EventType.TEXT, data={"text": "hello"})
+    assert snapshots == [
+        (
+            (USER_ID, "conversation", "current"),
+            (USER_ID, "another-conversation", "queued"),
         )
-        await streamer._flush(final=False)
-        await streamer.stop_edit_loop()
-
-    asyncio.run(drive())
-
-    assert streamer._queued is False
-    assert bot.drafts[-1] == "hello"
-
-
-def test_waiting_its_turn_costs_one_draft_not_two_per_second():
-    """Several queued placeholders used to hammer Telegram while idle."""
-    bot, streamer = _streamer()
-
-    async def drive():
-        await streamer.process_event(RuntimeEvent.queued())
-        task = streamer.start_edit_loop()
-        await asyncio.sleep(0.15)
-        streamer._done = True
-        await task
-        await streamer.stop_edit_loop()
-
-    asyncio.run(drive())
-
-    assert bot.drafts == [QUEUED_LABEL]
+    ]
+    assert [item.request_id for item in runs.runs_for_chat(CHAT_ID, USER_ID)] == [
+        "later"
+    ]
+    assert not unrelated.stopped
+    assert "cleared the queue" in replies[0]
 
 
-def test_a_stopped_turn_keeps_its_partial_answer_and_says_it_was_stopped():
-    bot, streamer = _streamer()
+def test_repeated_old_button_does_not_stop_later_input(monkeypatch):
+    first = target("first")
+    queued = target("queued")
+    stopped, replies = [], []
 
-    async def drive():
-        await streamer.process_event(
-            RuntimeEvent(type=EventType.TEXT, data={"text": "half an answ"})
+    async def cancel_requests(requests):
+        stopped.extend(requests)
+        target("later")
+        return 2
+
+    monkeypatch.setattr(runtime, "cancel_requests", cancel_requests)
+
+    async def scenario():
+        click = update(replies, token=first.token)
+        await handle_stop_callback(click, SimpleNamespace(user_data={}))
+        await handle_stop_callback(click, SimpleNamespace(user_data={}))
+
+    asyncio.run(scenario())
+    assert first.stopped and queued.stopped
+    assert stopped == [
+        (USER_ID, "conversation", "first"),
+        (USER_ID, "conversation", "queued"),
+    ]
+    assert [item.request_id for item in runs.runs_for_chat(CHAT_ID, USER_ID)] == [
+        "later"
+    ]
+    assert "already finished" in replies[-1]
+
+
+@pytest.mark.parametrize("message_id,user_id", [(20, USER_ID), (19, 8)])
+def test_button_requires_the_original_message_and_owner(
+    monkeypatch, message_id, user_id
+):
+    current = target("current")
+    replies = []
+
+    async def unexpected(_requests):
+        pytest.fail("an unrelated button must not cancel a request")
+
+    monkeypatch.setattr(runtime, "cancel_requests", unexpected)
+    asyncio.run(
+        handle_stop_callback(
+            update(
+                replies, token=current.token, message_id=message_id, user_id=user_id
+            ),
+            SimpleNamespace(user_data={}),
         )
-        await streamer.process_event(RuntimeEvent.done("cancelled"))
-        await streamer.finalize()
-
-    asyncio.run(drive())
-
-    final = bot.sent[-1]
-    assert "half an answ" in final
-    assert STOPPED_LABEL in final
+    )
+    assert not current.stopped
+    assert replies == ["This response has already finished."]
 
 
-def test_a_turn_stopped_before_it_spoke_is_not_reported_as_no_response():
-    bot, streamer = _streamer()
-
-    async def drive():
-        await streamer.process_event(RuntimeEvent.done("cancelled"))
-        await streamer.finalize()
-
-    asyncio.run(drive())
-
-    assert "stopped" in bot.sent[-1].lower()
-    assert "no response" not in bot.sent[-1]
+def test_stop_on_idle_chat_changes_nothing(approved_user):
+    replies = []
+    asyncio.run(stop_command(update(replies), SimpleNamespace(user_data={})))
+    assert replies == ["Nothing to stop — the agent is idle."]
 
 
-def test_a_normal_turn_is_unmarked():
-    bot, streamer = _streamer()
-
-    async def drive():
-        await streamer.process_event(
-            RuntimeEvent(type=EventType.TEXT, data={"text": "done thinking"})
-        )
-        await streamer.process_event(RuntimeEvent.done("end_turn"))
-        await streamer.finalize()
-
-    asyncio.run(drive())
-
-    assert STOPPED_LABEL not in bot.sent[-1]
+def test_stop_is_private_chat_only(approved_user):
+    current, replies = target("current"), []
+    event = update(replies)
+    event.effective_chat.type = "supergroup"
+    asyncio.run(stop_command(event, SimpleNamespace(user_data={})))
+    assert not current.stopped
+    assert "private chats" in replies[0]

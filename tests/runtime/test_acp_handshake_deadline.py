@@ -125,8 +125,11 @@ class _NeverReadyAgent:
         return self._ctx()
 
 
-def test_pydantic_ai_start_gives_up_on_mcp_servers_that_never_come_up(monkeypatch):
-    """The same deadline bounds the pydantic-ai ready wait."""
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_pydantic_ai_start_gives_up_on_mcp_servers_that_never_come_up(
+    monkeypatch, cancelled
+):
+    """A timeout or caller cancellation closes the pydantic-ai startup task."""
     monkeypatch.setattr(timeouts, "TIMEOUTS", _fast(0.3))
     client = PydanticAIClient(model="ollama:llama3.1")
     client._agent = _NeverReadyAgent()
@@ -139,8 +142,13 @@ def test_pydantic_ai_start_gives_up_on_mcp_servers_that_never_come_up(monkeypatc
     async def scenario():
         task = asyncio.create_task(client._run_mcp_lifecycle())
         client._mcp_task = task
-        with pytest.raises(TimeoutError):
-            await client._await_ready()
+        startup = asyncio.create_task(client._await_ready())
+        if cancelled:
+            await asyncio.sleep(0)
+            startup.cancel()
+        with pytest.raises(asyncio.CancelledError if cancelled else TimeoutError):
+            await startup
+        assert client._mcp_task is None
         return task
 
     task = asyncio.run(asyncio.wait_for(scenario(), timeout=10))

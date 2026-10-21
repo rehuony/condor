@@ -27,21 +27,21 @@ def _active_session_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="Change LLM", callback_data="agent:settings"),
-            InlineKeyboardButton(text="Talk to", callback_data="agent:talk_to"),
+            InlineKeyboardButton(text="Talk To", callback_data="agent:talk_to"),
         ],
         [InlineKeyboardButton(text="Conversations", callback_data="agent:conv_list")],
         [
             # Kills the subprocess and the conversation with it. Labelled
-            # "End session" so it is not read as "stop generating" — that is
-            # /stop, which aborts the turn and keeps the context.
-            InlineKeyboardButton(text="End session", callback_data="agent:stop"),
+            # "End Session" so it is not read as "stop generating" — that is
+            # /stop, which clears current requests and keeps the context.
+            InlineKeyboardButton(text="End Session", callback_data="agent:stop"),
             InlineKeyboardButton(text="Close", callback_data="agent:close"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-# "Talk to" picker pagination
+# "Talk To" picker pagination
 TALK_PAGE_SIZE = 8
 
 
@@ -56,7 +56,7 @@ def _talk_to_keyboard(
     keyboard: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
-                text=("• " if not current_slug else "") + "Condor (coordinator)",
+                text=("• " if not current_slug else "") + "Condor (Coordinator)",
                 callback_data="agent:talk_pick:-1",
             )
         ]
@@ -221,11 +221,11 @@ def _conversation_delete_keyboard(meta) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Delete for good",
+                    text="Delete for Good",
                     callback_data=f"agent:conv_delok:{conversation_token(meta.id)}",
                 )
             ],
-            [InlineKeyboardButton(text="Keep it", callback_data="agent:conv_list")],
+            [InlineKeyboardButton(text="Keep It", callback_data="agent:conv_list")],
         ]
     )
 
@@ -300,7 +300,7 @@ def _settings_keyboard(
     keyboard.append(
         [
             InlineKeyboardButton(
-                text=f"Key-shape warnings: {'on' if secret_notices else 'off'}",
+                text=f"Key-Shape Warnings: {'On' if secret_notices else 'Off'}",
                 callback_data="agent:secret_notices_toggle",
             )
         ]
@@ -339,7 +339,7 @@ def _openrouter_picker_keyboard(
     keyboard: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
-                text="Enter model manually", callback_data="agent:or_type"
+                text="Enter Model Manually", callback_data="agent:or_type"
             )
         ],
     ]
@@ -385,7 +385,7 @@ def _openrouter_input_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Back to model list", callback_data="agent:or_page:0"
+                    text="Back to Model List", callback_data="agent:or_page:0"
                 )
             ],
             [InlineKeyboardButton(text="Cancel", callback_data="agent:or_type_cancel")],
@@ -418,13 +418,13 @@ def _custom_endpoints_keyboard(
         )
 
     keyboard.append(
-        [InlineKeyboardButton(text="+ Add endpoint", callback_data="agent:cu_add")]
+        [InlineKeyboardButton(text="+ Add Endpoint", callback_data="agent:cu_add")]
     )
     if providers:
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Manage endpoints", callback_data="agent:cu_manage"
+                    text="Manage Endpoints", callback_data="agent:cu_manage"
                 )
             ]
         )
@@ -446,7 +446,7 @@ def _custom_manage_keyboard(providers: list[dict]) -> InlineKeyboardMarkup:
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Change API key", callback_data=f"agent:cu_key:{key}"
+                    text="Change API Key", callback_data=f"agent:cu_key:{key}"
                 ),
                 InlineKeyboardButton(
                     text="Forget", callback_data=f"agent:cu_del:{key}"
@@ -474,7 +474,7 @@ def _custom_delete_keyboard(name: str) -> InlineKeyboardMarkup:
                     callback_data=f"agent:cu_delok:{sanitize_provider_name(name)}",
                 )
             ],
-            [InlineKeyboardButton(text="Keep it", callback_data="agent:cu_manage")],
+            [InlineKeyboardButton(text="Keep It", callback_data="agent:cu_manage")],
         ]
     )
 
@@ -494,7 +494,7 @@ def _custom_key_prompt_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="No API key needed", callback_data="agent:cu_nokey"
+                    text="No API Key Needed", callback_data="agent:cu_nokey"
                 )
             ],
             [InlineKeyboardButton(text="Cancel", callback_data="agent:cu_cancel")],
@@ -516,7 +516,7 @@ def _custom_error_keyboard(
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Try again", callback_data=retry_action),
+                InlineKeyboardButton(text="Try Again", callback_data=retry_action),
                 InlineKeyboardButton(text=label, callback_data=action),
             ],
             [InlineKeyboardButton(text="Back", callback_data="agent:cu_list")],
@@ -559,7 +559,7 @@ def _custom_picker_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="No models match", callback_data="agent:cu_noop"
+                    text="No Models Match", callback_data="agent:cu_noop"
                 )
             ]
         )
@@ -608,7 +608,7 @@ def _custom_picker_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"Clear filter '{query}'", callback_data="agent:cu_clear"
+                    text=f"Clear Filter '{query}'", callback_data="agent:cu_clear"
                 )
             ]
         )
@@ -616,7 +616,7 @@ def _custom_picker_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Search models", callback_data="agent:cu_search"
+                    text="Search Models", callback_data="agent:cu_search"
                 )
             ]
         )
@@ -635,7 +635,7 @@ def _no_session_keyboard() -> InlineKeyboardMarkup:
         # Here too, not only beside a live session: picking the specialist is
         # how you say which one to *raise*, and hanging it off a running
         # subprocess made the coordinator the only thing a chat could start as.
-        [InlineKeyboardButton(text="Talk to", callback_data="agent:talk_to")],
+        [InlineKeyboardButton(text="Talk To", callback_data="agent:talk_to")],
         # Reachable with no session precisely because this is when it is wanted:
         # the chat whose subprocess is gone is the one whose owner is looking for
         # what they were saying yesterday.
@@ -682,7 +682,9 @@ async def show_agent_menu(
         # Advertised where the user can see it is answering — a menu opened
         # mid-answer is exactly when someone wants to interrupt.
         if session.is_busy:
-            lines.append("/stop interrupts the answer without losing the session.")
+            lines.append(
+                "/stop stops the answer and clears queued requests; the session is kept."
+            )
         text = "\n".join(lines)
         keyboard = _active_session_keyboard()
     else:
@@ -702,7 +704,7 @@ async def show_agent_menu(
         lines.append("\nStart a session or adjust settings below.")
         # Said where the choice is made: "Start" boots whoever the chat is bound
         # to, so the way to start it as somebody else has to be visible here.
-        lines.append('"Talk to" starts it as a specialist — or /agent <name>.')
+        lines.append('"Talk To" starts it as a specialist — or /agent <name>.')
         text = "\n".join(lines)
         keyboard = _no_session_keyboard()
 

@@ -3,64 +3,66 @@
 import logging
 
 import condor.runtime.client as runtime
+from condor.telegram.output.runs import (
+    RunTarget,
+    active_run,
+    runs_for_chat,
+    unregister_run,
+)
 from condor.telegram.types import (
     Context,
     Update,
 )
 from utils.auth import restricted
 
-from .session import _tg_key, destroy_session, get_session
+from .session import destroy_session
 
 log = logging.getLogger(__name__)
 
 
+def _claim_stop(chat_id: int, user_id: int) -> tuple[RunTarget, ...]:
+    """Freeze and retire this chat's current requests before any network await."""
+    targets = runs_for_chat(chat_id, user_id)
+    for target in targets:
+        target.stopped = True
+        unregister_run(target)
+    for target in targets:
+        if target.on_stop is not None:
+            target.on_stop()
+        cancel, target.cancel_preparation = target.cancel_preparation, None
+        if not target.accepted and cancel is not None:
+            cancel()
+    return targets
+
+
+async def _cancel_snapshot(targets: tuple[RunTarget, ...]) -> None:
+    await runtime.cancel_requests(
+        (target.user_id, target.conversation_id, target.request_id)
+        for target in targets
+        if target.user_id is not None and target.conversation_id and target.request_id
+    )
+
+
 @restricted
 async def stop_command(update: Update, context: Context) -> None:
-    """Handle /stop — interrupt the answer in flight, keep the session.
-
-    This is the dashboard's Stop button, as a command: it aborts the running
-    turn at the agent (ACP ``session/cancel``) and leaves the session and its
-    context intact. Deliberately *not* what the menu's "End session" button
-    does, which kills the subprocess and the conversation with it.
-
-    A message queued behind the aborted turn still runs — stopping the answer
-    you are watching is not the same as discarding what you asked next.
-    """
+    """Stop the requests already in this chat; preserve later input and context."""
     chat_type = update.effective_chat.type
     if chat_type in ("group", "supergroup"):
         await update.message.answer("The agent is only available in private chats.")
         return
 
-    chat_id = update.effective_chat.id
-    from condor.telegram.ingress import get_ingress
-
-    preparing = get_ingress().cancel(chat_id)
-    session = await get_session(chat_id)
-    if preparing and (not session or not session.is_busy):
-        await update.message.answer(
-            "⏹ Stopped reading attachments. The session is kept."
-        )
-        return
-
-    if not session or not session.alive:
-        await update.message.answer("No active session.")
-        return
-
-    if not session.is_busy:
+    targets = _claim_stop(update.effective_chat.id, update.effective_user.id)
+    if not targets:
         await update.message.answer("Nothing to stop — the agent is idle.")
         return
-
-    # Awaits the agent's own cancel (bounded by TIMEOUTS.prompt_cancel), so by
-    # the time this replies the generation has actually stopped. The streamed
-    # message finalizes itself on the DONE/cancelled event.
-    await runtime.abort(_tg_key(chat_id))
-    await update.message.answer("⏹ Stopped. The session and its context are kept.")
+    await _cancel_snapshot(targets)
+    await update.message.answer("⏹ Stopped the current requests and cleared the queue.")
 
 
 async def _handle_stop(update: Update, context: Context) -> None:
     """End the active session — subprocess and conversation both go.
 
-    Not to be confused with /stop, which only interrupts the turn in flight.
+    Not to be confused with /stop, which clears requests but keeps the session.
     """
     query = update.callback_query
     chat_id = update.effective_chat.id
@@ -73,26 +75,23 @@ async def _handle_stop(update: Update, context: Context) -> None:
         await query.message.edit_text("No active session.")
 
 
-async def handle_stopped_generation(update: Update, context: Context) -> None:
-    """Native composer stop: abort the turn that owns this ``draft_id``.
-
-    Stale or repeated events (a draft from a finished turn, a second tap) do
-    not touch a later request: lookup is ``(chat, draft_id)`` and a missing
-    or already-stopped target is ignored.
-    """
-    from condor.telegram.output.runs import run_for_draft, unregister_run
-
-    event = update.stopped_message_generation
-    if event is None:
+async def handle_stop_callback(
+    update: Update, context: Context, token: str | None = None
+) -> None:
+    """An active response button authorizes one chat-wide cancellation snapshot."""
+    query = update.callback_query
+    if token is None:
+        prefix = "agent:stop_run:"
+        data = query.data or ""
+        token = data[len(prefix) :] if data.startswith(prefix) else ""
+    target = active_run(token, update.effective_chat.id, update.effective_user.id)
+    message_id = getattr(query.message, "message_id", None)
+    if target is None or message_id not in target.message_ids:
+        await query.answer("This response has already finished.")
         return
-    target = run_for_draft(event.chat.id, event.draft_id)
-    if target is None or target.stopped:
-        return
-    target.stopped = True
-    unregister_run(target)
-    if target.user_id is None or not target.conversation_id or not target.request_id:
-        return
-    await runtime.abort_turn(target.user_id, target.conversation_id, target.request_id)
+    targets = _claim_stop(target.chat_id, target.user_id)
+    await _cancel_snapshot(targets)
+    await query.answer("Stopped the current requests and cleared the queue.")
 
 
 async def _handle_close(update: Update, context: Context) -> None:

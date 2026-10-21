@@ -126,9 +126,11 @@ def test_place_order_refusal_names_the_executor_tools():
 
 def test_the_reason_never_reaches_the_acp_wire():
     """ACP's permission response has no field for it; a strict bridge would 400."""
-    client = ACPClient.__new__(ACPClient)
-    client.permission_callback = _gate(
-        RiskLimits(max_position_size_quote=50.0), RiskState()
+    client = ACPClient(
+        command="true",
+        permission_callback=_gate(
+            RiskLimits(max_position_size_quote=50.0), RiskState()
+        ),
     )
 
     response = asyncio.run(
@@ -146,8 +148,9 @@ def test_the_reason_never_reaches_the_acp_wire():
 
 
 def test_an_approval_still_selects_its_option_over_the_wire():
-    client = ACPClient.__new__(ACPClient)
-    client.permission_callback = _gate(RiskLimits(), RiskState())
+    client = ACPClient(
+        command="true", permission_callback=_gate(RiskLimits(), RiskState())
+    )
 
     response = asyncio.run(
         client._on_request_permission(

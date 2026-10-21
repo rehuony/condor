@@ -159,7 +159,7 @@ if [ "${condor_mode_choice:-}" = "2" ]; then
     # above: an unauthenticated dashboard is only as safe as what can actually
     # reach it. Asked the same way Telegram mode asks it (below), so local
     # mode gets the identical Tailscale install/connect treatment in Step 3
-    # for hummingbot-api — and for the dashboard itself, main.py's _run_dual()
+    # for hummingbot-api — and for the dashboard itself, condor/web/server.py
     # binds loopback and proxies it via `tailscale serve` whenever
     # USE_TAILSCALE is set, local mode or not.
     prompt_visible "Use Tailscale to secure the dashboard and the hummingbot-api connection? [y/N]" "N" "use_tailscale_early"

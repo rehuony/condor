@@ -323,7 +323,7 @@ def test_an_experiment_tick_writes_no_log(tmp_path):
 
 # ── The route ──
 #
-# ``condor/web/routes/*.py`` is not in main.py's reload list, so a route change
+# ``condor/web/routes/*.py`` is not in condor/reload.py's list, so a route change
 # needs a full bot restart. It is verified offline here instead, by calling the
 # endpoint function directly the way ``test_fleet_map`` does.
 
