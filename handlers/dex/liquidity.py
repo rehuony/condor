@@ -706,7 +706,7 @@ async def show_liquidity_menu(
         ]
     )
 
-    keyboard.append([InlineKeyboardButton(text="✕ Close", callback_data="dex:close")])
+    keyboard.append([InlineKeyboardButton(text="🚪 Close", callback_data="dex:close")])
 
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 

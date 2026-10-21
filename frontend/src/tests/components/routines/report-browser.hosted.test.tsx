@@ -28,6 +28,7 @@ const getRoutineReports = vi.fn();
 const runRoutine = vi.fn();
 const scheduleRoutine = vi.fn();
 const deleteReport = vi.fn();
+const deleteRoutineReports = vi.fn();
 
 vi.mock("@/lib/api/reports", () => ({
   reportsApi: {
@@ -40,6 +41,7 @@ vi.mock("@/lib/api/routines", () => ({
   routinesApi: {
     getRoutines: (...a: unknown[]) => getRoutines(...a),
     getRoutineReports: (...a: unknown[]) => getRoutineReports(...a),
+    deleteRoutineReports: (...a: unknown[]) => deleteRoutineReports(...a),
     getRoutineFieldOptions: () => Promise.resolve({ options: [] }),
     getRoutineSource: () => Promise.resolve({ filename: "x.py", source: "" }),
     getRoutineInstance: () => Promise.resolve(null),
@@ -231,7 +233,7 @@ describe("ReportBrowser hosted in the pane", () => {
     expect(browser().className).not.toContain("inset-0");
     // The sidebar opens on its rail, which is what makes it fit at pane width.
     expect(container.querySelector('[class~="md:w-sidebar-rail"]')).toBeTruthy();
-    expect(container.querySelector('[class~="md:w-64"]')).toBeNull();
+    expect(container.querySelector('[class~="md:w-sidebar"]')).toBeNull();
   });
 
   it("leaves the window's keys to the conversation", async () => {
@@ -287,7 +289,7 @@ describe("ReportBrowser on its own page", () => {
     await render();
 
     expect(browser().className).toContain("fixed inset-0");
-    expect(container.querySelector('[class~="md:w-64"]')).toBeTruthy();
+    expect(container.querySelector('[class~="md:w-sidebar"]')).toBeTruthy();
 
     await press("ArrowDown", window);
     expect(heading()).toBe("Beta Check");
@@ -549,6 +551,11 @@ describe("ReportBrowser report deletion", () => {
       for (const source of Object.keys(stored)) stored[source] = stored[source].filter((item) => item !== id);
       return { deleted: true };
     });
+    deleteRoutineReports.mockImplementation(async (source: string) => {
+      const deleted = stored[source].length;
+      stored[source] = [];
+      return { deleted };
+    });
     await render({ page: mode === "page", hosted: mode === "hosted", initialSource: "alpha_check" });
     await act(async () => button(all ? "Delete all 2 reports from this routine" : "Delete report")!.click());
     const dialog = document.querySelector('[role="dialog"]')!;
@@ -561,7 +568,13 @@ describe("ReportBrowser report deletion", () => {
     await act(async () => {
       [...dialog.querySelectorAll("button")].find((item) => item.textContent === (all ? "Delete all" : "Delete"))!.click();
     });
-    expect(deleteReport.mock.calls.map(([id]) => id)).toEqual(all ? ["alpha-first", "alpha-second"] : ["alpha-first"]);
+    if (all) {
+      // One request for the whole routine, never one per report.
+      expect(deleteRoutineReports).toHaveBeenCalledExactlyOnceWith("alpha_check");
+      expect(deleteReport).not.toHaveBeenCalled();
+    } else {
+      expect(deleteReport.mock.calls.map(([id]) => id)).toEqual(["alpha-first"]);
+    }
     expect(stored.beta_check).toEqual(["beta-first"]);
   });
 
@@ -571,9 +584,10 @@ describe("ReportBrowser report deletion", () => {
     // The grouped summary is empty here, so the card reads the routine list's count.
     getRoutines.mockImplementation(async () => [{ ...routine("alpha_check"), report_count: stored.length }, routine("beta_check")]);
     getRoutineReports.mockImplementation(async () => ({ reports: stored.map(report), total: stored.length }));
-    deleteReport.mockImplementation(async (id: string) => {
-      stored = stored.filter((item) => item !== id);
-      return { deleted: true };
+    deleteRoutineReports.mockImplementation(async () => {
+      const deleted = stored.length;
+      stored = [];
+      return { deleted };
     });
     await render({ page: true, initialSource: "alpha_check" });
     expect(library().querySelector('[title="2 reports"]')).not.toBeNull();

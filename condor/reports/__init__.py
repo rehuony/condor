@@ -10,6 +10,7 @@ from .store import (
     current_agent,
     default_source,
     delete_report,
+    delete_reports,
     get_last_report_id,
     get_report,
     get_report_raw_html,
@@ -39,4 +40,5 @@ __all__ = [
     "list_reports_grouped",
     "get_report",
     "delete_report",
+    "delete_reports",
 ]

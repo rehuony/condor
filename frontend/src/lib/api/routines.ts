@@ -10,6 +10,8 @@ export interface RoutineFieldInfo {
   type: string;
   default: unknown;
   description: string;
+  /** A display label; the form falls back to the field name. */
+  title?: string;
   widget?: "select";
   options_from?: string;
 }
@@ -135,6 +137,13 @@ export const routinesApi = {
   getRoutineReports: (name: string) =>
     apiFetch<ReportsListResponse>(
       `/api/v1/routines/${encodeURIComponent(name)}/reports`,
+    ),
+
+  /** Delete every report of a routine the caller may see, in one request. */
+  deleteRoutineReports: (name: string) =>
+    apiFetch<{ deleted: number }>(
+      `/api/v1/routines/${encodeURIComponent(name)}/reports`,
+      { method: "DELETE" },
     ),
 
   getRoutineFieldOptions: (source: string, server: string) =>

@@ -440,7 +440,7 @@ async def prompt_add_token(query, context: Context, network_id: str) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data=f"gateway_token_view_{network_id}"
+                    text="↩️ Cancel", callback_data=f"gateway_token_view_{network_id}"
                 )
             ]
         ]
@@ -646,7 +646,7 @@ async def prompt_edit_token(query, context: Context, token_idx: int) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data=f"gateway_token_select_{token_idx}"
+                    text="↩️ Cancel", callback_data=f"gateway_token_select_{token_idx}"
                 )
             ]
         ]
@@ -731,7 +731,7 @@ async def show_delete_token_confirmation(
             ],
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data=f"gateway_token_view_{network_id}"
+                    text="↩️ Cancel", callback_data=f"gateway_token_view_{network_id}"
                 )
             ],
         ]

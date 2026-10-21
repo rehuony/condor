@@ -6,11 +6,12 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import secrets
 import time
 from decimal import Decimal
+from pathlib import Path
 
+from condor.paths import data_dir
 from condor.telegram.errors import (
     BadRequest,
     Forbidden,
@@ -35,13 +36,6 @@ from .store import get_store
 
 logger = logging.getLogger(__name__)
 TTL_SECONDS = 4 * 3600
-
-
-def execution_mode(mode: str | None = None) -> str:
-    mode = mode if mode is not None else os.environ.get("TRADE_CARDS_MODE", "dry_run")
-    if mode not in {"dry_run", "live"}:
-        raise ValueError("TRADE_CARDS_MODE must be dry_run or live")
-    return mode
 
 
 def get_card(card_id: str, *, owner_id: int) -> Card | None:
@@ -79,7 +73,6 @@ async def publish(
     connector_name: str,
     bot,
     signal_id: str | None = None,
-    mode: str | None = None,
 ) -> Card | None:
     """Publish one photo; None means that exact signal was already reserved.
 
@@ -98,7 +91,6 @@ async def publish(
         raise ValueError("A card requires a recipient and an explicit execution target")
     if not callable(getattr(bot, "send_photo", None)):
         raise ValueError("Trade cards require a Telegram photo sender")
-    mode = execution_mode(mode)
     manager = execution.authorize_target(owner_id, server_name)
     target_fingerprint = execution.server_fingerprint(manager, server_name)
     signal_key = None
@@ -114,12 +106,11 @@ async def publish(
             plan.timeframe,
             plan.signal_type,
             signal_id,
-            mode,
         ]
         signal_key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
     store = get_store()
     async with store.publish_lock:
-        if signal_key is not None and store.find_signal(signal_key) is not None:
+        if signal_key is not None and store.signal_reserved(signal_key):
             return None
         card = Card(
             id=secrets.token_hex(6),
@@ -130,7 +121,6 @@ async def publish(
             server_fingerprint=target_fingerprint,
             account_name=account_name,
             connector_name=connector_name,
-            mode=mode,
             signal_key=signal_key,
             expires_at=time.time() + TTL_SECONDS,
         )
@@ -138,6 +128,10 @@ async def publish(
     async with store.lock(card.id):
         try:
             png = await asyncio.to_thread(render_chart, candles, plan, connector_name)
+            # Kept so a deleted message of a live card can be sent again.
+            path = chart_path(card.id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(png)
         except Exception:
             card.delivery_status = "failed"
             card.transition(CardStatus.FAILED)
@@ -213,43 +207,119 @@ def _render_key(card: Card) -> str:
     )
 
 
-async def update_message(card: Card, bot) -> None:
-    """Retry failed edits/deletes, but never send a replacement photo."""
-    if card.message_id is None or card.message_deleted:
-        return
-    store = get_store()
-    if card.status in HIDDEN:
-        try:
-            await bot.delete_message(chat_id=card.chat_id, message_id=card.message_id)
-        except Exception as exc:
-            if (
-                isinstance(exc, BadRequest)
-                and "message to delete not found" in str(exc).lower()
-            ):
-                card.message_deleted = True
-            else:
-                card.delete_failed = True
-                logger.warning("Trade card message deletion pending: %s", card.id)
-        else:
-            card.message_deleted = True
-        store.save(card)
-        if card.message_deleted:
-            return
-    key = _render_key(card)
-    if key == card.last_render:
+#: How often an unchanged message is checked for having been deleted: often
+#: while the card trades, rarely once it only shows a result.
+CHECK_SECONDS = {"trading": 60, "idle": 600}
+
+
+def chart_path(card_id: str) -> Path:
+    return data_dir() / "trade_cards" / "charts" / f"{card_id}.png"
+
+
+def _purge(card: Card) -> None:
+    """Delete the record of a card whose message is gone for good."""
+    get_store().delete(card)
+    chart_path(card.id).unlink(missing_ok=True)
+
+
+def _gone(exc: BaseException) -> bool:
+    return isinstance(exc, BadRequest) and "not found" in str(exc).lower()
+
+
+async def _resend(card: Card, bot) -> None:
+    """Send a trading card again so it always has a message to track it by."""
+    path = chart_path(card.id)
+    if not path.exists():
+        logger.warning("Trade card %s has no saved chart to resend", card.id)
         return
     try:
-        await bot.edit_message_caption(
+        message = await bot.send_photo(
             chat_id=card.chat_id,
-            message_id=card.message_id,
+            photo=as_input_file(path.read_bytes(), filename=f"trade-{card.id}.png"),
             caption=render.caption(card),
             reply_markup=render.keyboard(card),
             parse_mode="MarkdownV2",
         )
+    except Exception:
+        # Retried on the next tracker tick.
+        logger.warning("Trade card resend failed: %s", card.id)
+        return
+    card.message_id = message.message_id
+    card.last_render = _render_key(card)
+    card.last_checked = time.time()
+    get_store().save(card)
+
+
+async def _message_gone(card: Card, bot) -> None:
+    """The chat no longer holds the card's message."""
+    if card.status in EXECUTING:
+        card.message_id = None
+        get_store().save(card)
+        await _resend(card, bot)
+    else:
+        _purge(card)
+
+
+async def update_message(card: Card, bot) -> None:
+    """Keep the card's one message current, or retire the card without it.
+
+    A card that is still trading must always have a message: if it was deleted
+    it is sent again. Any other card is deleted once its message is gone, so no
+    stale record can be acted on later.
+    """
+    store = get_store()
+    if card.message_id is None:
+        if card.status in EXECUTING and card.delivery_status == "sent":
+            await _resend(card, bot)
+        elif card.status in TERMINAL:
+            _purge(card)
+        return
+    if card.message_deleted:
+        await _message_gone(card, bot)
+        return
+    if card.status in HIDDEN:
+        try:
+            await bot.delete_message(chat_id=card.chat_id, message_id=card.message_id)
+        except Exception as exc:
+            if _gone(exc):
+                _purge(card)
+                return
+            # Strip the buttons and say why the message is still there; the
+            # deletion is retried on the next tick.
+            card.delete_failed = True
+            logger.warning("Trade card message deletion pending: %s", card.id)
+        else:
+            _purge(card)
+            return
+    key = _render_key(card)
+    try:
+        if key != card.last_render:
+            await bot.edit_message_caption(
+                chat_id=card.chat_id,
+                message_id=card.message_id,
+                caption=render.caption(card),
+                reply_markup=render.keyboard(card),
+                parse_mode="MarkdownV2",
+            )
+        else:
+            interval = CHECK_SECONDS["trading" if card.status in EXECUTING else "idle"]
+            if time.time() - card.last_checked < interval:
+                return
+            # Bots are not told about deletions; an unchanged edit answers
+            # "not modified" while the message exists and "not found" once gone.
+            await bot.edit_message_reply_markup(
+                chat_id=card.chat_id,
+                message_id=card.message_id,
+                reply_markup=render.keyboard(card),
+            )
     except BadRequest as exc:
+        if _gone(exc):
+            await _message_gone(card, bot)
+            return
         if not is_not_modified(exc):
             raise
     card.last_render = key
+    card.last_checked = time.time()
     store.save(card)
 
 

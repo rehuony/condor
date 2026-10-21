@@ -265,7 +265,7 @@ def _build_step_2_keyboard(
             InlineKeyboardButton(
                 text="« Back", callback_data="executors:create_position"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="executors:menu"),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -340,7 +340,7 @@ async def show_step_1_connector(update: Update, context: Context) -> None:
             keyboard.append(row)
 
         keyboard.append(
-            [InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu")]
+            [InlineKeyboardButton(text="↩️ Cancel", callback_data="executors:menu")]
         )
 
         lines = [
@@ -417,7 +417,7 @@ async def handle_connector_select(
             InlineKeyboardButton(
                 text="« Back", callback_data="executors:create_position"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="executors:menu"),
         ]
     )
 
@@ -957,7 +957,7 @@ async def handle_deploy(update: Update, context: Context) -> None:
                 InlineKeyboardButton(
                     text="📋 View Executors", callback_data="executors:menu"
                 ),
-                InlineKeyboardButton(text="✕ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="🚪 Close", callback_data="executors:close"),
             ]
         ]
 
@@ -996,7 +996,7 @@ async def handle_deploy(update: Update, context: Context) -> None:
                 InlineKeyboardButton(
                     text="🔁 Try Again", callback_data="executors:pos_step2"
                 ),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="executors:menu"),
             ]
         ]
 

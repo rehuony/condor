@@ -388,7 +388,7 @@ def _build_deploy_progressive_message(
             InlineKeyboardButton(text="« Back", callback_data="bots:deploy_prev_field")
         )
     nav_buttons.append(
-        InlineKeyboardButton(text="✕ Cancel", callback_data="bots:deploy_menu")
+        InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:deploy_menu")
     )
     keyboard.append(nav_buttons)
 
@@ -666,7 +666,7 @@ async def handle_deploy_set_field(
     message += r"Type the new value or tap Cancel\."
 
     keyboard = [
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:deploy_form_back")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:deploy_form_back")]
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 

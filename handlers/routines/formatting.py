@@ -1,6 +1,7 @@
 """Display helpers for routine names, durations, schedules and config previews."""
 
 import logging
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ def _format_schedule(schedule: dict) -> str:
         else:
             return f"Every {secs // 3600}h"
     elif stype == "continuous":
-        return "Running"
+        return "Continuous"
     elif stype == "daily":
         return f"Daily @ {schedule.get('daily_time', '09:00')}"
     return "Unknown"
@@ -58,3 +59,12 @@ def _config_preview(config: dict, max_items: int = 2) -> str:
     """Get short config preview."""
     items = list(config.items())[:max_items]
     return ", ".join(f"{k}={v}" for k, v in items)
+
+
+def _result_preview(result: str, limit: int = 48) -> str:
+    """The first readable line of a result, short enough not to wrap."""
+    for line in result.splitlines():
+        line = " ".join(re.sub(r"[*_`~|#>]", "", line).split())
+        if line:
+            return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+    return ""

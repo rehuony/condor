@@ -8,10 +8,11 @@
   }
 }
 
-/* Page side rails (Agents, Bots, Routines) share one width, expanded and
-   collapsed, so switching pages does not shift the content column. */
+/* Side rails (Agents, Bots, Routines and the routine library overlay) share
+   one width, expanded and collapsed, so switching pages does not shift the
+   content column. */
 @theme {
-  --spacing-sidebar: 18rem;
+  --spacing-sidebar: 15rem;
   --spacing-sidebar-rail: 3rem;
 }
 

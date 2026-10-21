@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 from aiohttp import ClientTimeout
 
+from condor.api_pool import limit_pool_keepalive
 from condor.fsutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -595,6 +596,7 @@ class ConfigManager:
 
         try:
             await client.init()
+            limit_pool_keepalive(client)
             await client.accounts.list_accounts()
             self._clients[name] = (client, time.time())
             self._client_failures.pop(name, None)

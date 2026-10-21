@@ -1014,7 +1014,7 @@ async def handle_pos_close_confirm(
                     text="✅ Yes, Close",
                     callback_data=f"dex:pos_close_exec:{pos_index}",
                 ),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="dex:liquidity"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1139,7 +1139,7 @@ async def handle_position_list(update: Update, context: Context) -> None:
         r"`meteora solana\-mainnet\-beta POOL_ADDRESS`"
     )
 
-    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity")]]
+    keyboard = [[InlineKeyboardButton(text="↩️ Cancel", callback_data="dex:liquidity")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "position_list"

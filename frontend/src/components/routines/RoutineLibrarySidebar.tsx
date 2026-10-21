@@ -138,7 +138,7 @@ export function RoutineLibrarySidebar({
           ? "w-full max-h-32 md:w-sidebar-rail md:max-h-none"
           : page
             ? "w-full md:w-sidebar"
-            : "w-full max-h-[35%] md:w-64 md:max-h-none"
+            : "w-full max-h-[35%] md:w-sidebar md:max-h-none"
       }`}
     >
       {/* Header */}

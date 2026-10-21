@@ -135,7 +135,7 @@ async def _show_pv1_wizard_amount_step(update: Update, context: Context) -> None
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pv1_back:pair"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -188,7 +188,7 @@ async def _show_pv1_wizard_spreads_step(update: Update, context: Context) -> Non
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pv1_back:amount"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -260,7 +260,7 @@ async def _show_pv1_wizard_review_step(update: Update, context: Context) -> None
         [InlineKeyboardButton(text="✅ Save Config", callback_data="bots:pv1_save")],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pv1_back:spreads"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -324,7 +324,7 @@ async def handle_pv1_pair_select(
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pv1_back:pair"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -419,7 +419,7 @@ async def process_pv1_wizard_input(
             ],
             [
                 InlineKeyboardButton(text="« Back", callback_data="bots:pv1_back:pair"),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
             ],
         ]
         await context.bot.edit_message_text(
@@ -476,7 +476,7 @@ async def process_pv1_wizard_input(
                         text="« Back", callback_data="bots:pv1_back:amount"
                     ),
                     InlineKeyboardButton(
-                        text="✕ Cancel", callback_data="bots:main_menu"
+                        text="↩️ Cancel", callback_data="bots:main_menu"
                     ),
                 ],
             ]
@@ -520,7 +520,7 @@ async def process_pv1_wizard_input(
                         text="« Back", callback_data="bots:pv1_back:pair"
                     ),
                     InlineKeyboardButton(
-                        text="✕ Cancel", callback_data="bots:main_menu"
+                        text="↩️ Cancel", callback_data="bots:main_menu"
                     ),
                 ],
             ]
@@ -583,7 +583,7 @@ async def process_pv1_wizard_input(
                         text="« Back", callback_data="bots:pv1_back:amount"
                     ),
                     InlineKeyboardButton(
-                        text="✕ Cancel", callback_data="bots:main_menu"
+                        text="↩️ Cancel", callback_data="bots:main_menu"
                     ),
                 ],
             ]
@@ -670,7 +670,7 @@ async def _pv1_show_review(context, chat_id, message_id, config):
         [InlineKeyboardButton(text="✅ Save Config", callback_data="bots:pv1_save")],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pv1_back:spreads"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 

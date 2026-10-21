@@ -54,12 +54,10 @@ card = await publish(
 )
 ```
 
-The default execution mode comes from `TRADE_CARDS_MODE` (`dry_run` by default).
-An explicit `mode="dry_run"` always creates a simulated card. Use `mode="live"`
-only when the user requests a live interactive card. Publishing does not place
+Every card trades live; there is no simulated mode. Publishing does not place
 an order: the owner chooses a margin and confirms the review on the card.
-Each card keeps its original mode and server/account identity. Never convert a
-simulated card into a live one or silently switch its trading target.
+Each card keeps its server/account identity. Never silently switch its trading
+target.
 
 Automated sources supply a stable `signal_id` describing the signal type,
 timeframe and trigger candle. `publish` returns `None` for an already reserved
@@ -126,9 +124,7 @@ the position as closed. The service can replay the exact persisted request and
 operation ID against the same API; it must never create a new identity to retry
 an unknown result. Read the API's actual group state after recovery.
 
-Dry-run uses live prices but a separate simulated broker and performs no
-exchange writes. It can exercise interaction and state transitions, not prove
-real fills or slippage. Condor restarts do not stop API-managed positions;
+Condor restarts do not stop API-managed positions;
 Hummingbot API downtime interrupts its software protection until reconciliation
 and management resume. Report this distinction when discussing recovery.
 

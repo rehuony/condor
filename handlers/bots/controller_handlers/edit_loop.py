@@ -196,7 +196,9 @@ async def show_cfg_edit_form(
             InlineKeyboardButton(
                 text="💾 Save All & Exit", callback_data="bots:cfg_edit_save_all"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:cfg_edit_cancel"),
+            InlineKeyboardButton(
+                text="↩️ Cancel", callback_data="bots:cfg_edit_cancel"
+            ),
         ]
     )
 
@@ -272,7 +274,7 @@ async def handle_cfg_edit_field(
     ]
 
     keyboard = [
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:cfg_edit_form")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:cfg_edit_form")]
     ]
 
     await query.message.edit_text(
@@ -460,7 +462,9 @@ async def process_cfg_edit_input(
             InlineKeyboardButton(
                 text="💾 Save All & Exit", callback_data="bots:cfg_edit_save_all"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:cfg_edit_cancel"),
+            InlineKeyboardButton(
+                text="↩️ Cancel", callback_data="bots:cfg_edit_cancel"
+            ),
         ]
     )
 

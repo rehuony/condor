@@ -376,7 +376,7 @@ async def _show_pair_suggestions(
     keyboard.append(
         [
             InlineKeyboardButton(text="« Back", callback_data=back_callback),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="executors:menu"),
         ]
     )
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)

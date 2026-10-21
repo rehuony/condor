@@ -21,7 +21,7 @@ async def show_gateway_menu(query, context: Context) -> None:
         if not servers:
             message_text = format_server_selection_needed()
             keyboard = [
-                [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
+                [InlineKeyboardButton(text="🚪 Close", callback_data="config_close")]
             ]
         else:
             # Build unified header with server and gateway info
@@ -95,7 +95,7 @@ async def show_gateway_menu(query, context: Context) -> None:
 
             # Add close button
             keyboard.append(
-                [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
+                [InlineKeyboardButton(text="🚪 Close", callback_data="config_close")]
             )
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -122,7 +122,7 @@ async def show_gateway_menu(query, context: Context) -> None:
         logger.error(f"Error showing gateway menu: {e}", exc_info=True)
         error_text = f"❌ Error loading gateway: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
+            [InlineKeyboardButton(text="🚪 Close", callback_data="config_close")]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(

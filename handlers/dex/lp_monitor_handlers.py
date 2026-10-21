@@ -565,7 +565,7 @@ async def handle_lpm_rebalance(
                 callback_data=f"dex:lpm_rebalance_confirm:{cache_key}",
             ),
             InlineKeyboardButton(
-                text="✕ Cancel",
+                text="↩️ Cancel",
                 callback_data=f"dex:lpm_dismiss:{cache_key.split('_')[1]}",
             ),
         ]

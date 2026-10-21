@@ -472,7 +472,7 @@ async def prompt_add_pool(query, context: Context, network_id: str) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data=f"gateway_pool_view_{network_id}"
+                    text="↩️ Cancel", callback_data=f"gateway_pool_view_{network_id}"
                 )
             ]
         ]
@@ -625,7 +625,7 @@ async def show_delete_pool_confirmation(
             ],
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data=f"gateway_pool_view_{network_id}"
+                    text="↩️ Cancel", callback_data=f"gateway_pool_view_{network_id}"
                 )
             ],
         ]

@@ -410,3 +410,21 @@ async def get_routine_reports(
         owner_id=report_owner_filter(user),
     )
     return {"reports": reports, "total": total}
+
+
+@router.delete("/{routine_name:path}/reports")
+async def delete_routine_reports(
+    routine_name: str, user: WebUser = Depends(get_current_user)
+):
+    """Delete every report of a routine the caller may see, in one pass.
+
+    Matches exactly what ``GET`` above lists — the full or base name, scoped by
+    the same owner filter — so nobody can delete a report they could not list.
+    """
+    from condor.web.routes.reports import remove_reports
+
+    base_name = routine_name.split("/")[-1] if "/" in routine_name else routine_name
+    deleted = await remove_reports(
+        source_name=(routine_name, base_name), owner_id=report_owner_filter(user)
+    )
+    return {"deleted": len(deleted)}

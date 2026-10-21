@@ -40,7 +40,7 @@ async def handle_gecko_search(update: Update, context: Context) -> None:
                 text=f"🌐 {network_display}", callback_data="dex:gecko_search_network"
             )
         ],
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="dex:gecko_explore")],
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="dex:gecko_explore")],
     ]
 
     message = (

@@ -135,7 +135,6 @@ class Card(BaseModel):
     server_fingerprint: str | None = None
     account_name: str
     connector_name: str
-    mode: Literal["dry_run", "live"] = "dry_run"
     status: CardStatus = CardStatus.PROPOSED
     created_at: float = Field(default_factory=time.time)
     expires_at: float
@@ -156,6 +155,8 @@ class Card(BaseModel):
     custom_input: bool = False
     note: str = ""
     last_render: str = ""
+    #: When the message was last confirmed to still exist in the chat.
+    last_checked: float = 0
 
     def transition(self, status: CardStatus) -> None:
         if status == self.status:

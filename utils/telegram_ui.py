@@ -26,7 +26,7 @@ NOTICE_EMOJI = {
     "warning": "⚠️",
     "success": "✅",
     "info": "ℹ️",
-    "cancelled": "✕",
+    "cancelled": "↩️",
     "stopped": "🛑",
     "rejected": "❌",
     "stale": "⚠️",
@@ -156,8 +156,8 @@ SOMETHING_WRONG = notice(
 # -- buttons ----------------------------------------------------------------
 
 BACK = "« Back"
-CLOSE = "✕ Close"
-CANCEL = "✕ Cancel"
+CLOSE = "🚪 Close"
+CANCEL = "↩️ Cancel"
 REFRESH = "🔄 Refresh"
 PREV = "‹ Prev"
 NEXT = "Next ›"

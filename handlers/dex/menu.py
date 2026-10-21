@@ -230,6 +230,8 @@ async def _fetch_balances(client, refresh: bool = False) -> dict:
 
     except Exception as e:
         logger.error(f"Error fetching balances: {e}", exc_info=True)
+        # Distinguishes "could not load" from "no wallet" on every screen.
+        data["error"] = str(e) or type(e).__name__
 
     return data
 
@@ -341,7 +343,7 @@ def _build_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🔄 Refresh", callback_data="dex:refresh"),
-            InlineKeyboardButton(text="✕ Close", callback_data="dex:close"),
+            InlineKeyboardButton(text="🚪 Close", callback_data="dex:close"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

@@ -311,23 +311,47 @@ def get_report(report_id: str) -> dict | None:
     return None
 
 
-async def delete_report(report_id: str) -> bool:
-    """Delete a report's HTML and its index entry. True when one was removed."""
+async def delete_reports(
+    *,
+    report_ids: Iterable[str] | None = None,
+    source_name: Iterable[str] | None = None,
+    owner_id: int | None = None,
+) -> list[str]:
+    """Delete matching reports' HTML and index entries; return the deleted ids.
+
+    One lock and one index write for the whole set, so deleting a routine's
+    entire history costs the same as deleting one report. ``owner_id`` scopes
+    the match exactly as :func:`list_reports` does (``None``: every owner), so a
+    caller can only remove what it could list.
+    """
+    ids = set(report_ids) if report_ids is not None else None
+    names = set(source_name) if source_name is not None else None
+    if ids is None and names is None:
+        raise ValueError("delete_reports needs report_ids or source_name")
+
+    def matches(entry: dict) -> bool:
+        return (
+            (ids is None or entry["id"] in ids)
+            and (names is None or entry.get("source_name") in names)
+            and (owner_id is None or entry.get("user_id") == owner_id)
+        )
+
     async with _index_lock:
         entries = _read_index()
-        new_entries = []
-        deleted = False
-        for entry in entries:
-            if entry["id"] == report_id:
-                path = _charts_dir() / entry["filename"]
-                if path.exists():
-                    path.unlink()
-                deleted = True
-            else:
-                new_entries.append(entry)
-        if deleted:
-            _write_index(new_entries)
-    return deleted
+        doomed = [entry for entry in entries if matches(entry)]
+        if not doomed:
+            return []
+        # The index goes first: a crash mid-way leaves orphaned files, never an
+        # entry pointing at a file that is gone.
+        _write_index([entry for entry in entries if not matches(entry)])
+        for entry in doomed:
+            (_charts_dir() / entry["filename"]).unlink(missing_ok=True)
+    return [entry["id"] for entry in doomed]
+
+
+async def delete_report(report_id: str) -> bool:
+    """Delete a report's HTML and its index entry. True when one was removed."""
+    return bool(await delete_reports(report_ids=[report_id]))
 
 
 def _cleanup_locked(max_reports: int = MAX_REPORTS) -> None:

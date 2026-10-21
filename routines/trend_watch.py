@@ -1,8 +1,11 @@
-"""Scan perpetual trends on one connector and publish qualified plans as Trade Cards.
+"""Scan Binance USDT perpetual trend pullbacks and publish qualified plans as Trade Cards.
 
 The scanner owns market selection, closed-candle signals, clarity scoring and
 reports. Trade Cards owns rendering, publication deduplication, interaction and
-execution. The clarity threshold remains 80, with no card-count or cooldown cap.
+execution; its executor supports Binance USDT perpetuals only, so that is the
+only market scanned. The 4H breakout signal was retired: it was negative R in
+and out of sample. The clarity threshold remains 80, with no card-count or
+cooldown cap.
 Historical validation used a 48-hour observation horizon; live positions have no
 time-based exit. The preserved study is under .condor/research/trend-watch-clarity/.
 """
@@ -27,11 +30,15 @@ from routines.base import RoutineContext, RoutineResult, resolve_server_name
 logger = logging.getLogger(__name__)
 CATEGORY = "Monitoring"
 INTERVAL_SEC = {"4h": 14400, "1h": 3600, "15m": 900}
-SIG_NAME = {"pullback": "Trend pullback", "breakout": "4H breakout"}
+#: The one market Trade Cards can execute on.
+CONNECTOR = "binance_perpetual"
+SIG_NAME = {"pullback": "Trend pullback"}
 SIDE_NAME = {"long": "Long", "short": "Short"}
 
 # Tokenized stocks / ETFs / commodities listed as perps (base asset names).
-DEFAULT_EXCLUDE = [
+# Entries of 5+ characters match as substrings, so SKHYNIX also excludes
+# CSOPSKHYNIX2L.
+EXCLUDE = [
     "SOXL",
     "SOXS",
     "SNDK",
@@ -77,46 +84,51 @@ DEFAULT_EXCLUDE = [
 
 
 class Config(BaseModel):
-    """Scan trend pullbacks and publish plans meeting the clarity threshold."""
+    """Scan Binance USDT perpetual trend pullbacks and publish qualified plans as trade cards."""
 
-    connector_name: str = Field(
-        default="binance_perpetual", description="Exchange connector"
-    )
+    # Market
     top_n: int = Field(
-        default=40, description="Scan the top N -USDT perpetuals by 24h volume"
+        title="Pairs to scan",
+        default=40,
+        description="Scan the top N USDT perpetuals by 24h volume",
     )
     min_quote_volume: float = Field(
+        title="Min 24h volume (USDT)",
         default=20_000_000,
-        description="Minimum 24h volume in USDT; lower pairs are skipped",
+        description="Skip pairs under this 24h volume (USDT)",
     )
-    exclude: list[str] = Field(
-        default=DEFAULT_EXCLUDE,
-        description="Base names to exclude (stocks, ETFs, commodities); entries of 5+ characters match as substrings, so SKHYNIX also excludes CSOPSKHYNIX2L",
-    )
+    # Signal
     min_score: float = Field(
-        default=80, description="Minimum trend clarity (0–100) for a card"
-    )
-    enable_breakout: bool = Field(
-        default=False,
-        description="Also publish 4H breakout cards (negative R in and out of sample; off by default)",
+        title="Min clarity",
+        default=80,
+        description="Minimum trend clarity (0–100) to publish a card",
     )
     pullback_atr: float = Field(
+        title="Pullback (×ATR1H)",
         default=0.6,
-        description="Trend pullback: price within this multiple of ATR1H from the 1H EMA21 counts as pulled back",
+        description="Pulled back when price is within this × ATR1H of the 1H EMA21",
     )
-    vol_mult: float = Field(
-        default=1.5,
-        description="4H breakout (only with enable_breakout=True): breakout bar volume must reach this multiple of the prior 20-bar average",
-    )
+    # Plan
     stop_atr: float = Field(
+        title="Stop (×ATR1H)",
         default=2.0,
-        description="Stop distance = ATR1H × this multiple (from the entry midpoint)",
+        description="Stop distance = this × ATR1H from the entry midpoint",
     )
-    tp1_r: float = Field(default=1.0, description="TP1 = stop distance × this multiple")
-    tp2_r: float = Field(default=2.0, description="TP2 = stop distance × this multiple")
+    tp1_r: float = Field(
+        title="TP1 (R)",
+        default=1.0,
+        description="TP1 at this multiple of the stop distance",
+    )
+    tp2_r: float = Field(
+        title="TP2 (R)",
+        default=2.0,
+        description="TP2 at this multiple of the stop distance",
+    )
+    # Delivery
     send: bool = Field(
+        title="Publish cards",
         default=True,
-        description="Send cards to Telegram (when off, nothing is recorded for deduplication)",
+        description="Publish trade cards to Telegram; when off, only the report is saved and nothing is sent",
     )
 
 
@@ -157,7 +169,7 @@ async def _candles(
 ) -> pd.DataFrame:
     async with sem:
         rows = await client.market_data.get_candles_last_days(
-            cfg.connector_name, pair, days=days, interval=interval
+            CONNECTOR, pair, days=days, interval=interval
         )
     if isinstance(rows, dict):
         rows = rows.get("data") or rows.get("candles") or []
@@ -200,7 +212,7 @@ def _excluded(base: str, exclude: list[str]) -> bool:
 def _universe(tickers: dict, cfg: Config) -> list[str]:
     rows = []
     for pair, t in tickers.items():
-        if not pair.endswith("-USDT") or _excluded(pair[:-5], cfg.exclude):
+        if not pair.endswith("-USDT") or _excluded(pair[:-5], EXCLUDE):
             continue
         qv = float((t or {}).get("quote_volume") or 0)
         if qv >= cfg.min_quote_volume:
@@ -282,100 +294,20 @@ def _pullback(m15, h1, last, cfg):
     return pl, prog
 
 
-def _breakout(h4, h1c, last, atr1h, cfg):
-    """Latest closed 4H bar closes beyond the prior 20-bar high/low, trend-aligned, on volume.
-
-    Only called when cfg.enable_breakout is on. near is (distance in ATR4H, text) or None;
-    a pair already beyond the level (no fresh break) gets distance None and is not ranked.
-    """
-    b, p = h4.iloc[-1], h4.iloc[-2]
-    atr4 = float(b.atr)
-    hh20, ll20 = float(h4.high.iloc[-21:-1].max()), float(h4.low.iloc[-21:-1].min())
-    hh20_p, ll20_p = float(h4.high.iloc[-22:-2].max()), float(h4.low.iloc[-22:-2].min())
-    up4, down4 = b.ema20 > b.ema50, b.ema20 < b.ema50
-    near = None
-    if up4:
-        d = (hh20 - b.close) / atr4
-        near = (
-            (
-                d,
-                f"4H bullish · close is {d:.1f}×ATR4H below the 20-bar high {_fmt(hh20)}",
-            )
-            if d > 0
-            else (
-                None,
-                f"4H bullish · close already above the 20-bar high {_fmt(hh20)} (not a fresh break)",
-            )
-        )
-    elif down4:
-        d = (b.close - ll20) / atr4
-        near = (
-            (
-                d,
-                f"4H bearish · close is {d:.1f}×ATR4H above the 20-bar low {_fmt(ll20)}",
-            )
-            if d > 0
-            else (
-                None,
-                f"4H bearish · close already below the 20-bar low {_fmt(ll20)} (not a fresh break)",
-            )
-        )
-    vx = float(b.volume) / float(h4.volume.iloc[-21:-1].mean())
-
-    if (
-        b.close > hh20
-        and p.close <= hh20_p
-        and up4
-        and 40 <= b.rsi <= 70
-        and h1c > hh20
-    ):
-        if vx < cfg.vol_mult:
-            return (
-                None,
-                near,
-                f"4H close broke the 20-bar high {_fmt(hh20)}, but breakout volume is short: {_cmp(vx, '<', cfg.vol_mult, '×')}",
-            )
-        pl = _plan("long", last, atr1h, cfg)
-        pl["bar"] = float(b.timestamp)
-        pl["why"] = (
-            f"4H close {_fmt(b.close)} on {vx:.1f}× average volume above the 20-bar high {_fmt(hh20)}; "
-            f"4H EMA20>EMA50, RSI {b.rsi:.0f}"
-        )
-        return pl, near, None
-
-    if b.close < ll20 and p.close >= ll20_p and down4 and b.rsi > 30 and h1c < ll20:
-        if vx < cfg.vol_mult:
-            return (
-                None,
-                near,
-                f"4H close broke the 20-bar low {_fmt(ll20)}, but breakout volume is short: {_cmp(vx, '<', cfg.vol_mult, '×')}",
-            )
-        pl = _plan("short", last, atr1h, cfg)
-        pl["bar"] = float(b.timestamp)
-        pl["why"] = (
-            f"4H close {_fmt(b.close)} on {vx:.1f}× average volume below the 20-bar low {_fmt(ll20)}; "
-            f"4H EMA20<EMA50, RSI {b.rsi:.0f}"
-        )
-        return pl, near, None
-    return None, near, None
-
-
 def _scan_pair(cfg: Config, pair: str, data: dict) -> dict:
-    """Evaluate one pair: signals, then the clarity score. Plans in out['plans'] are tradable."""
+    """Evaluate one pair: the pullback signal, then its clarity. ``plan`` is tradable."""
     base = pair.split("-")[0]
     m15_raw, h1_raw, h4_raw = data["m15"], data["h1"], data["h4"]
     out = dict(
         pair=pair,
         base=base,
-        plans=[],
-        blocked=[],
-        notes=[],
-        hits={},
+        plan=None,
+        blocked=None,
+        hit=False,
         skip=None,
         prog=None,
         clar=None,
         gap=None,
-        near_b=None,
     )
     if len(m15_raw) < 100 or len(h1_raw) < 60 or len(h4_raw) < 60:
         out["skip"] = (
@@ -384,33 +316,20 @@ def _scan_pair(cfg: Config, pair: str, data: dict) -> dict:
         return out
     m15, h1, h4 = _closed(m15_raw, "15m"), _closed(h1_raw, "1h"), _closed(h4_raw, "4h")
     last = float(m15_raw.close.iloc[-1])
-    atr15, atr1h = float(m15.atr.iloc[-1]), float(h1.atr.iloc[-1])
+    atr15 = float(m15.atr.iloc[-1])
     h4_up = bool(h4.ema20.iloc[-1] > h4.ema50.iloc[-1])
     out.update(
         last=last, atr_pct=atr15 / last * 100, rsi1h=float(h1.rsi.iloc[-1]), h4_up=h4_up
     )
 
-    found = []  # (type, plan, tf, candles for card)
     pl, prog = _pullback(m15, h1, last, cfg)
     if pl:
-        found.append(("pullback", pl, "1H", h1_raw))
-    if cfg.enable_breakout:
-        pl, out["near_b"], note = _breakout(
-            h4, float(h1.close.iloc[-1]), last, atr1h, cfg
-        )
-        if pl:
-            found.append(("breakout", pl, "4H", h4_raw))
-        if note:
-            out["notes"].append(note)
-    for t, _, _, _ in found:
-        out["hits"][t] = out["hits"].get(t, 0) + 1
-
-    for t, pl, tf, df in found:
+        out["hit"] = True
         c = _clarity(h4, h1, pl["side"])
         pl.update(
-            type=t,
-            tf=tf,
-            df=df,
+            type="pullback",
+            tf="1H",
+            df=h1_raw,
             pair=pair,
             base=base,
             atr_pct=out["atr_pct"],
@@ -418,23 +337,16 @@ def _scan_pair(cfg: Config, pair: str, data: dict) -> dict:
             score=c["score"],
         )
         if c["score"] < cfg.min_score:
-            out["blocked"].append(
-                dict(
-                    plan=pl,
-                    fails=[
-                        f"clarity {_cmp(c['score'], '<', cfg.min_score)} ({_parts(c)})"
-                    ],
-                )
+            out["blocked"] = dict(
+                plan=pl,
+                fails=[f"clarity {_cmp(c['score'], '<', cfg.min_score)} ({_parts(c)})"],
             )
         else:
-            out["plans"].append(pl)
-    if len({pl["side"] for pl in out["plans"]}) > 1:
-        out["notes"].append("long and short signals at once; trend unclear, waiting")
-        out["plans"] = []
+            out["plan"] = pl
     if prog:
         out["clar"] = _clarity(h4, h1, prog["side"])
         out["prog"] = prog
-        if not out["plans"]:
+        if not out["plan"]:
             out["gap"] = _gap(cfg, prog, out["clar"], out["blocked"])
     return out
 
@@ -477,14 +389,11 @@ def _gap(cfg, prog, clar, blocked) -> dict:
 
     steps lists every missing condition in rule order; pairs are ranked by clarity score
     (highest first) in the report, so rank only breaks ties by missing price steps.
+    ``triggered`` marks a pair whose price setup is complete and only clarity is short.
     """
+    if blocked:
+        return dict(steps=blocked["fails"], triggered=True, rank=(-clar["score"], 0))
     side = prog["side"]
-    hit = next((b for b in blocked if b["plan"]["type"] == "pullback"), None)
-    if hit:
-        steps = hit["fails"]
-        return dict(
-            steps=steps, need=f"15m triggered; {steps[0]}", rank=(-clar["score"], 0)
-        )
     steps = []
     verb = "pull back" if side == "long" else "bounce"
     if prog["dist"] > cfg.pullback_atr:
@@ -496,21 +405,18 @@ def _gap(cfg, prog, clar, blocked) -> dict:
         steps.append(
             f"no {verb} to near EMA21 in the last 3 1H bars (within ±0.25×ATR1H)"
         )
-    if prog["turned"]:
-        steps.append(
-            "pullback opposes the 4H breakout; long and short conflict"
-        )  # only reachable with breakout on
-    else:
-        steps.append(
-            f"15m {'green close above' if side == 'long' else 'red close below'} EMA9"
-        )
+    steps.append(
+        f"15m {'green close above' if side == 'long' else 'red close below'} EMA9"
+    )
     if clar["score"] < cfg.min_score:
         steps.append(f"clarity {_cmp(clar['score'], '<', cfg.min_score)}")
-    return dict(
-        steps=steps,
-        need=f"{len(steps)} steps left: {_numbered(steps)}",
-        rank=(-clar["score"], len(steps)),
-    )
+    return dict(steps=steps, triggered=False, rank=(-clar["score"], len(steps)))
+
+
+def _need(gap: dict) -> str:
+    """One-cell summary for the report table."""
+    prefix = "15m triggered; " if gap["triggered"] else f"{len(gap['steps'])} left: "
+    return prefix + _numbered(gap["steps"])
 
 
 # ── dedupe state (coin + side + signal type) ────────────────────────────
@@ -539,6 +445,26 @@ def _trade_plan(plan: dict) -> TradePlan:
     )
 
 
+def _summary(head: str, verdict: str, sections: list[tuple[str, list[str]]]) -> str:
+    """The run's chat-sized summary: a heading, a verdict, then titled groups."""
+    blocks = [f"{head}\n{verdict}"]
+    for title, lines in sections:
+        if lines:
+            blocks.append("\n".join([title, *lines]))
+    return "\n\n".join(blocks)
+
+
+def _closest_lines(r) -> list[str]:
+    """A near-miss pair as a bullet with its missing steps indented beneath."""
+    trend = "bullish" if r["prog"]["side"] == "long" else "bearish"
+    tag = " · triggered" if r["gap"]["triggered"] else ""
+    lines = [
+        f"• {r['base']} {_fmt(r['last'])} · 1H {trend} · clarity {r['clar']['score']:.0f}{tag}"
+    ]
+    lines += [f"  {chr(0x2460 + i)} {step}" for i, step in enumerate(r["gap"]["steps"])]
+    return lines
+
+
 async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     t0 = time.time()
     client = await get_client(
@@ -549,12 +475,10 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     if not client:
         return "No server available"
 
-    tk = await client.market_data.get_tickers(config.connector_name)
-    tickers = ((tk or {}).get("tickers") or {}).get(config.connector_name) or {}
+    tk = await client.market_data.get_tickers(CONNECTOR)
+    tickers = ((tk or {}).get("tickers") or {}).get(CONNECTOR) or {}
     if not tickers:
-        return (
-            f"Could not load the {config.connector_name} ticker list; skipped this run"
-        )
+        return f"Could not load the {CONNECTOR} ticker list; skipped this run"
     pairs = _universe(tickers, config)
 
     sem = asyncio.Semaphore(10)
@@ -568,17 +492,13 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
             failed.append(pair.split("-")[0])
             continue
         results.append(_scan_pair(config, pair, data))
-    skipped = [f"{r['base']}:{r['skip']}" for r in results if r["skip"]]
+    skipped = [f"{r['base']}: {r['skip']}" for r in results if r["skip"]]
     results = [r for r in results if not r["skip"]]
 
-    candidates, muted, cards = [], [], []
-    for result in results:
-        if result["plans"]:
-            best = result["plans"][0]
-            best["also"] = [SIG_NAME[p["type"]] for p in result["plans"][1:]]
-            candidates.append(best)
-    candidates.sort(key=lambda plan: -plan["score"])
-
+    candidates = sorted(
+        (r["plan"] for r in results if r["plan"]), key=lambda plan: -plan["score"]
+    )
+    muted, cards = [], []
     for plan in candidates:
         trade_plan = _trade_plan(plan)
         plan["caption"] = _line(plan)
@@ -592,7 +512,7 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
                 chat_id=context.chat_id,
                 server_name=resolve_server_name(context),
                 account_name="master_account",
-                connector_name=config.connector_name,
+                connector_name=CONNECTOR,
                 bot=context.bot,
                 signal_id=f"trend_watch:{plan['type']}:{plan['tf']}:{plan['bar']}",
             )
@@ -602,10 +522,7 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         else:
             # A preview does not reserve a signal or mutate any trading state.
             png = await asyncio.to_thread(
-                trade_cards.render_chart,
-                plan["df"],
-                trade_plan,
-                config.connector_name,
+                trade_cards.render_chart, plan["df"], trade_plan, CONNECTOR
             )
             preview = (
                 paths.data_dir()
@@ -619,37 +536,18 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         cards.append(plan)
 
     elapsed = time.time() - t0
-    types = ["pullback"] + (["breakout"] if config.enable_breakout else [])
-    hits = {t: sum(r["hits"].get(t, 0) for r in results) for t in types}
-    passed = {t: sum(1 for p in cards if p["type"] == t) for t in types}
+    hits = sum(r["hit"] for r in results)
     # Closest to a card: highest clarity first (see _gap)
     near = sorted((r for r in results if r["gap"]), key=lambda r: r["gap"]["rank"])
-    closest = [
-        f"{r['base']} {_fmt(r['last'])} · 1H {'bullish' if r['prog']['side'] == 'long' else 'bearish'} · "
-        f"clarity {r['clar']['score']:.0f} · {r['gap']['need']}"
-        for r in near[:3]
-    ]
-    near_b = sorted(
-        (
-            r
-            for r in results
-            if r["near_b"] and r["near_b"][0] is not None and not r["plans"]
-        ),
-        key=lambda r: r["near_b"][0],
-    )
-    closest_b = [
-        f"{r['base']} {_fmt(r['last'])} · {r['near_b'][1]}" for r in near_b[:3]
-    ]
     muted_why = "a card was already sent for this trigger bar"
 
     # ── report ──
-    builder = ReportBuilder(f"Trend Watch · {venue_label(config.connector_name)}")
+    builder = ReportBuilder(f"Trend Watch · {venue_label(CONNECTOR)}")
     builder.source("routine", "trend_watch")
     builder.tags(["trend", "monitor", "scanner"])
     builder.kpi("Pairs scanned", str(len(results)))
+    builder.kpi("Signals", str(hits))
     builder.kpi("Cards", str(len(cards)))
-    for t in types:
-        builder.kpi(f"{SIG_NAME[t]} hits/passed", f"{hits[t]}/{passed[t]}")
     builder.kpi("Duration", f"{elapsed:.1f}s")
 
     def _row(p, status):
@@ -657,7 +555,6 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         return {
             "Pair": p["base"],
             "Side": SIDE_NAME[p["side"]],
-            "Signal": SIG_NAME[p["type"]],
             "TF": p["tf"],
             "Entry": f"{_fmt(p['lo'])}–{_fmt(p['hi'])}",
             "Stop": _fmt(p["stop"]),
@@ -674,7 +571,6 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     cols = [
         "Pair",
         "Side",
-        "Signal",
         "TF",
         "Entry",
         "Stop",
@@ -694,7 +590,9 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
 
     # Every candidate that triggered but did not become a card, with what stopped it
     blocked_rows = [
-        _row(b["plan"], _numbered(b["fails"])) for r in results for b in r["blocked"]
+        _row(r["blocked"]["plan"], _numbered(r["blocked"]["fails"]))
+        for r in results
+        if r["blocked"]
     ]
     blocked_rows += [_row(p, muted_why) for p in muted]
     if blocked_rows:
@@ -702,7 +600,7 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
             "**Triggered without a card** (clarity too low / already sent for this bar)"
         )
         builder.table(blocked_rows, cols)
-    rule = (
+    builder.markdown(
         f"**Card rules** (trend pullback): ① 1H EMA9/21/50 stacked with the trend → "
         f"② price within {config.pullback_atr:.2f}×ATR1H of the 1H EMA21, with a pullback "
         f"or bounce to near EMA21 in the last 3 1H bars → ③ a green 15m close above "
@@ -710,20 +608,17 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         f"efficiency ratio, 1H trend strength and 4H alignment). No card cap; one card "
         f"per trigger bar"
     )
-    if config.enable_breakout:
-        rule += f"; 4H breakout is on (breakout volume ≥ {config.vol_mult:.2f}×)"
-    builder.markdown(rule)
 
     def _status(r):
-        if r["plans"]:
+        if r["plan"]:
             return "qualified signal"
         if r["gap"]:
-            return r["gap"]["need"]
+            return _need(r["gap"])
         return "1H EMAs not stacked; no pullback signal"
 
     scan_rows = sorted(
         results,
-        key=lambda r: (not r["plans"], -(r["clar"]["score"] if r["clar"] else -1)),
+        key=lambda r: (not r["plan"], -(r["clar"]["score"] if r["clar"] else -1)),
     )
     scan_cols = [
         "Pair",
@@ -739,31 +634,27 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     rows = []
     for r in scan_rows:
         p, c = r["prog"], r["clar"]
-        row = {
-            "Pair": r["base"],
-            "Price": _fmt(r["last"]),
-            "1H stack": ("bullish" if p["side"] == "long" else "bearish") if p else "—",
-            "To EMA21 (×ATR1H)": f"{p['dist']:.2f}" if p else "—",
-            "Clarity": f"{c['score']:.0f}" if c else "—",
-            "1H eff": f"{c['er1h']:.2f}" if c else "—",
-            "1H strength": f"{c['trend1h']:.2f}" if c else "—",
-            "4H trend": "bullish" if r["h4_up"] else "bearish",
-            "To card": _status(r),
-        }
-        if config.enable_breakout:
-            row["4H breakout"] = r["near_b"][1] if r["near_b"] else "4H EMAs flat"
-        rows.append(row)
-    builder.table(rows, scan_cols + (["4H breakout"] if config.enable_breakout else []))
-    md = []
-    for p in cards:
-        extra = f" (also: {', '.join(p['also'])})" if p.get("also") else ""
-        md.append(
-            f"**{p['base']} {SIDE_NAME[p['side']]} · {SIG_NAME[p['type']]} · clarity {p['score']:.0f}**"
-            f"{extra}: {p['why']}; {_parts(p['clar'])}"
+        rows.append(
+            {
+                "Pair": r["base"],
+                "Price": _fmt(r["last"]),
+                "1H stack": (
+                    ("bullish" if p["side"] == "long" else "bearish") if p else "—"
+                ),
+                "To EMA21 (×ATR1H)": f"{p['dist']:.2f}" if p else "—",
+                "Clarity": f"{c['score']:.0f}" if c else "—",
+                "1H eff": f"{c['er1h']:.2f}" if c else "—",
+                "1H strength": f"{c['trend1h']:.2f}" if c else "—",
+                "4H trend": "bullish" if r["h4_up"] else "bearish",
+                "To card": _status(r),
+            }
         )
-    notes = [f"{r['base']}: {n}" for r in results for n in r["notes"]]
-    if notes:
-        md.append("**Notes**  \n" + "  \n".join(notes))
+    builder.table(rows, scan_cols)
+    md = [
+        f"**{p['base']} {SIDE_NAME[p['side']]} · clarity {p['score']:.0f}**: "
+        f"{p['why']}; {_parts(p['clar'])}"
+        for p in cards
+    ]
     if failed or skipped:
         md.append(
             "**Not scanned**: "
@@ -774,25 +665,39 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     await builder.save()
 
     head = f"Trend scan · {len(results)} pairs · {elapsed:.0f}s"
-    tail = []
-    if muted:
-        tail.append(
-            f"Skipped, {muted_why}: "
-            + ", ".join(f"{p['base']} {SIDE_NAME[p['side']]}" for p in muted)
-        )
+    not_scanned = [f"• {b}: fetch failed" for b in failed] + [f"• {s}" for s in skipped]
     if not cards:
-        lines = [head, "Result: no qualified signal; still waiting"]
-        if closest:
-            lines += ["Closest to a card (by clarity):"] + [f"• {c}" for c in closest]
-        if closest_b:
-            lines += ["Closest to a 4H breakout:"] + [f"• {c}" for c in closest_b]
-        # Keep no-signal summaries in the report instead of sending a message.
-        return RoutineResult(text="\n".join(lines + tail), silent=True)
-    lines = [
-        head,
-        f"Result: {len(cards)} cards{'' if config.send else ' (send=False, not sent)'}",
-    ]
-    lines += [f"Card {i + 1}: {p['caption']}" for i, p in enumerate(cards)]
-    lines += [f"Preview image: {p['card']}" for p in cards if p.get("card")]
-    # Published cards already carry their context; do not send another summary.
-    return RoutineResult(text="\n".join(lines + tail), silent=True)
+        text = _summary(
+            head,
+            "Result: no qualified signal; still waiting",
+            [
+                (
+                    "Closest to a card (by clarity)",
+                    [line for r in near[:3] for line in _closest_lines(r)],
+                ),
+                (
+                    f"Skipped — {muted_why}",
+                    [f"• {p['base']} {SIDE_NAME[p['side']]}" for p in muted],
+                ),
+                ("Not scanned", not_scanned),
+            ],
+        )
+    else:
+        sent = "" if config.send else " (send is off, nothing was sent)"
+        text = _summary(
+            head,
+            f"Result: {len(cards)} cards{sent}",
+            [
+                ("Cards", [f"• {p['caption']}" for p in cards]),
+                (
+                    f"Skipped — {muted_why}",
+                    [f"• {p['base']} {SIDE_NAME[p['side']]}" for p in muted],
+                ),
+                ("Previews", [f"• {p['card']}" for p in cards if p.get("card")]),
+                ("Not scanned", not_scanned),
+            ],
+        )
+    # Published cards carry their own context and a scan without a card is not
+    # news, so a scheduled run never posts this summary; it stays in the report
+    # and the routine's last result.
+    return RoutineResult(text=text, silent=True)

@@ -3,7 +3,6 @@
 import asyncio
 import logging
 
-from .models import TERMINAL
 from .service import refresh_card
 from .store import get_store
 
@@ -22,16 +21,9 @@ async def tick(bot) -> None:
             except Exception:
                 logger.exception("Trade card tracker failed for %s", card.id)
 
-    # Terminal cards can still need a message update/deletion after a network
-    # failure. refresh_card never repeats their trading operation.
-    await asyncio.gather(
-        *(
-            refresh(card)
-            for card in get_store().all()
-            if card.status not in TERMINAL
-            or (card.message_id and not card.message_deleted)
-        )
-    )
+    # Every card: terminal ones still need their message checked or deleted
+    # and their record retired. refresh_card never repeats a trading operation.
+    await asyncio.gather(*(refresh(card) for card in get_store().all()))
 
 
 async def _run(bot) -> None:

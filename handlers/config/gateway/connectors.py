@@ -620,7 +620,7 @@ def _build_connector_config_message(
     # Always add cancel button
     nav_buttons.append(
         InlineKeyboardButton(
-            text="✕ Cancel",
+            text="↩️ Cancel",
             callback_data=f"gateway_connector_cancel_edit_{connector_name}",
         )
     )

@@ -16,6 +16,7 @@ from routines.base import (
     discover_routines,
     get_routine,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2, escape_markdown_v2_code
 
 from .formatting import (
@@ -24,6 +25,7 @@ from .formatting import (
     _format_ago,
     _format_duration,
     _format_schedule,
+    _result_preview,
 )
 from .storage import (
     DAILY_PRESETS,
@@ -128,7 +130,6 @@ async def _show_menu(update: Update, context: Context) -> None:
 
 async def _show_tasks(update: Update, context: Context) -> None:
     """Show all running tasks."""
-    chat_id = update.effective_chat.id
     instances = _get_instances(context)
 
     running = [
@@ -138,52 +139,36 @@ async def _show_tasks(update: Update, context: Context) -> None:
     ]
 
     if not running:
-        text = "📋 *Running Tasks*\n\n" "No tasks running\\."
-        keyboard = [
-            [InlineKeyboardButton(text="« Back", callback_data="routines:menu")]
+        text = ui.screen(ui.title("📋", "Running Tasks"), ui.esc("No tasks running."))
+        await _edit_or_send(
+            update, text, ui.keyboard([ui.back_button("routines:menu")])
+        )
+        return
+
+    # One short line per fact and no leading-space indent: Telegram drops the
+    # indent when a long line wraps, which broke the layout.
+    blocks = [ui.title("📋", "Running Tasks", f"{len(running)} running")]
+    keyboard = []
+    for index, (iid, inst) in enumerate(running, 1):
+        name = _display_name(inst["routine_name"])
+        started = _format_ago(inst.get("created_at", time.time()))
+        rows = [
+            ui.numbered(index, f"🟢 {ui.bold(name)} {ui.code(iid)}", raw=True),
+            ui.bullet("Schedule", _format_schedule(inst.get("schedule", {}))),
+            ui.bullet("Started", started),
+            ui.bullet("Runs", inst.get("run_count", 0)),
         ]
-    else:
-        lines = ["📋 *Running Tasks*", ""]
-        keyboard = []
-
-        for iid, inst in running:
-            name = inst["routine_name"]
-            schedule = inst.get("schedule", {})
-            created = inst.get("created_at", time.time())
-            config = inst.get("config", {})
-            run_count = inst.get("run_count", 0)
-
-            lines.append(f"🟢 *{escape_markdown_v2(_display_name(name))}* `{iid}`")
-            lines.append(
-                f"   {escape_markdown_v2(_format_schedule(schedule))} \\| {escape_markdown_v2(_format_ago(created))}"
-            )
-            lines.append(
-                f"   Runs: {run_count} \\| `{escape_markdown_v2(_config_preview(config))}`"
-            )
-
-            if inst.get("last_result"):
-                result_preview = inst["last_result"][:40].replace("\n", " ")
-                lines.append(f"   └ {escape_markdown_v2(result_preview)}\\.\\.\\.")
-            lines.append("")
-
-            keyboard.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"⏹ {_display_name(name)[:12]}[{iid}]",
-                        callback_data=f"routines:stop:{iid}",
-                    )
-                ]
-            )
-
+        preview = _result_preview(inst.get("last_result") or "")
+        if preview:
+            rows.append(f"• Last: {ui.italic(preview)}")
+        blocks.append(rows)
         keyboard.append(
-            [InlineKeyboardButton(text="⏹ Stop All", callback_data="routines:stopall")]
+            [ui.action_button("stop", f"{index}. {name}", f"routines:stop:{iid}")]
         )
-        keyboard.append(
-            [InlineKeyboardButton(text="« Back", callback_data="routines:menu")]
-        )
-        text = "\n".join(lines)
 
-    await _edit_or_send(update, text, InlineKeyboardMarkup(inline_keyboard=keyboard))
+    keyboard.append([ui.action_button("stop", "Stop All", "routines:stopall")])
+    keyboard.append([ui.back_button("routines:menu")])
+    await _edit_or_send(update, ui.screen(*blocks), ui.keyboard(*keyboard))
 
 
 async def _show_detail(update: Update, context: Context, routine_name: str) -> None:
@@ -347,7 +332,7 @@ async def _show_schedule_menu(
         ],
         [
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data=f"routines:select:{routine_name}"
+                text="↩️ Cancel", callback_data=f"routines:select:{routine_name}"
             )
         ],
     ]

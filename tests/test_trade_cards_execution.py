@@ -67,7 +67,6 @@ async def test_preview_and_creation_use_exact_server_and_group_protocol(
         side_effect=[
             {
                 "version": 1,
-                "modes": ["dry_run", "live"],
                 "connectors": ["binance_perpetual"],
             },
             quote(),

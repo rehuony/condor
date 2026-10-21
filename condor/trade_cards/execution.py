@@ -217,20 +217,17 @@ def payload(card: Card) -> dict:
         "tp2_price": str(plan.tp2_price),
         "margin": card.margin,
         "leverage": 10,
-        "mode": card.mode,
         "entry_expires_at": card.expires_at,
     }
 
 
 async def preview(card: Card) -> dict:
     capabilities = await _request(card, "GET", "/capabilities")
-    if (
-        capabilities.get("version") != 1
-        or card.mode not in capabilities.get("modes", [])
-        or card.connector_name not in capabilities.get("connectors", [])
+    if capabilities.get("version") != 1 or card.connector_name not in capabilities.get(
+        "connectors", []
     ):
         raise ExecutionError(
-            "The executor does not support this card mode or exchange. Update the executor first.",
+            "The executor does not support trade cards on this exchange. Update the executor first.",
             status=501,
         )
     result = validate_quote(await _request(card, "POST", "/preview", payload(card)))

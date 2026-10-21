@@ -36,7 +36,7 @@ def _get_admin_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⬇️ Update", callback_data="admin:update_check"),
         ],
         [
-            InlineKeyboardButton(text="✕ Close", callback_data="config_close"),
+            InlineKeyboardButton(text="🚪 Close", callback_data="config_close"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

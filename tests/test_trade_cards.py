@@ -59,10 +59,10 @@ def setup(monkeypatch):
             )
         ),
     )
-    monkeypatch.delenv("TRADE_CARDS_MODE", raising=False)
     bot = SimpleNamespace(
         send_photo=AsyncMock(return_value=SimpleNamespace(message_id=11)),
         edit_message_caption=AsyncMock(),
+        edit_message_reply_markup=AsyncMock(),
         delete_message=AsyncMock(),
     )
     return bot
@@ -117,16 +117,10 @@ async def test_publish_deduplicates_concurrent_signals_and_scopes_target(setup):
 
 
 @pytest.mark.asyncio
-async def test_mode_is_fixed_on_card_and_invalid_mode_never_sends(setup, monkeypatch):
-    monkeypatch.setenv("TRADE_CARDS_MODE", "live")
+async def test_cards_name_no_execution_mode(setup):
     card = await published(setup)
-    assert card.mode == "live"
-    monkeypatch.setenv("TRADE_CARDS_MODE", "dry_run")
-    assert get_card(card.id, owner_id=7).mode == "live"
-    monkeypatch.setenv("TRADE_CARDS_MODE", "typo")
-    with pytest.raises(ValueError):
-        await published(setup)
-    assert setup.send_photo.await_count == 1
+    assert "mode" not in execution.payload(card)
+    assert "Dry run" not in render.caption(card) and "Live" not in render.caption(card)
 
 
 @pytest.mark.asyncio
@@ -283,7 +277,8 @@ async def test_close_confirmation_survives_refresh_and_detach_deletes_only_after
         card, "DETACHED", operation={"id": operation_id, "status": "COMPLETED"}
     )
     await tracker.tick(setup)
-    assert get_card(card.id, owner_id=7).status == CardStatus.DETACHED
+    # Detached, its message deleted, so the record is gone too.
+    assert get_card(card.id, owner_id=7) is None
     setup.delete_message.assert_awaited_once()
     assert execution.command.await_count == 1
 
@@ -305,7 +300,7 @@ async def test_detach_delete_failure_removes_buttons_and_retries_without_trading
     assert "not deleted yet" in edited["caption"]
     setup.delete_message.side_effect = None
     await tracker.tick(setup)
-    assert get_card(card.id, owner_id=7).message_deleted
+    assert get_card(card.id, owner_id=7) is None
     execution.command.assert_awaited_once()
 
 
@@ -318,7 +313,8 @@ async def test_expired_unordered_card_deletes_without_price_and_open_card_has_no
     store.get_store().save(unopened)
     execution.current_price.side_effect = RuntimeError("unavailable")
     await tracker.tick(setup)
-    assert get_card(unopened.id, owner_id=7).status == CardStatus.EXPIRED
+    # Expired, its message deleted, so the record is gone too.
+    assert get_card(unopened.id, owner_id=7) is None
     execution.current_price.assert_not_awaited()
     opened = await reviewed(setup)
     opened = await action(setup, opened, "confirm")
@@ -611,7 +607,6 @@ async def test_live_liquidation_and_negative_net_target_profit_are_not_fabricate
     card.quote = validate_quote(quote(profit_tp1="-0.02"))
     assert "*\\-0\\.02 / " in render.caption(card)
     card.status = CardStatus.OPEN
-    card.mode = "live"
     card.execution = group(
         card,
         liquidation_price="93",
@@ -789,3 +784,61 @@ async def test_every_card_caption_is_valid_markdown_v2(setup):
     card.status = CardStatus.OPEN
     card.confirm_action = "close"
     assert_valid(render.caption(card))
+
+
+@pytest.mark.asyncio
+async def test_close_buttons_show_what_each_close_locks_in_on_its_own_row(setup):
+    card = await reviewed(setup)
+    card.status = CardStatus.OPEN
+    # Long 1 @ 100, price 102: the remaining position is worth +2 unrealized;
+    # the trade's pnl (realized legs included) is a different number.
+    card.execution = group(
+        card,
+        current_price="102",
+        entry_price="100",
+        remaining_amount="1",
+        pnl="7.5",
+        available_actions=["reduce_half", "close", "detach"],
+    )
+    rows = [[b.text for b in row] for row in render.keyboard(card).inline_keyboard]
+    assert ["🔻 Close Half · +1.00 USDT"] in rows
+    assert ["🔻 Close All · +2.00 USDT"] in rows
+
+
+def _message_deleted():
+    from condor.telegram.errors import bad_request
+
+    return bad_request("Bad Request: message to edit not found")
+
+
+@pytest.mark.asyncio
+async def test_a_trading_card_whose_message_was_deleted_is_sent_again(setup):
+    card = await reviewed(setup)
+    card = await action(setup, card, "confirm")
+    assert card.status == CardStatus.OPEN
+    setup.send_photo.return_value = SimpleNamespace(message_id=12)
+    setup.edit_message_caption.side_effect = _message_deleted()
+    setup.edit_message_reply_markup.side_effect = _message_deleted()
+    record = store.get_store().get(card.id)
+    record.last_render = ""  # force the next tick to edit
+    store.get_store().save(record)
+    await tracker.tick(setup)
+    resent = get_card(card.id, owner_id=7)
+    assert resent is not None and resent.status == CardStatus.OPEN
+    assert resent.message_id == 12
+    assert setup.send_photo.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_finished_card_whose_message_was_deleted_is_forgotten(setup):
+    card = await published(setup, signal_id="pullback:777")
+    record = store.get_store().get(card.id)
+    record.status = CardStatus.CLOSED
+    record.last_render = service._render_key(record)
+    store.get_store().save(record)
+    setup.edit_message_reply_markup.side_effect = _message_deleted()
+    await tracker.tick(setup)
+    assert get_card(card.id, owner_id=7) is None
+    assert not service.chart_path(card.id).exists()
+    # The signal stays reserved: the same trigger cannot publish again.
+    assert await published(setup, signal_id="pullback:777") is None

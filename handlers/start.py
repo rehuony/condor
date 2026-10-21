@@ -5,6 +5,18 @@ from handlers import clear_all_input_states
 from utils import telegram_ui as ui
 from utils.auth import ACCESS_DENIED, restricted
 
+#: The commands the welcome screen points a newcomer to.
+WELCOME_COMMANDS = ("keys", "portfolio", "bots", "trade", "agent", "web")
+
+
+def _welcome_commands() -> list[tuple[str, str]]:
+    """``(command, description)`` shortest first, worded as the ``/`` menu has it."""
+    from handlers.commands import PUBLIC_COMMANDS
+
+    described = dict(PUBLIC_COMMANDS)
+    names = sorted(WELCOME_COMMANDS, key=lambda name: (len(name), name))
+    return [(name, described[name]) for name in names]
+
 
 async def start_command(update: Update, context: Context) -> None:
     """Start the conversation and display available commands (BotFather style)."""
@@ -76,17 +88,7 @@ async def start_command(update: Update, context: Context) -> None:
         ),
         [
             ui.section("Commands"),
-            *(
-                ui.esc(f"/{name} — {text}")
-                for name, text in (
-                    ("keys", "add exchange API keys"),
-                    ("portfolio", "view balances across exchanges"),
-                    ("bots", "deploy and manage trading bots"),
-                    ("trade", "place CEX and DEX orders"),
-                    ("agent", "AI trading assistant"),
-                    ("web", "open the web dashboard"),
-                )
-            ),
+            *(ui.esc(f"/{name} — {text}") for name, text in _welcome_commands()),
         ],
         ui.hint("New to Condor? See", raw=False)
         + " [the manual](https://github.com/rehuony/condor#readme)\\.",

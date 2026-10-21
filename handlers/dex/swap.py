@@ -377,9 +377,8 @@ async def _fetch_quotes_background(
         for line in errors:
             logger.warning(f"Background quote failed — {line}")
 
-        if len(errors) == 2:
-            return
-
+        # Re-render even when both quotes fail: the balances fetched alongside
+        # them, and the reason each side failed, still belong on the screen.
         quote_data = {
             "trading_pair": trading_pair,
             "amount": amount,
@@ -388,8 +387,9 @@ async def _fetch_quotes_background(
             "errors": errors,
         }
 
-        # Store quote in cache for display
-        set_cached(context.user_data, "swap_quote", quote_data)
+        # Cache only a usable quote, so a failed pair is retried next time
+        if len(errors) < 2:
+            set_cached(context.user_data, "swap_quote", quote_data)
 
         # Rebuild and update the message with quote
         # Only update if still in swap state
@@ -455,7 +455,7 @@ def _build_swap_keyboard(params: dict) -> list:
         [
             InlineKeyboardButton(text="📋 Quote", callback_data="dex:swap_get_quote"),
             InlineKeyboardButton(text="📜 History", callback_data="dex:swap_history"),
-            InlineKeyboardButton(text="✕ Close", callback_data="dex:close"),
+            InlineKeyboardButton(text="🚪 Close", callback_data="dex:close"),
         ],
     ]
 
@@ -484,7 +484,19 @@ def _build_swap_menu_text(
         enabled_networks = get_all_enabled_networks(user_data)
         if enabled_networks and gateway_data:
             gateway_data = _filter_balances_by_networks(gateway_data, enabled_networks)
-        if gateway_data and gateway_data.get("balances_by_network"):
+        if gateway_data is None:
+            help_text += "⏳ _Loading…_\n"
+        elif gateway_data.get("error"):
+            help_text += (
+                ui.notice(
+                    "warning", "Could not load wallet balances", gateway_data["error"]
+                )
+                + "\n"
+            )
+        elif not gateway_data.get("balances_by_network"):
+            help_text += ui.hint("No DEX wallet balances. Add a wallet with /gateway.")
+            help_text += "\n"
+        else:
             network_key = network.split("-")[0].lower() if network else ""
             balances_found = {
                 "base_balance": 0,
@@ -520,8 +532,6 @@ def _build_swap_menu_text(
                 else ""
             )
             help_text += f"💵 `{escape_markdown_v2(quote_token)}`: `{escape_markdown_v2(quote_bal_str)}` {escape_markdown_v2(quote_val_str)}\n"
-        else:
-            help_text += "⏳ _Loading\\.\\.\\._\n"
 
     except Exception as e:
         logger.warning(f"Could not get cached balances: {e}")
@@ -572,7 +582,13 @@ def _build_swap_menu_text(
             help_text += _format_compact_swap_line(swap) + "\n"
     elif user_data.get("recent_swaps_error"):
         help_text += r"*Recent*" + "\n"
-        help_text += "⚠️ " + escape_markdown_v2(user_data["recent_swaps_error"]) + "\n"
+        help_text += (
+            "⚠️ "
+            + escape_markdown_v2(
+                f"Could not load recent swaps: {user_data['recent_swaps_error']}"
+            )
+            + "\n"
+        )
 
     return help_text
 
@@ -1288,7 +1304,7 @@ async def handle_swap_status(update: Update, context: Context) -> None:
         r"`<tx_hash>`"
     )
 
-    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:swap")]]
+    keyboard = [[InlineKeyboardButton(text="↩️ Cancel", callback_data="dex:swap")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "swap_status"

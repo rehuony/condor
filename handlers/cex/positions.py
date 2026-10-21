@@ -282,7 +282,7 @@ async def handle_close_position(
                     text="✅ Confirm Close",
                     callback_data=f"cex:confirm_close:{position_index}",
                 ),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="cex:positions"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="cex:positions"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)

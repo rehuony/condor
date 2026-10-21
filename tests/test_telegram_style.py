@@ -45,8 +45,8 @@ def test_validator_rejects_unescaped_and_unbalanced_text():
 def test_navigation_buttons_use_the_fixed_labels():
     assert ui.back_button("x:menu").text == "« Back"
     assert ui.back_button("x:menu", "Pools").text == "« Back to Pools"
-    assert ui.close_button("x:close").text == "✕ Close"
-    assert ui.cancel_button("x:menu").text == "✕ Cancel"
+    assert ui.close_button("x:close").text == "🚪 Close"
+    assert ui.cancel_button("x:menu").text == "↩️ Cancel"
     row = ui.pager_row("2/5", "x:noop", prev_callback="x:p")
     assert [b.text for b in row] == ["‹ Prev", "2/5", " "]
     assert row[2].callback_data == "x:noop"
@@ -154,3 +154,50 @@ def test_navigation_buttons_everywhere_use_canonical_labels():
         if not ok:
             wrong.append(f"{path}:{line} {label!r}")
     assert not wrong, wrong
+
+
+def test_welcome_lists_commands_shortest_first_in_menu_wording():
+    from handlers.commands import PUBLIC_COMMANDS
+    from handlers.start import WELCOME_COMMANDS, _welcome_commands
+
+    listed = _welcome_commands()
+    names = [name for name, _ in listed]
+    assert sorted(names) == sorted(WELCOME_COMMANDS)
+    assert [len(name) for name in names] == sorted(len(name) for name in names)
+    menu = dict(PUBLIC_COMMANDS)
+    assert all(text == menu[name] for name, text in listed)
+
+
+def test_running_tasks_rows_stay_flush_and_short(monkeypatch):
+    """Telegram drops a leading indent on wrap, so rows carry none."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from handlers.routines import views
+
+    sent = {}
+
+    async def capture(update, text, markup):
+        sent["text"] = text
+
+    monkeypatch.setattr(views, "_edit_or_send", capture)
+    monkeypatch.setattr(
+        views,
+        "_get_instances",
+        lambda context: {
+            "6b6753": {
+                "status": "running",
+                "routine_name": "trend_watch",
+                "schedule": {"type": "continuous"},
+                "run_count": 12,
+                "last_result": "**Trend Watch** · " + "BTC-USDT " * 20 + "\nmore",
+            }
+        },
+    )
+    asyncio.run(views._show_tasks(SimpleNamespace(), SimpleNamespace()))
+
+    text = sent["text"]
+    assert_valid(text)
+    assert all(not line.startswith(" ") for line in text.splitlines())
+    last = next(line for line in text.splitlines() if line.startswith("• Last"))
+    assert "**" not in last and "more" not in last and len(last) < 70

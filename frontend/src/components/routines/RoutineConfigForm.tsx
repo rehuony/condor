@@ -122,7 +122,7 @@ export function RoutineConfigForm({ fields, values, onChange }: Props) {
           const isBoolean = field.type === "bool" && !(field.widget === "select" && field.options_from);
           const label = (
             <label htmlFor={id} className="mb-1 block text-xs font-medium text-[var(--color-text)]">
-              {formatSlug(key)}
+              {field.title ?? formatSlug(key)}
             </label>
           );
           const description = field.description ? (
@@ -158,7 +158,7 @@ export function RoutineConfigForm({ fields, values, onChange }: Props) {
                     <SelectField
                       id={id}
                       descriptionId={descriptionId}
-                      label={formatSlug(key)}
+                      label={field.title ?? formatSlug(key)}
                       field={field}
                       value={values[key]}
                       onChange={(v) => onChange(key, v)}

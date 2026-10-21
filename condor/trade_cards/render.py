@@ -64,6 +64,31 @@ def result_row(card: Card) -> str:
     return f"{icon} {label} · {number(pnl, True)} USDT{multiple}"
 
 
+def close_value(card: Card, fraction: Decimal) -> Decimal | None:
+    """Unrealized PnL closing ``fraction`` of the remaining position locks in.
+
+    ``side × (price − average entry) × remaining × fraction``, before fees. The
+    card's ``pnl`` is the whole trade (realized legs included), so it is the
+    same for both buttons and is not what either close realizes.
+    """
+    execution = card.execution
+    try:
+        price = Decimal(str(execution["current_price"]))
+        entry = Decimal(str(execution["entry_price"]))
+        remaining = Decimal(str(execution["remaining_amount"]))
+    except (KeyError, InvalidOperation, TypeError):
+        return None
+    direction = 1 if card.plan.side == "long" else -1
+    value = direction * (price - entry) * remaining * fraction
+    return value if value.is_finite() else None
+
+
+def close_label(card: Card, text: str, fraction: Decimal) -> str:
+    value = close_value(card, fraction)
+    shown = f" · {value:+.2f} USDT" if value is not None else ""
+    return f"🔻 {text}{shown}"
+
+
 def block(heading: str, rows: list[tuple[str, str]]) -> list[str]:
     """A bold section heading followed by ``• Label: *value*`` rows."""
     return [ui.section(heading), *(ui.bullet(label, value) for label, value in rows)]
@@ -75,11 +100,6 @@ def caption(card: Card) -> str:
     side = "🟢 Long" if plan.side == "long" else "🔴 Short"
     lines = [
         ui.bold(f"{plan.trading_pair} · {side} · {plan.timeframe}"),
-        (
-            ui.italic("Dry run · no real orders")
-            if card.mode == "dry_run"
-            else ui.bold("⚡ Live")
-        ),
         "",
         *block(
             "📍 Trade plan",
@@ -146,7 +166,7 @@ def caption(card: Card) -> str:
         liquidation = e.get("liquidation_price")
         if e.get("liquidation_price_kind") == "exchange" and liquidation is not None:
             rows.append(("Exchange liquidation", number(liquidation)))
-        elif card.mode == "live":
+        else:
             notes.append("The exchange liquidation price is unavailable for now.")
         try:
             price = Decimal(str(e["current_price"]))
@@ -243,18 +263,15 @@ def keyboard(card: Card) -> InlineKeyboardMarkup | None:
             ]
         ]
     elif card.status == CardStatus.OPEN:
-        pnl = number(card.execution.get("pnl"), True)
-        rows = []
-        close_buttons = [
-            button(text, action)
-            for text, action in (
-                (f"🔻 Close Half · {pnl}", "reduce_half"),
-                (f"🔻 Close All · {pnl}", "close"),
+        # One row each, so the value each close would lock in is never cut off
+        rows = [
+            [button(close_label(card, text, fraction), action)]
+            for text, action, fraction in (
+                ("Close Half", "reduce_half", Decimal("0.5")),
+                ("Close All", "close", Decimal(1)),
             )
             if action in actions
         ]
-        if close_buttons:
-            rows.append(close_buttons)
         if "cancel_entry" in actions:
             rows.append([button("🛑 Cancel Remaining Entry", "cancel_entry")])
         row = [button(ui.REFRESH, "refresh")]

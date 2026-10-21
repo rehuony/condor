@@ -93,7 +93,7 @@ def _build_main_menu_keyboard(bots_dict: Dict[str, Any]) -> InlineKeyboardMarkup
     keyboard.append(
         [
             InlineKeyboardButton(text="🔄 Refresh", callback_data="bots:refresh"),
-            InlineKeyboardButton(text="✕ Close", callback_data="bots:close"),
+            InlineKeyboardButton(text="🚪 Close", callback_data="bots:close"),
         ]
     )
 
@@ -909,7 +909,7 @@ async def handle_stop_controller(update: Update, context: Context) -> None:
                 text="✅ Yes, Stop", callback_data="bots:confirm_stop_ctrl"
             ),
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="↩️ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             ),
         ],
     ]
@@ -1023,7 +1023,7 @@ async def handle_start_controller(update: Update, context: Context) -> None:
                 text="✅ Yes, Start", callback_data="bots:confirm_start_ctrl"
             ),
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="↩️ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             ),
         ],
     ]
@@ -1420,7 +1420,7 @@ async def show_controller_edit(update: Update, context: Context) -> None:
     keyboard = [
         [
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="↩️ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             )
         ],
     ]
@@ -1552,7 +1552,7 @@ async def handle_controller_set_field(
                     text="✅ Yes, Pause" if new_val else "✅ Yes, Resume",
                     callback_data=f"bots:ctrl_confirm_set:{field_name}:{new_val}",
                 ),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:ctrl_edit"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:ctrl_edit"),
             ],
         ]
 
@@ -1591,7 +1591,9 @@ async def handle_controller_set_field(
     context.user_data["bots_state"] = f"ctrl_set:{field_name}"
     context.user_data["editing_ctrl_field"] = field_name
 
-    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="bots:ctrl_edit")]]
+    keyboard = [
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:ctrl_edit")]
+    ]
 
     await query.message.edit_text(
         f"*Edit {escape_markdown_v2(label)}*\n\n"
@@ -1966,7 +1968,7 @@ async def handle_stop_bot(update: Update, context: Context) -> None:
             ),
         ],
         [
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:back_to_bot"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:back_to_bot"),
         ],
     ]
 

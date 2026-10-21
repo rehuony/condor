@@ -381,7 +381,7 @@ async def show_type_selector(update: Update, context: Context) -> None:
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data="bots:controller_configs"
+                text="↩️ Cancel", callback_data="bots:controller_configs"
             ),
         ]
     )
@@ -461,7 +461,7 @@ async def handle_cfg_delete_confirm(update: Update, context: Context) -> None:
                 text="✅ Yes, Delete", callback_data="bots:cfg_delete_execute"
             ),
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data="bots:controller_configs"
+                text="↩️ Cancel", callback_data="bots:controller_configs"
             ),
         ]
     ]

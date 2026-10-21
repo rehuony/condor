@@ -198,7 +198,7 @@ async def _show_wizard_side_step(update: Update, context: Context) -> None:
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:gs_back_to_pair"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -272,7 +272,7 @@ async def _show_wizard_leverage_step(update: Update, context: Context) -> None:
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:gs_back_to_side"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -427,7 +427,7 @@ async def _show_wizard_amount_step(update: Update, context: Context) -> None:
             InlineKeyboardButton(
                 text="« Back", callback_data="bots:gs_back_to_leverage"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -733,7 +733,7 @@ async def _show_wizard_prices_step(
                 InlineKeyboardButton(
                     text="« Back", callback_data="bots:gs_back_to_amount"
                 ),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
             ],
         ]
 
@@ -950,7 +950,7 @@ async def _show_wizard_take_profit_step(update: Update, context: Context) -> Non
             InlineKeyboardButton(text="0.2%", callback_data="bots:gs_tp:0.002"),
             InlineKeyboardButton(text="0.5%", callback_data="bots:gs_tp:0.005"),
         ],
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")],
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu")],
     ]
 
     message_text = (
@@ -1101,7 +1101,7 @@ async def _update_wizard_message_for_side(update: Update, context: Context) -> N
             InlineKeyboardButton(text="📈 LONG", callback_data="bots:gs_side:long"),
             InlineKeyboardButton(text="📉 SHORT", callback_data="bots:gs_side:short"),
         ],
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")],
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu")],
     ]
 
     # Determine total steps based on connector type

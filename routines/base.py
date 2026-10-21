@@ -10,7 +10,7 @@ Routine Types:
 import importlib
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -180,9 +180,23 @@ class RoutineResult:
 
 
 def normalize_result(result) -> RoutineResult:
-    """Wrap a plain string into RoutineResult for backwards compatibility."""
+    """Wrap a plain string into RoutineResult for backwards compatibility.
+
+    A hot reload re-executes this module, so a routine module loaded before it
+    still returns the *previous* ``RoutineResult`` class. ``isinstance`` fails
+    for those, and stringifying one would post its repr and drop ``silent``;
+    rebuild it as the current class instead.
+    """
     if isinstance(result, RoutineResult):
         return result
+    if is_dataclass(result) and type(result).__name__ == "RoutineResult":
+        return RoutineResult(
+            **{
+                f.name: getattr(result, f.name)
+                for f in fields(RoutineResult)
+                if hasattr(result, f.name)
+            }
+        )
     return RoutineResult(text=str(result) if result else "Completed")
 
 
@@ -499,6 +513,8 @@ class RoutineInfo:
                 "default": field_info.default,
                 "description": field_info.description or name,
             }
+            if field_info.title:
+                entry["title"] = field_info.title
             # Pass through widget hints from json_schema_extra
             extra = field_info.json_schema_extra
             if isinstance(extra, dict):

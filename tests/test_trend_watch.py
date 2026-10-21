@@ -47,11 +47,9 @@ def signal_frames():
 
 def test_scan_preserves_clarity_and_closed_trigger_bar(monkeypatch):
     monkeypatch.setattr(scanner.time, "time", lambda: 2_000_000_000)
-    breakout = Mock(side_effect=AssertionError("breakout is disabled by default"))
-    monkeypatch.setattr(scanner, "_breakout", breakout)
     frames = signal_frames()
     result = scanner._scan_pair(scanner.Config(), "SOL-USDT", frames)
-    plan = result["plans"][0]
+    plan = result["plan"]
     assert plan["score"] == 100
     assert plan["bar"] == frames["m15"].timestamp.iloc[-1]
     assert (plan["lo"], plan["hi"], plan["stop"], plan["tp1"], plan["tp2"]) == (
@@ -63,9 +61,9 @@ def test_scan_preserves_clarity_and_closed_trigger_bar(monkeypatch):
     )
     frames["h4"]["ema20"] = 96.0
     blocked = scanner._scan_pair(scanner.Config(), "SOL-USDT", frames)
-    assert not blocked["plans"]
-    assert blocked["blocked"][0]["plan"]["score"] == 66.7
-    breakout.assert_not_called()
+    assert blocked["plan"] is None
+    assert blocked["blocked"]["plan"]["score"] == 66.7
+    assert blocked["gap"]["triggered"]
 
 
 def test_clarity_components_remain_directional():
@@ -136,3 +134,53 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
         assert render.call_count == 3
         assert "Result: 3 cards" in result.text
         assert len(list(tmp_path.rglob("*.png"))) == 3
+
+
+def test_config_keeps_only_tunable_parameters():
+    assert list(scanner.Config.model_fields) == [
+        "top_n",
+        "min_quote_volume",
+        "min_score",
+        "pullback_atr",
+        "stop_atr",
+        "tp1_r",
+        "tp2_r",
+        "send",
+    ]
+
+
+def test_no_signal_summary_groups_each_pairs_missing_steps():
+    r = {
+        "base": "BTC",
+        "last": 84412.8,
+        "prog": {"side": "long"},
+        "clar": {"score": 100},
+        "gap": {
+            "steps": ["pull back to near EMA21", "15m green close above EMA9"],
+            "triggered": False,
+        },
+    }
+    text = scanner._summary(
+        "Trend scan · 40 pairs · 6s",
+        "Result: no qualified signal; still waiting",
+        [
+            ("Closest to a card (by clarity)", scanner._closest_lines(r)),
+            ("Not scanned", []),
+        ],
+    )
+    assert text == (
+        "Trend scan · 40 pairs · 6s\n"
+        "Result: no qualified signal; still waiting\n\n"
+        "Closest to a card (by clarity)\n"
+        "• BTC 84412.80 · 1H bullish · clarity 100\n"
+        "  ① pull back to near EMA21\n"
+        "  ② 15m green close above EMA9"
+    )
+
+
+def test_fields_carry_readable_titles_for_the_config_form():
+    from routines.base import get_routine
+
+    fields = get_routine("trend_watch").get_fields()
+    assert fields["pullback_atr"]["title"] == "Pullback (×ATR1H)"
+    assert fields["send"]["title"] == "Publish cards"

@@ -121,38 +121,45 @@ function AppShellBody() {
 
   return (
     <div className="flex h-dvh min-w-0 flex-col">
-      {/* Top bar */}
-      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 xl:px-4">
-        {/* Left: logo + nav */}
-        <div className="contents">
-          <NavLink to="/" className="order-1 flex shrink-0 items-center gap-2 font-bold tracking-tight xl:mr-6">
-            <img src="/condor_old.jpeg" alt="Condor" className="h-6 w-6 rounded-full" />
-            <span className="hidden text-sm sm:inline">Condor</span>
-          </NavLink>
+      {/* Top bar: one row from sm up. The nav is a size container: when its
+          own width cannot hold every label it keeps only the current page's,
+          showing the rest as icons (label in the tooltip and for screen
+          readers), and if even that does not fit it scrolls under the edge
+          fades. Only a phone, too narrow for the nav beside the controls,
+          gives the nav its own full-width row. */}
+      <header className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 max-sm:pt-1 sm:h-12 sm:flex-nowrap xl:gap-x-4 xl:px-4">
+        <NavLink to="/" className="flex shrink-0 items-center gap-2 font-bold tracking-tight">
+          <img src="/condor_old.jpeg" alt="Condor" className="h-6 w-6 rounded-full" />
+          <span className="hidden text-sm lg:inline">Condor</span>
+        </NavLink>
 
-          <nav ref={navRef} onScroll={updateNavEdges} aria-label="Main navigation" data-overflow-left={navEdges.left} data-overflow-right={navEdges.right} className="main-navigation order-3 flex w-full items-center overflow-x-auto pb-1 xl:order-2 xl:w-auto xl:pb-0">
-            {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === "/"}
-                className={({ isActive }) =>
-                  `flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${
-                    isActive
-                      ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
-                      : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                  }`
-                }
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" />
-                {label}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
+        <nav ref={navRef} onScroll={updateNavEdges} aria-label="Main navigation" data-overflow-left={navEdges.left} data-overflow-right={navEdges.right} className="main-navigation @container flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto max-sm:order-last max-sm:basis-full">
+          {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === "/"}
+              title={label}
+              className={({ isActive }) =>
+                `flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors ${
+                  isActive
+                    ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
+                    : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className={isActive ? undefined : "@max-[42rem]:sr-only"}>{label}</span>
+                </>
+              )}
+            </NavLink>
+          ))}
+        </nav>
 
         {/* Right: server selector + controls */}
-        <div className="order-2 ml-auto flex min-w-0 items-center gap-1 py-1 xl:order-3 xl:gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-1 xl:gap-3">
           <ServerSelector />
           <CurrencySelector />
 

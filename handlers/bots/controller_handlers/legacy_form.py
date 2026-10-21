@@ -159,7 +159,7 @@ async def show_config_form(update: Update, context: Context) -> None:
                 text="💾 Save Config", callback_data="bots:save_config"
             ),
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data="bots:controller_configs"
+                text="↩️ Cancel", callback_data="bots:controller_configs"
             ),
         ]
     )
@@ -215,7 +215,7 @@ async def handle_set_field(update: Update, context: Context, field_name: str) ->
     message += r"Type the new value or tap Cancel\."
 
     keyboard = [
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:edit_config_back")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:edit_config_back")]
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -261,7 +261,7 @@ async def show_connector_selector(update: Update, context: Context) -> None:
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data="bots:edit_config_back"
+                    text="↩️ Cancel", callback_data="bots:edit_config_back"
                 )
             ]
         )

@@ -33,6 +33,7 @@ import hashlib
 import logging
 import time
 import traceback
+from collections.abc import Iterable
 from pathlib import Path
 
 import condor.reports as reports
@@ -295,6 +296,18 @@ class RoutineStore:
         return out
 
     # ── Instances ──
+
+    def forget_reports(self, report_ids: Iterable[str]) -> None:
+        """Unlink instances from reports that were deleted.
+
+        An instance keeps its last run's ``report_id`` so a reader can open it;
+        once that report is gone the link would open a 404 and hide the run's
+        row behind a report that no longer exists.
+        """
+        gone = set(report_ids)
+        for meta in self._instances.values():
+            if meta.get("report_id") in gone:
+                meta["report_id"] = None
 
     def list_instances(self) -> list[dict]:
         out = []

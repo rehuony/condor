@@ -302,7 +302,7 @@ async def prompt_api_key_input(query, context: Context, provider_key: str) -> No
     keyboard = [
         [
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data=f"gateway_rpc_{provider_key}"
+                text="↩️ Cancel", callback_data=f"gateway_rpc_{provider_key}"
             )
         ]
     ]
@@ -935,7 +935,7 @@ async def prompt_node_url_input(query, context: Context, network_id: str) -> Non
     context.user_data["rpc_chat_id"] = query.message.chat.id
 
     keyboard = [
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="gateway_rpc_url_menu")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="gateway_rpc_url_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 

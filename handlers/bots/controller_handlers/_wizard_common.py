@@ -109,7 +109,7 @@ async def show_connector_step(
         if row:
             keyboard.append(row)
         keyboard.append(
-            [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")]
+            [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu")]
         )
 
         await query.message.edit_text(
@@ -176,7 +176,7 @@ async def show_pair_step(
     keyboard.append(
         [
             InlineKeyboardButton(text="« Back", callback_data=spec.back_to_connector),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ]
     )
 
@@ -217,7 +217,7 @@ async def show_pair_suggestions(
     keyboard.append(
         [
             InlineKeyboardButton(text="« Back", callback_data=spec.back_to_connector),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ]
     )
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)

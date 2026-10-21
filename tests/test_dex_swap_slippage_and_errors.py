@@ -186,3 +186,29 @@ def test_a_priceless_quote_raises_rather_than_defaulting_the_price_to_one():
                 None,
             )
         )
+
+
+@pytest.mark.parametrize(
+    "cached,expected",
+    [
+        (None, "Loading…"),
+        ({"balances_by_network": {}, "total_value": 0}, "No DEX wallet balances"),
+        (
+            {"balances_by_network": {}, "total_value": 0, "error": "timeout"},
+            "Could not load wallet balances",
+        ),
+    ],
+)
+def test_swap_balance_says_why_it_is_empty(cached, expected):
+    from handlers.dex._shared import set_cached
+    from handlers.dex.swap import _build_swap_menu_text
+    from tests.support.markdown_v2 import assert_valid, plain
+
+    user_data = {}
+    if cached is not None:
+        set_cached(user_data, "gateway_balances", cached)
+    text = _build_swap_menu_text(
+        user_data, {"trading_pair": "SOL-USDC", "network": "solana-mainnet-beta"}
+    )
+    assert_valid(text)
+    assert expected in plain(text)

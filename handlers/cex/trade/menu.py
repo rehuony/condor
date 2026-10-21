@@ -243,7 +243,7 @@ def _build_trade_keyboard(
         [
             InlineKeyboardButton(text="📋 Orders", callback_data="cex:search_orders"),
             InlineKeyboardButton(text="📊 Positions", callback_data="cex:positions"),
-            InlineKeyboardButton(text="✕ Close", callback_data="cex:close"),
+            InlineKeyboardButton(text="🚪 Close", callback_data="cex:close"),
         ]
     )
 

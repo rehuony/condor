@@ -38,7 +38,7 @@ async def handle_pool_info(update: Update, context: Context) -> None:
         r"`pancakeswap 0x2...def bsc`"
     )
 
-    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity")]]
+    keyboard = [[InlineKeyboardButton(text="↩️ Cancel", callback_data="dex:liquidity")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "pool_info"

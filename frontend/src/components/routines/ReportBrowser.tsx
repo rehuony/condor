@@ -42,7 +42,6 @@ import {
 import { useViewFacts } from "@/lib/viewFacts";
 import { useServer } from "@/hooks/useServer";
 import { ReportFrame } from "./ReportFrame";
-import { deleteAllRoutineReports } from "./deleteRoutineReports";
 import { RoutinePicker } from "./RoutinePicker";
 import {
   RoutineLibrarySidebar,
@@ -473,17 +472,14 @@ export function ReportBrowser({
     },
   });
 
-  const [deleteAllProgress, setDeleteAllProgress] = useState<{ deleted: number; total: number } | null>(null);
+  // One request: the server deletes the whole set under one index write.
   const deleteAllMutation = useMutation({
-    mutationFn: (source: string) => deleteAllRoutineReports(source, (deleted, total) => setDeleteAllProgress({ deleted, total })),
-    onSuccess: ({ failed }, source) => {
-      if (failed === 0) setConfirmDelete(null);
+    mutationFn: (source: string) => routinesApi.deleteRoutineReports(source),
+    onSuccess: (_, source) => {
+      setConfirmDelete(null);
       if (activeSource === source) setSelectedReportIdx(0);
     },
-    onSettled: (_, _error, source) => {
-      setDeleteAllProgress(null);
-      invalidateReports(source);
-    },
+    onSettled: (_, _error, source) => invalidateReports(source),
   });
   const deleting = deleteMutation.isPending || deleteAllMutation.isPending;
   const closeDeleteDialog = () => {
@@ -494,9 +490,7 @@ export function ReportBrowser({
   };
   const deleteAllError = deleteAllMutation.error
     ? deleteAllMutation.error instanceof Error ? deleteAllMutation.error.message : "Delete failed."
-    : deleteAllMutation.data?.failed
-      ? `Deleted ${deleteAllMutation.data.deleted}; ${deleteAllMutation.data.failed} could not be deleted.`
-      : null;
+    : null;
 
   // Run All state. It acts on every listed routine, so it always asks first.
   const [runAllProgress, setRunAllProgress] = useState<{ current: number; total: number } | null>(null);
@@ -1249,7 +1243,7 @@ export function ReportBrowser({
         <ConfirmDialog
           title={`Delete all ${confirmDelete.total} reports?`}
           confirmLabel="Delete all"
-          pendingLabel={deleteAllProgress ? `Deleting ${deleteAllProgress.deleted} of ${deleteAllProgress.total}…` : "Deleting…"}
+          pendingLabel="Deleting…"
           pending={deleteAllMutation.isPending}
           error={deleteAllError}
           onConfirm={() => deleteAllMutation.mutate(confirmDelete.source)}

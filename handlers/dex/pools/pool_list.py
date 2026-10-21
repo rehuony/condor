@@ -47,7 +47,7 @@ async def handle_pool_list(
         r"`USDC 5`" + "\n"
     )
 
-    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity")]]
+    keyboard = [[InlineKeyboardButton(text="↩️ Cancel", callback_data="dex:liquidity")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "pool_list"

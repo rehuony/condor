@@ -11,6 +11,7 @@ from typing import Any
 
 from hummingbot_api_client import HummingbotAPIClient
 
+from condor.api_pool import limit_pool_keepalive
 from mcp_servers.hummingbot_api.exceptions import MaxConnectionsAttemptError
 from mcp_servers.hummingbot_api.settings import settings
 
@@ -55,6 +56,7 @@ class HummingbotClient:
 
                 # Initialize and test connection
                 await self._client.init()
+                limit_pool_keepalive(self._client)
                 await self._client.accounts.list_accounts()
 
                 self._initialized = True

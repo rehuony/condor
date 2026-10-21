@@ -130,9 +130,7 @@ async def _start_interval(
         f"Created interval schedule {instance_id} for {routine_name}: every {interval_sec}s"
     )
 
-    await update.callback_query.answer(
-        f"⏱️ Scheduled every {_format_schedule(schedule)}"
-    )
+    await update.callback_query.answer(f"⏱️ Scheduled: {_format_schedule(schedule)}")
     await _show_detail(update, context, routine_name)
 
 

@@ -606,7 +606,7 @@ async def prompt_add_wallet_private_key(query, context: Context, chain: str) -> 
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data="gateway_wallet_cancel_add"
+                    text="↩️ Cancel", callback_data="gateway_wallet_cancel_add"
                 )
             ]
         ]

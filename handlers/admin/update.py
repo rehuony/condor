@@ -235,7 +235,7 @@ def _preflight_keyboard(key: str, preflight) -> InlineKeyboardMarkup:
         )
 
     rows.append(
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="admin:update_refresh")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="admin:update_refresh")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

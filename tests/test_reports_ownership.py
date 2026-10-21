@@ -286,3 +286,30 @@ def test_live_report_update_preserves_the_owner(tmp_path, monkeypatch):
 
     report_id = asyncio.run(go())
     assert rep.get_report(report_id)["user_id"] == USER.id
+
+
+def test_deleting_a_routines_reports_takes_one_call_and_unlinks_its_runs(
+    reports_dir,
+):
+    """Bulk delete matches the listing: own reports of that routine only."""
+    from condor.routine_store import get_routine_store
+
+    store = get_routine_store()
+    store._instances["run1"] = {"routine_name": "mine", "report_id": "mine01"}
+    store._instances["run2"] = {"routine_name": "theirs", "report_id": "their1"}
+    try:
+        res = _client(USER).delete("/api/v1/routines/mine/reports")
+        assert res.status_code == 200 and res.json() == {"deleted": 1}
+        ids = {entry["id"] for entry in rep.list_reports(limit=10)[0]}
+        assert ids == {"their1", "legacy"}
+        assert not (reports_dir / "mine.html").exists()
+        assert store._instances["run1"]["report_id"] is None
+        assert store._instances["run2"]["report_id"] == "their1"
+        # Another user's reports are not theirs to delete, by name or otherwise.
+        assert _client(USER).delete("/api/v1/routines/theirs/reports").json() == {
+            "deleted": 0
+        }
+        assert (reports_dir / "theirs.html").exists()
+    finally:
+        store._instances.pop("run1", None)
+        store._instances.pop("run2", None)

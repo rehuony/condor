@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from condor.reports import (
-    delete_report,
+    delete_reports,
     get_report,
     get_report_raw_html,
     hydrate,
@@ -20,6 +20,20 @@ from condor.web.models import ReportsListResponse, ReportSummary, WebUser
 from config_manager import get_config_manager
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+async def remove_reports(**match) -> list[str]:
+    """Delete reports and everything still linked to them; return their ids.
+
+    The one path every report deletion takes, so a routine instance never keeps
+    pointing at a report that is gone.
+    """
+    from condor.routine_store import get_routine_store
+
+    deleted = await delete_reports(**match)
+    if deleted:
+        get_routine_store().forget_reports(deleted)
+    return deleted
 
 
 def _authorized_entry(report_id: str, user: WebUser) -> dict:
@@ -144,6 +158,6 @@ async def delete_report_endpoint(
     report_id: str, user: WebUser = Depends(get_current_user)
 ):
     _authorized_entry(report_id, user)
-    if not await delete_report(report_id):
+    if not await remove_reports(report_ids=[report_id]):
         raise HTTPException(404, "Report not found")
     return {"deleted": True}

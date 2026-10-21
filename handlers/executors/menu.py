@@ -210,7 +210,7 @@ async def show_executors_menu(update: Update, context: Context) -> None:
                     text="📜 History", callback_data="executors:history"
                 ),
                 InlineKeyboardButton(text="🔄 Refresh", callback_data="executors:menu"),
-                InlineKeyboardButton(text="✕ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="🚪 Close", callback_data="executors:close"),
             ]
         )
 
@@ -245,7 +245,7 @@ async def show_executors_menu(update: Update, context: Context) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(text="🔁 Retry", callback_data="executors:menu"),
-                InlineKeyboardButton(text="✕ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="🚪 Close", callback_data="executors:close"),
             ]
         ]
 
@@ -833,7 +833,7 @@ async def handle_stop_executor(
                 callback_data=f"executors:confirm_stop:{executor_id}",
             ),
             InlineKeyboardButton(
-                text="✕ Cancel", callback_data=f"executors:detail:{executor_id}"
+                text="↩️ Cancel", callback_data=f"executors:detail:{executor_id}"
             ),
         ],
     ]

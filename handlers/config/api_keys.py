@@ -116,7 +116,7 @@ async def show_api_keys(query, context: Context) -> None:
         if not servers:
             message_text = format_server_selection_needed()
             keyboard = [
-                [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
+                [InlineKeyboardButton(text="🚪 Close", callback_data="config_close")]
             ]
         else:
             chat_id = query.message.chat.id
@@ -132,7 +132,11 @@ async def show_api_keys(query, context: Context) -> None:
                     header + "⚠️ _Server is offline\\. Cannot show API keys\\._"
                 )
                 keyboard = [
-                    [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
+                    [
+                        InlineKeyboardButton(
+                            text="🚪 Close", callback_data="config_close"
+                        )
+                    ]
                 ]
             else:
                 client = await get_config_manager().get_client_for_chat(
@@ -187,7 +191,11 @@ async def show_api_keys(query, context: Context) -> None:
 
                 message_text = header + creds_display + web_hint
                 keyboard.append(
-                    [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
+                    [
+                        InlineKeyboardButton(
+                            text="🚪 Close", callback_data="config_close"
+                        )
+                    ]
                 )
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -206,7 +214,7 @@ async def show_api_keys(query, context: Context) -> None:
         logger.error(f"Error showing API keys: {e}", exc_info=True)
         error_text = f"❌ Error loading API keys: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
+            [InlineKeyboardButton(text="🚪 Close", callback_data="config_close")]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(

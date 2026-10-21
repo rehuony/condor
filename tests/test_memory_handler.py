@@ -92,3 +92,26 @@ def test_del_map_indexes_match_buttons_across_stores(memory_root):
         assert idx in del_map
         agent_slug, name = del_map[idx]
         assert MemoryStore(user_id, agent_slug).read(name) is not None
+
+
+def test_view_groups_by_type_and_numbers_match_delete_buttons(memory_root):
+    from tests.support.markdown_v2 import assert_valid, plain
+
+    user_id = 5
+    store = MemoryStore(user_id)
+    for name, kind in (("likes_short", "preference"), ("on_binance", "fact")):
+        store.write(
+            name=name,
+            content="x",
+            description=f"about {name}",
+            type=kind,
+            source="chat",
+        )
+    text, keyboard = _build_view(user_id, _fake_context())
+    assert_valid(text)
+    seen = plain(text)
+    # Preferences come before facts, each entry numbered once.
+    assert seen.index("Preferences") < seen.index("1. likesshort")
+    assert seen.index("Facts") < seen.index("2. onbinance")
+    labels = [b.text for b in _all_buttons(keyboard)]
+    assert labels[:2] == ["🗑 1 · likes_short", "🗑 2 · on_binance"]

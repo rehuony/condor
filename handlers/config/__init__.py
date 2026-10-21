@@ -33,7 +33,7 @@ def _get_start_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="👑 Admin", callback_data="start:admin")]
         )
     keyboard.append(
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="start:cancel")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="start:cancel")]
     )
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

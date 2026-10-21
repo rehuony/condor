@@ -145,7 +145,7 @@ async def _show_pmm_wizard_leverage_step(update: Update, context: Context) -> No
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:pair"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -199,7 +199,7 @@ async def _show_pmm_wizard_allocation_step(update: Update, context: Context) -> 
             InlineKeyboardButton(
                 text="« Back", callback_data=f"bots:pmm_back:{back_target}"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -331,7 +331,7 @@ async def _show_pmm_wizard_amount_step(update: Update, context: Context) -> None
             InlineKeyboardButton(
                 text="« Back", callback_data="bots:pmm_back:allocation"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -400,7 +400,7 @@ async def _show_pmm_wizard_spreads_step(update: Update, context: Context) -> Non
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:amount"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -448,7 +448,7 @@ async def _show_pmm_wizard_spreads_step_msg(
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:amount"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -493,7 +493,7 @@ async def _show_pmm_wizard_amount_step_msg(
             InlineKeyboardButton(
                 text="« Back", callback_data="bots:pmm_back:allocation"
             ),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -546,7 +546,7 @@ async def _show_pmm_wizard_tp_step(update: Update, context: Context) -> None:
         ],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:spreads"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -664,7 +664,7 @@ async def _show_pmm_wizard_review_step(update: Update, context: Context) -> None
         [InlineKeyboardButton(text="✅ Save Config", callback_data="bots:pmm_save")],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:tp"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -713,7 +713,7 @@ async def handle_pmm_edit_id(update: Update, context: Context) -> None:
     context.user_data["pmm_wizard_step"] = "edit_id"
 
     keyboard = [
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:pmm_review_back")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:pmm_review_back")]
     ]
     await query.message.edit_text(
         r"*Edit Config ID*" + "\n\n"
@@ -732,7 +732,7 @@ async def handle_pmm_edit_field(update: Update, context: Context, field: str) ->
     context.user_data["pmm_wizard_step"] = f"edit_{field}"
 
     keyboard = [
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:pmm_review_back")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:pmm_review_back")]
     ]
 
     if field == "leverage":
@@ -762,7 +762,7 @@ async def handle_pmm_edit_field(update: Update, context: Context, field: str) ->
             ],
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data="bots:pmm_review_back"
+                    text="↩️ Cancel", callback_data="bots:pmm_review_back"
                 )
             ],
         ]
@@ -798,7 +798,7 @@ async def handle_pmm_edit_field(update: Update, context: Context, field: str) ->
             ],
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data="bots:pmm_review_back"
+                    text="↩️ Cancel", callback_data="bots:pmm_review_back"
                 )
             ],
         ]
@@ -831,7 +831,7 @@ async def handle_pmm_edit_field(update: Update, context: Context, field: str) ->
             ],
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data="bots:pmm_review_back"
+                    text="↩️ Cancel", callback_data="bots:pmm_review_back"
                 )
             ],
         ]
@@ -870,7 +870,7 @@ async def handle_pmm_edit_field(update: Update, context: Context, field: str) ->
             ],
             [
                 InlineKeyboardButton(
-                    text="✕ Cancel", callback_data="bots:pmm_review_back"
+                    text="↩️ Cancel", callback_data="bots:pmm_review_back"
                 )
             ],
         ]
@@ -991,7 +991,7 @@ async def handle_pmm_adv_setting(
     label, current, hint = hints.get(setting, (setting, "", ""))
 
     keyboard = [
-        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:pmm_edit_advanced")]
+        [InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:pmm_edit_advanced")]
     ]
     await query.message.edit_text(
         f"*Edit {escape_markdown_v2(label)}*" + "\n\n"
@@ -1042,7 +1042,7 @@ async def handle_pmm_pair_select(
             ],
             [
                 InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:pair"),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
             ],
         ]
         await context.bot.edit_message_text(
@@ -1074,7 +1074,7 @@ async def handle_pmm_pair_select(
             ],
             [
                 InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:pair"),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
             ],
         ]
         await context.bot.edit_message_text(
@@ -1170,7 +1170,7 @@ async def process_pmm_wizard_input(
                         text="« Back", callback_data="bots:pmm_back:pair"
                     ),
                     InlineKeyboardButton(
-                        text="✕ Cancel", callback_data="bots:main_menu"
+                        text="↩️ Cancel", callback_data="bots:main_menu"
                     ),
                 ],
             ]
@@ -1218,7 +1218,7 @@ async def process_pmm_wizard_input(
                         text="« Back", callback_data="bots:pmm_back:pair"
                     ),
                     InlineKeyboardButton(
-                        text="✕ Cancel", callback_data="bots:main_menu"
+                        text="↩️ Cancel", callback_data="bots:main_menu"
                     ),
                 ],
             ]
@@ -1279,7 +1279,7 @@ async def process_pmm_wizard_input(
                         text="« Back", callback_data=f"bots:pmm_back:{back_target}"
                     ),
                     InlineKeyboardButton(
-                        text="✕ Cancel", callback_data="bots:main_menu"
+                        text="↩️ Cancel", callback_data="bots:main_menu"
                     ),
                 ],
             ]
@@ -1337,7 +1337,7 @@ async def process_pmm_wizard_input(
                         text="« Back", callback_data="bots:pmm_back:allocation"
                     ),
                     InlineKeyboardButton(
-                        text="✕ Cancel", callback_data="bots:main_menu"
+                        text="↩️ Cancel", callback_data="bots:main_menu"
                     ),
                 ],
             ]
@@ -1378,7 +1378,7 @@ async def process_pmm_wizard_input(
                 InlineKeyboardButton(
                     text="« Back", callback_data="bots:pmm_back:spreads"
                 ),
-                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
             ],
         ]
         await context.bot.edit_message_text(
@@ -1648,7 +1648,7 @@ async def _pmm_show_review(context, chat_id, message_id, config):
         [InlineKeyboardButton(text="✅ Save Config", callback_data="bots:pmm_save")],
         [
             InlineKeyboardButton(text="« Back", callback_data="bots:pmm_back:tp"),
-            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="↩️ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
