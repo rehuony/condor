@@ -8,11 +8,29 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 
 from .availability import _reclaim_default_agent, set_active_llm
 from .session import destroy_session
 
 log = logging.getLogger(__name__)
+
+_EXPIRED = ui.notice("stale", "Selection expired", "Reopen the picker via Change LLM.")
+_CANCELLED = ui.notice("cancelled", "Cancelled", "Use /agent to continue.")
+
+
+def _model_rows(model) -> list[str]:
+    """Slug and pricing as bullet rows, for the confirm and result screens."""
+    rows = [ui.bullet("Slug", model.slug, code_value=True)]
+    if model.prompt_price or model.completion_price:
+        rows.append(
+            ui.bullet(
+                "Pricing",
+                f"${model.prompt_price:.2f}/M input, "
+                f"${model.completion_price:.2f}/M output",
+            )
+        )
+    return rows
 
 
 async def _handle_openrouter_picker(
@@ -33,18 +51,28 @@ async def _handle_openrouter_picker(
     # (condor/web/routes/chat_ws.py). The key is only needed to RUN a model; that
     # is enforced with a clear error at session start (pydantic_ai_client.py).
     if page == 0:
-        await query.message.edit_text("Loading OpenRouter models...")
+        await query.message.edit_text(
+            "⏳ " + ui.esc("Loading OpenRouter models…"), parse_mode="MarkdownV2"
+        )
 
     try:
         models = await fetch_models()
     except Exception as e:
         log.exception("Failed to fetch OpenRouter models")
-        await query.message.edit_text(f"Failed to fetch OpenRouter models: {e}")
+        await query.message.edit_text(
+            ui.notice("error", "Could not load OpenRouter models", str(e)),
+            parse_mode="MarkdownV2",
+        )
         return
 
     if not models:
         await query.message.edit_text(
-            "No OpenRouter models available. Check your network or try again later."
+            ui.notice(
+                "warning",
+                "No OpenRouter models available",
+                "Check your network or try again later.",
+            ),
+            parse_mode="MarkdownV2",
         )
         return
 
@@ -61,7 +89,11 @@ async def _handle_openrouter_picker(
 
     keyboard = _openrouter_picker_keyboard(models, page=page, current_slug=current_slug)
     await query.message.edit_text(
-        f"Select an OpenRouter model ({len(models)} with tool-calling support):",
+        ui.screen(
+            ui.title("🧭", "OpenRouter", f"{len(models)} models with tool calling"),
+            ui.hint("Select the model for new sessions."),
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=keyboard,
     )
 
@@ -71,9 +103,7 @@ async def _handle_openrouter_pick(update: Update, context: Context, idx: int) ->
     query = update.callback_query
     models = context.user_data.get("_openrouter_models") or []
     if not models or idx < 0 or idx >= len(models):
-        await query.message.edit_text(
-            "Selection expired. Reopen the picker via Change LLM."
-        )
+        await query.message.edit_text(_EXPIRED, parse_mode="MarkdownV2")
         return
 
     model = models[idx]
@@ -84,17 +114,13 @@ async def _handle_openrouter_pick(update: Update, context: Context, idx: int) ->
     # Destroy existing session so the next interaction uses the new LLM
     await destroy_session(update.effective_chat.id)
 
-    pricing = ""
-    if model.prompt_price or model.completion_price:
-        pricing = (
-            f"\nPricing: ${model.prompt_price:.2f}/M input, "
-            f"${model.completion_price:.2f}/M output"
-        )
-
     await query.message.edit_text(
-        f"LLM set to OpenRouter — {model.name}.\n"
-        f"Slug: {model.slug}{pricing}\n\n"
-        "New sessions will use this model. Use /agent to continue."
+        ui.screen(
+            f"✅ {ui.bold(f'LLM set to OpenRouter — {model.name}')}",
+            _model_rows(model),
+            ui.hint("New sessions will use this model. Use /agent to continue."),
+        ),
+        parse_mode="MarkdownV2",
     )
 
 
@@ -105,9 +131,12 @@ async def _handle_openrouter_type_prompt(update: Update, context: Context) -> No
     query = update.callback_query
     context.user_data["_openrouter_typing_slug"] = True
     await query.message.edit_text(
-        "Send the OpenRouter model slug as a message.\n"
-        "Example: anthropic/claude-sonnet-4.5\n\n"
-        "Send /cancel, or tap Cancel, to abort.",
+        ui.prompt(
+            "Enter OpenRouter model",
+            "Send the exact model slug as a message.",
+            "anthropic/claude-sonnet-4.5",
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=_openrouter_input_keyboard(),
     )
 
@@ -121,15 +150,18 @@ async def _resolve_openrouter_typed_slug(
     from .menu import _openrouter_input_keyboard
 
     slug = text.strip()
-    if slug.lower() in ("/cancel", "cancel"):
-        await update.message.answer("Cancelled. Use /agent to continue.")
+    if slug.lower() == "cancel":
+        await update.message.answer(_CANCELLED, parse_mode="MarkdownV2")
         return
 
     try:
         models = await fetch_models()
     except Exception as e:
         log.exception("Failed to fetch OpenRouter models")
-        await update.message.answer(f"Failed to fetch OpenRouter models: {e}")
+        await update.message.answer(
+            ui.notice("error", "Could not load OpenRouter models", str(e)),
+            parse_mode="MarkdownV2",
+        )
         return
 
     model = find_model_by_slug(models, slug)
@@ -139,36 +171,37 @@ async def _resolve_openrouter_typed_slug(
         # "that isn't a model either" with no visible way out.
         context.user_data["_openrouter_typing_slug"] = True
         await update.message.answer(
-            f"No tool-calling OpenRouter model matches '{slug}'.\n"
-            "The slug must be exact (e.g. anthropic/claude-sonnet-4.5).\n"
-            "Try again, send /cancel, or tap Cancel.",
+            ui.screen(
+                ui.notice(
+                    "warning",
+                    "No matching model",
+                    f"No tool-calling OpenRouter model matches '{slug}'. The slug "
+                    "must be exact, for example anthropic/claude-sonnet-4.5.",
+                ),
+                ui.CANCEL_HINT,
+            ),
+            parse_mode="MarkdownV2",
             reply_markup=_openrouter_input_keyboard(),
         )
         return
 
     context.user_data["_openrouter_typed_slug"] = model.slug
 
-    pricing = ""
-    if model.prompt_price or model.completion_price:
-        pricing = (
-            f"\nPricing: ${model.prompt_price:.2f}/M input, "
-            f"${model.completion_price:.2f}/M output"
-        )
-
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Use This Model", callback_data="agent:or_type_confirm"
+                    text="✅ Use This Model", callback_data="agent:or_type_confirm"
                 ),
-                InlineKeyboardButton(
-                    text="Cancel", callback_data="agent:or_type_cancel"
-                ),
+                ui.cancel_button("agent:or_type_cancel"),
             ]
         ]
     )
     await update.message.answer(
-        f"Use OpenRouter — {model.name}?\nSlug: {model.slug}{pricing}",
+        ui.screen(
+            ui.title("🧭", f"Use OpenRouter — {model.name}?"), _model_rows(model)
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=keyboard,
     )
 
@@ -178,9 +211,7 @@ async def _handle_openrouter_type_confirm(update: Update, context: Context) -> N
     query = update.callback_query
     slug = context.user_data.pop("_openrouter_typed_slug", None)
     if not slug:
-        await query.message.edit_text(
-            "Selection expired. Reopen the picker via Change LLM."
-        )
+        await query.message.edit_text(_EXPIRED, parse_mode="MarkdownV2")
         return
 
     set_active_llm(context, f"openrouter:{slug}")
@@ -190,8 +221,12 @@ async def _handle_openrouter_type_confirm(update: Update, context: Context) -> N
     await destroy_session(update.effective_chat.id)
 
     await query.message.edit_text(
-        f"LLM set to OpenRouter — {slug}.\n\n"
-        "New sessions will use this model. Use /agent to continue."
+        ui.notice(
+            "success",
+            f"LLM set to OpenRouter — {slug}",
+            "New sessions will use this model. Use /agent to continue.",
+        ),
+        parse_mode="MarkdownV2",
     )
 
 
@@ -199,4 +234,4 @@ async def _handle_openrouter_type_cancel(update: Update, context: Context) -> No
     """Discard the typed slug without changing the active LLM."""
     query = update.callback_query
     context.user_data.pop("_openrouter_typed_slug", None)
-    await query.message.edit_text("Cancelled. Use /agent to continue.")
+    await query.message.edit_text(_CANCELLED, parse_mode="MarkdownV2")

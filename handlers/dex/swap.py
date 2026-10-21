@@ -31,6 +31,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_compact_number,
@@ -449,8 +450,11 @@ def _build_swap_keyboard(params: dict) -> list:
             ),
         ],
         [
+            ui.action_button("quick", "Quick Swap", "dex:swap_quick"),
+        ],
+        [
             InlineKeyboardButton(text="📋 Quote", callback_data="dex:swap_get_quote"),
-            InlineKeyboardButton(text="🔍 History", callback_data="dex:swap_history"),
+            InlineKeyboardButton(text="📜 History", callback_data="dex:swap_history"),
             InlineKeyboardButton(text="✕ Close", callback_data="dex:close"),
         ],
     ]
@@ -473,7 +477,7 @@ def _build_swap_menu_text(
     help_text = r"💱 *Swap*" + "\n\n"
 
     # Show wallet balances from cache
-    help_text += r"━━━ Balance ━━━" + "\n"
+    help_text += r"*Balance*" + "\n"
     try:
         gateway_data = get_cached(user_data, "gateway_balances", ttl=120)
         # Filter by enabled networks
@@ -527,7 +531,7 @@ def _build_swap_menu_text(
 
     # Show quote result if available
     if quote_result:
-        help_text += r"━━━ Quote ━━━" + "\n"
+        help_text += r"*Quote*" + "\n"
         amount_requested = quote_result.get("amount", params.get("amount", "1"))
 
         buy_price = None
@@ -557,22 +561,17 @@ def _build_swap_menu_text(
 
         help_text += "\n"
 
-    # Type directly hint
-    help_text += r"━━━ Quick Trade ━━━" + "\n"
-    help_text += r"⌨️ `pair side amount [slippage]`" + "\n"
-    example_pair = escape_markdown_v2(params.get("trading_pair", "SOL-USDC"))
-    example_side = params.get("side", "BUY")
-    example_amount = escape_markdown_v2(str(params.get("amount", "1.0")))
-    help_text += f"*Ex:* `{example_pair} {example_side} {example_amount}`\n\n"
+    help_text += ui.hint("Tap ⌨️ Quick Swap to set pair, side and amount at once.")
+    help_text += "\n\n"
 
     # Show recent swaps (compact format), or why they could not be loaded
     swaps = get_cached(user_data, "recent_swaps", ttl=60)
     if swaps:
-        help_text += r"━━━ Recent ━━━" + "\n"
+        help_text += r"*Recent*" + "\n"
         for swap in swaps[:5]:
             help_text += _format_compact_swap_line(swap) + "\n"
     elif user_data.get("recent_swaps_error"):
-        help_text += r"━━━ Recent ━━━" + "\n"
+        help_text += r"*Recent*" + "\n"
         help_text += "⚠️ " + escape_markdown_v2(user_data["recent_swaps_error"]) + "\n"
 
     return help_text
@@ -658,6 +657,7 @@ async def show_swap_menu(
     if message:
         context.user_data["swap_menu_message_id"] = message.message_id
         context.user_data["swap_menu_chat_id"] = message.chat.id
+        ui.remember_menu(context.user_data, "dex_swap", message.message_id)
 
     # Launch background fetch if needed (balances missing or quotes needed)
     if message:
@@ -1134,6 +1134,10 @@ async def handle_swap_get_quote(update: Update, context: Context) -> None:
 
 async def handle_swap_execute_confirm(update: Update, context: Context) -> None:
     """Execute the swap with current parameters"""
+    query = update.callback_query
+    if not ui.is_current_menu(context.user_data, "dex_swap", query.message):
+        await ui.refuse_stale_menu(query, "dex:swap")
+        return
     try:
         params = context.user_data.get("swap_params", {})
 
@@ -1284,7 +1288,7 @@ async def handle_swap_status(update: Update, context: Context) -> None:
         r"`<tx_hash>`"
     )
 
-    keyboard = [[InlineKeyboardButton(text="« Cancel", callback_data="dex:swap")]]
+    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:swap")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "swap_status"
@@ -1456,7 +1460,7 @@ async def handle_swap_history(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        text="🔄 Clear Filters", callback_data="dex:swap_hist_clear"
+                        text="🧹 Clear Filters", callback_data="dex:swap_hist_clear"
                     )
                 ]
             )
@@ -1518,7 +1522,7 @@ async def handle_swap_history(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="🔄 Clear Filters", callback_data="dex:swap_hist_clear"
+                    text="🧹 Clear Filters", callback_data="dex:swap_hist_clear"
                 ),
                 InlineKeyboardButton(text="« Back", callback_data="dex:swap_refresh"),
             ]
@@ -1655,9 +1659,12 @@ async def process_swap(update: Update, context: Context, user_input: str) -> Non
         side = parts[1].upper()
         amount = parts[2]
 
-        # Get connector/network from defaults
-        network = DEFAULT_DEX_NETWORK
-        connector = get_dex_connector(context.user_data, network)
+        # Keep the network and connector the open swap menu shows
+        current = context.user_data.get("swap_params", {})
+        network = current.get("network") or DEFAULT_DEX_NETWORK
+        connector = current.get("connector") or get_dex_connector(
+            context.user_data, network
+        )
 
         # Update params. Slippage stays unset unless typed — the connector's setting applies.
         swap_params = {
@@ -1678,9 +1685,40 @@ async def process_swap(update: Update, context: Context, user_input: str) -> Non
         await show_swap_menu(update, context, send_new=True)
 
     except Exception as e:
+        # The Quick Swap prompt stays armed so a corrected line can follow.
         logger.error(f"Error processing swap input: {e}", exc_info=True)
         error_message = format_error_message(f"Invalid input: {str(e)}")
-        await update.message.answer(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(
+            error_message + "\n\n" + ui.CANCEL_HINT, parse_mode="MarkdownV2"
+        )
+
+
+async def handle_swap_quick(update: Update, context: Context) -> None:
+    """Arm one Quick Swap line; the swap menu itself never captures text."""
+    params = context.user_data.get("swap_params", {})
+    example = " ".join(
+        str(params.get(key, default))
+        for key, default in (
+            ("trading_pair", "SOL-USDC"),
+            ("side", "BUY"),
+            ("amount", "1.0"),
+        )
+    )
+    text = ui.prompt(
+        "Quick Swap",
+        ui.screen(
+            ui.esc("Send pair, side and amount in one line. Nothing executes yet."),
+            [ui.bullet("Format", "pair side amount [slippage]", code_value=True)],
+        ),
+        example,
+        raw=True,
+    )
+    context.user_data["dex_state"] = "swap_quick"
+    await update.callback_query.message.edit_text(
+        text,
+        parse_mode="MarkdownV2",
+        reply_markup=ui.keyboard([ui.cancel_button("dex:swap")]),
+    )
 
 
 async def process_swap_set_pair(

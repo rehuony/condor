@@ -18,6 +18,7 @@ from condor.runtime.confirmations import (
     ConfirmationStatus,
     build_permission_callback,
 )
+from tests.support.markdown_v2 import plain
 from tests.support.runtime_sessions import install_session
 
 # A tool the danger heuristic flags, and one it does not.
@@ -416,7 +417,7 @@ def test_confirmation_names_the_agent_and_server(registry, monkeypatch):
         str(key), 1, "buy", DANGEROUS, OPTIONS, origin=pending.origin
     )
     asyncio.run(TelegramChannel(_Bot(), 42).deliver(pending))
-    assert "Executor Manager on hb-prod" in sent["text"]
+    assert "Executor Manager on hb-prod" in plain(sent["text"])
 
 
 def test_request_cancellation_denies_only_its_approvals_and_rejects_late_requests(

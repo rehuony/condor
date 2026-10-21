@@ -99,7 +99,12 @@ async def _handle_agent_argument(update: Update, context: Context, arg: str) -> 
     """
     slug, label, error = _resolve_agent_argument(arg)
     if error:
-        await update.message.answer(error)
+        from utils.telegram_ui import notice
+
+        await update.message.answer(
+            notice("warning", "Could not pick an agent", error),
+            parse_mode="MarkdownV2",
+        )
         return
 
     await _raise_agent(update, context, slug, label)

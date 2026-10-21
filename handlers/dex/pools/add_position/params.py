@@ -11,6 +11,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_compact_number,
@@ -20,6 +21,51 @@ from utils.telegram_formatters import (
 from ..add_position.range_math import _validate_bin_range
 
 logger = logging.getLogger(__name__)
+
+
+QUICK_EDIT_PROMPT_KEY = "add_position_prompt_msg_id"
+
+
+async def handle_pos_quick_edit(update: Update, context: Context) -> None:
+    """Arm range/amount edits as typed text; the menu itself never captures it."""
+    text = ui.prompt(
+        "Quick Edit",
+        ui.screen(
+            ui.esc("Send one or more fields. Percentages are relative to the price."),
+            [
+                ui.bullet("L", "lower price or -5%"),
+                ui.bullet("U", "upper price or 5%"),
+                ui.bullet("B", "base amount or 10%"),
+                ui.bullet("Q", "quote amount or 10%"),
+            ],
+        ),
+        "L:-5% U:5% B:10% Q:10%",
+        raw=True,
+    )
+    context.user_data["dex_state"] = "add_position_quick"
+    sent = await update.callback_query.message.answer(
+        text,
+        parse_mode="MarkdownV2",
+        reply_markup=ui.keyboard([ui.cancel_button("dex:pos_quick_cancel")]),
+    )
+    context.user_data[QUICK_EDIT_PROMPT_KEY] = sent.message_id
+
+
+async def close_quick_edit_prompt(context: Context, chat_id: int) -> None:
+    """Remove the Quick Edit prompt once it is answered or cancelled."""
+    message_id = context.user_data.pop(QUICK_EDIT_PROMPT_KEY, None)
+    if message_id is None:
+        return
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        logger.debug(f"Could not delete quick edit prompt: {e}")
+
+
+async def handle_pos_quick_cancel(update: Update, context: Context) -> None:
+    if context.user_data.get("dex_state") == "add_position_quick":
+        context.user_data["dex_state"] = "add_position"
+    await close_quick_edit_prompt(context, update.effective_chat.id)
 
 
 async def handle_pos_set_connector(update: Update, context: Context) -> None:

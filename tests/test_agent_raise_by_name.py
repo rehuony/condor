@@ -17,6 +17,7 @@ from condor.preferences import get_chat_binding
 from handlers import agents as agents_mod
 from handlers.agents import menu as menu_mod
 from tests.conftest import patch_agents
+from tests.support.markdown_v2 import plain
 
 # --- doubles -----------------------------------------------------------------
 
@@ -58,12 +59,12 @@ class _Message:
         self.keyboards: list = []
 
     async def edit_text(self, text, **kw):
-        self._rendered.append(text)
+        self._rendered.append(plain(text))
         self.keyboards.append(kw.get("reply_markup"))
         return self
 
     async def answer(self, text, **kw):
-        self._rendered.append(text)
+        self._rendered.append(plain(text))
         self.keyboards.append(kw.get("reply_markup"))
         return self
 
@@ -212,7 +213,7 @@ def test_slash_agent_with_a_name_raises_that_specialist(monkeypatch):
     assert creates[-1]["agent_key"] == ""
     assert get_chat_binding(ctx.user_data).get("agent_slug") == "orca_lp_expert"
     # With nothing running the verb is "Starting", not "Switching to".
-    assert any(r.startswith("Starting Orca LP Expert") for r in rendered)
+    assert any("Starting Orca LP Expert" in r for r in rendered)
     assert any("Now talking to Orca LP Expert" in r for r in rendered)
 
 
@@ -227,7 +228,7 @@ def test_slash_agent_with_a_name_switches_a_live_session(monkeypatch):
     assert creates[-1]["agent_slug"] == "orca_lp_expert"
     # The conversation is carried across the reap, as through the picker.
     assert creates[-1]["conversation_id"] == "c1"
-    assert any(r.startswith("Switching to Orca LP Expert") for r in rendered)
+    assert any("Switching to Orca LP Expert" in r for r in rendered)
 
 
 def test_a_bad_name_spawns_nothing(monkeypatch):
@@ -276,5 +277,5 @@ def test_picking_from_the_no_session_menu_raises_the_agent(monkeypatch):
     assert creates[-1]["agent_slug"] == "orca_lp_expert"
     # Nothing to carry: a raise from cold starts a fresh conversation.
     assert creates[-1]["conversation_id"] == ""
-    assert any(r.startswith("Starting Orca LP Expert") for r in rendered)
+    assert any("Starting Orca LP Expert" in r for r in rendered)
     assert not any("carried over" in r for r in rendered)

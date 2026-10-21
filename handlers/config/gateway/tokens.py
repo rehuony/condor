@@ -11,6 +11,8 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
+from utils.telegram_formatters import format_error_message
 from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import (
@@ -358,14 +360,14 @@ async def show_network_tokens(
                 if page > 0:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            text="« Prev",
+                            text="‹ Prev",
                             callback_data=f"gateway_token_page_{page - 1}",
                         )
                     )
                 if page < total_pages - 1:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            text="Next »",
+                            text="Next ›",
                             callback_data=f"gateway_token_page_{page + 1}",
                         )
                     )
@@ -438,7 +440,7 @@ async def prompt_add_token(query, context: Context, network_id: str) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="« Cancel", callback_data=f"gateway_token_view_{network_id}"
+                    text="✕ Cancel", callback_data=f"gateway_token_view_{network_id}"
                 )
             ]
         ]
@@ -644,7 +646,7 @@ async def prompt_edit_token(query, context: Context, token_idx: int) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="« Cancel", callback_data=f"gateway_token_select_{token_idx}"
+                    text="✕ Cancel", callback_data=f"gateway_token_select_{token_idx}"
                 )
             ]
         ]
@@ -729,7 +731,7 @@ async def show_delete_token_confirmation(
             ],
             [
                 InlineKeyboardButton(
-                    text="❌ Cancel", callback_data=f"gateway_token_view_{network_id}"
+                    text="✕ Cancel", callback_data=f"gateway_token_view_{network_id}"
                 )
             ],
         ]
@@ -898,14 +900,20 @@ async def handle_token_input(update: Update, context: Context) -> None:
                     logger.warning(f"Failed to fetch token from GeckoTerminal: {e}")
                     await context.bot.send_message(
                         chat_id=chat_id,
-                        text=f"❌ Could not fetch token details. Please use full format:\naddress,symbol,decimals,name",
+                        text=format_error_message(
+                            f"Could not fetch token details. Please use full format:\naddress,symbol,decimals,name"
+                        ),
+                        parse_mode="MarkdownV2",
                     )
                     return
 
             elif len(parts) < 3:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="❌ Invalid format. Use: address,symbol,decimals,name\nOr just paste the token address.",
+                    text=format_error_message(
+                        "Invalid format. Use: address,symbol,decimals,name\nOr just paste the token address."
+                    ),
+                    parse_mode="MarkdownV2",
                 )
                 return
             else:
@@ -970,7 +978,7 @@ async def handle_token_input(update: Update, context: Context) -> None:
 
             except Exception as e:
                 logger.error(f"Error adding token: {e}", exc_info=True)
-                error_text = f"❌ Error adding token: {escape_markdown_v2(str(e))}"
+                error_text = ui.notice("error", "Could not add the token", str(e))
                 if message_id and chat_id:
                     await context.bot.edit_message_text(
                         chat_id=chat_id,
@@ -1008,7 +1016,11 @@ async def handle_token_input(update: Update, context: Context) -> None:
 
             if len(parts) < 2:
                 await context.bot.send_message(
-                    chat_id=chat_id, text="❌ Invalid format. Use: symbol,decimals,name"
+                    chat_id=chat_id,
+                    text=format_error_message(
+                        "Invalid format. Use: symbol,decimals,name"
+                    ),
+                    parse_mode="MarkdownV2",
                 )
                 return
 

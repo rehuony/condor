@@ -121,8 +121,8 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
     scanner.ReportBuilder.assert_called_once_with("Trend Watch · Binance Perp")
     if send:
         assert publish.await_count == 3
-        assert "出卡 2 张" in result.text
-        assert "同一根触发 K 线已发过卡" in result.text
+        assert "Result: 2 cards" in result.text
+        assert "a card was already sent for this trigger bar" in result.text
         assert publish.await_args.kwargs["owner_id"] == 7
         assert publish.await_args.kwargs["chat_id"] == -100
         assert publish.await_args.kwargs["server_name"] == "pinned-server"
@@ -134,5 +134,5 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
     else:
         publish.assert_not_awaited()
         assert render.call_count == 3
-        assert "出卡 3 张" in result.text
+        assert "Result: 3 cards" in result.text
         assert len(list(tmp_path.rglob("*.png"))) == 3

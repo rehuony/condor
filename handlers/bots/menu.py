@@ -21,6 +21,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_active_bots,
@@ -92,7 +93,7 @@ def _build_main_menu_keyboard(bots_dict: Dict[str, Any]) -> InlineKeyboardMarkup
     keyboard.append(
         [
             InlineKeyboardButton(text="🔄 Refresh", callback_data="bots:refresh"),
-            InlineKeyboardButton(text="❌ Close", callback_data="bots:close"),
+            InlineKeyboardButton(text="✕ Close", callback_data="bots:close"),
         ]
     )
 
@@ -182,7 +183,7 @@ async def show_bots_menu(update: Update, context: Context) -> None:
         reply_markup = _build_main_menu_keyboard(bots_dict)
 
         # Add header with server indicator
-        header = f"*Bots Dashboard* \\| _Server: {escape_markdown_v2(server_name)} {status_emoji}_\n\n"
+        header = f"🤖 *Bots Dashboard*\n_Server: {escape_markdown_v2(server_name)} {status_emoji}_\n\n"
         full_message = header + status_message
 
         if query:
@@ -293,7 +294,7 @@ async def show_bot_detail(update: Update, context: Context, bot_name: str) -> No
                 uptime_str = f" ⏱️ {uptime}"
 
         lines = [
-            f"*Bot Details*",
+            f"🤖 *Bot Details*",
             "",
             f"{status_emoji} `{escape_markdown_v2(display_name)}`{uptime_str}",
         ]
@@ -529,7 +530,7 @@ async def show_bot_detail(update: Update, context: Context, bot_name: str) -> No
 
         keyboard.append(
             [
-                InlineKeyboardButton(text="⬅️ Back", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="« Back", callback_data="bots:main_menu"),
                 InlineKeyboardButton(
                     text="🔄 Refresh", callback_data="bots:refresh_bot"
                 ),
@@ -573,7 +574,7 @@ async def show_bot_detail(update: Update, context: Context, bot_name: str) -> No
         logger.error(f"Error showing bot detail: {e}", exc_info=True)
         error_message = format_error_message(f"Failed to fetch bot status: {str(e)}")
         keyboard = [
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:main_menu")]
+            [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
         ]
         try:
             if getattr(query.message, "photo", None):
@@ -860,7 +861,7 @@ async def show_controller_detail(
 
     keyboard.append(
         [
-            InlineKeyboardButton(text="⬅️ Back", callback_data="bots:back_to_bot"),
+            InlineKeyboardButton(text="« Back", callback_data="bots:back_to_bot"),
             InlineKeyboardButton(
                 text="🔄 Refresh", callback_data=f"bots:refresh_ctrl:{controller_idx}"
             ),
@@ -908,7 +909,7 @@ async def handle_stop_controller(update: Update, context: Context) -> None:
                 text="✅ Yes, Stop", callback_data="bots:confirm_stop_ctrl"
             ),
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="✕ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             ),
         ],
     ]
@@ -974,7 +975,7 @@ async def handle_confirm_stop_controller(update: Update, context: Context) -> No
                     text="▶️ Restart", callback_data="bots:start_ctrl"
                 ),
                 InlineKeyboardButton(
-                    text="⬅️ Back to Bot", callback_data="bots:back_to_bot"
+                    text="« Back to Bot", callback_data="bots:back_to_bot"
                 ),
             ]
         ]
@@ -990,7 +991,7 @@ async def handle_confirm_stop_controller(update: Update, context: Context) -> No
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                    text="« Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                 )
             ]
         ]
@@ -1022,7 +1023,7 @@ async def handle_start_controller(update: Update, context: Context) -> None:
                 text="✅ Yes, Start", callback_data="bots:confirm_start_ctrl"
             ),
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="✕ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             ),
         ],
     ]
@@ -1085,7 +1086,7 @@ async def handle_confirm_start_controller(update: Update, context: Context) -> N
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="⬅️ Back to Bot", callback_data="bots:back_to_bot"
+                    text="« Back to Bot", callback_data="bots:back_to_bot"
                 )
             ]
         ]
@@ -1101,7 +1102,7 @@ async def handle_confirm_start_controller(update: Update, context: Context) -> N
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                    text="« Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                 )
             ]
         ]
@@ -1316,7 +1317,7 @@ async def show_controller_chart(update: Update, context: Context) -> None:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                        text="« Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                     ),
                     InlineKeyboardButton(
                         text="🔄 Refresh", callback_data="bots:ctrl_chart"
@@ -1338,29 +1339,30 @@ async def show_controller_chart(update: Update, context: Context) -> None:
             )
         else:
             await query.message.edit_text(
-                "❌ Could not generate chart",
+                format_error_message("Could not generate chart"),
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="⬅️ Back",
+                                text="« Back",
                                 callback_data=f"bots:ctrl_idx:{controller_idx}",
                             )
                         ]
                     ]
                 ),
+                parse_mode="MarkdownV2",
             )
 
     except Exception as e:
         logger.error(f"Error generating chart: {e}", exc_info=True)
         await query.message.edit_text(
-            f"❌ Error: {escape_markdown_v2(str(e)[:100])}",
+            format_error_message(str(e)[:100]),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="⬅️ Back",
+                            text="« Back",
                             callback_data=f"bots:ctrl_idx:{controller_idx}",
                         )
                     ]
@@ -1418,7 +1420,7 @@ async def show_controller_edit(update: Update, context: Context) -> None:
     keyboard = [
         [
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                text="✕ Cancel", callback_data=f"bots:ctrl_idx:{controller_idx}"
             )
         ],
     ]
@@ -1550,7 +1552,7 @@ async def handle_controller_set_field(
                     text="✅ Yes, Pause" if new_val else "✅ Yes, Resume",
                     callback_data=f"bots:ctrl_confirm_set:{field_name}:{new_val}",
                 ),
-                InlineKeyboardButton(text="❌ Cancel", callback_data="bots:ctrl_edit"),
+                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:ctrl_edit"),
             ],
         ]
 
@@ -1589,9 +1591,7 @@ async def handle_controller_set_field(
     context.user_data["bots_state"] = f"ctrl_set:{field_name}"
     context.user_data["editing_ctrl_field"] = field_name
 
-    keyboard = [
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:ctrl_edit")]
-    ]
+    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="bots:ctrl_edit")]]
 
     await query.message.edit_text(
         f"*Edit {escape_markdown_v2(label)}*\n\n"
@@ -1663,7 +1663,7 @@ async def handle_controller_confirm_set(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="⬅️ Back", callback_data="bots:ctrl_edit"
+                                text="« Back", callback_data="bots:ctrl_edit"
                             )
                         ]
                     ]
@@ -1693,10 +1693,10 @@ async def handle_controller_confirm_set(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="⬅️ Back to Edit", callback_data="bots:ctrl_edit"
+                                text="« Back to Edit", callback_data="bots:ctrl_edit"
                             ),
                             InlineKeyboardButton(
-                                text="⬅️ Controller",
+                                text="« Back to Controller",
                                 callback_data=f"bots:ctrl_idx:{controller_idx}",
                             ),
                         ]
@@ -1712,7 +1712,7 @@ async def handle_controller_confirm_set(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="⬅️ Back", callback_data="bots:ctrl_edit"
+                                text="« Back", callback_data="bots:ctrl_edit"
                             )
                         ]
                     ]
@@ -1728,7 +1728,7 @@ async def handle_controller_confirm_set(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="⬅️ Back", callback_data="bots:ctrl_edit"
+                            text="« Back", callback_data="bots:ctrl_edit"
                         )
                     ]
                 ]
@@ -1749,7 +1749,10 @@ async def process_controller_field_input(
     message_id = context.user_data.get("ctrl_edit_message_id")
 
     if not bot_name or not ctrl_config or controller_idx is None:
-        await update.message.answer("Context lost. Please start over.")
+        await update.message.answer(
+            ui.notice("stale", "Context lost", "Start over from the menu."),
+            parse_mode="MarkdownV2",
+        )
         return
 
     controller_name = controllers[controller_idx]
@@ -1794,12 +1797,18 @@ async def process_controller_field_input(
             errors.append(f"Invalid: {key}={value}")
 
     if errors:
-        error_msg = "⚠️ " + ", ".join(errors)
-        await context.bot.send_message(chat_id=chat_id, text=error_msg)
+        error_msg = ui.notice(
+            "warning", "Some values were not applied", ", ".join(errors)
+        )
+        await context.bot.send_message(
+            chat_id=chat_id, text=error_msg, parse_mode="MarkdownV2"
+        )
 
     if not updates:
         await context.bot.send_message(
-            chat_id=chat_id, text="❌ No valid updates found. Use format: key=value"
+            chat_id=chat_id,
+            text=ui.notice("error", "No valid updates", "Use the format key=value."),
+            parse_mode="MarkdownV2",
         )
         return
 
@@ -1865,11 +1874,11 @@ async def process_controller_field_input(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="⬅️ Controller",
+                        text="« Back to Controller",
                         callback_data=f"bots:ctrl_idx:{controller_idx}",
                     ),
                     InlineKeyboardButton(
-                        text="⬅️ Bot", callback_data="bots:back_to_bot"
+                        text="« Back to Bot", callback_data="bots:back_to_bot"
                     ),
                 ]
             ]
@@ -1896,7 +1905,7 @@ async def process_controller_field_input(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                        text="« Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                     )
                 ]
             ]
@@ -1922,7 +1931,7 @@ async def process_controller_field_input(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="⬅️ Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
+                    text="« Back", callback_data=f"bots:ctrl_idx:{controller_idx}"
                 )
             ]
         ]
@@ -1957,7 +1966,7 @@ async def handle_stop_bot(update: Update, context: Context) -> None:
             ),
         ],
         [
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:back_to_bot"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:back_to_bot"),
         ],
     ]
 
@@ -1999,7 +2008,11 @@ async def handle_confirm_stop_bot(update: Update, context: Context) -> None:
         status = result.get("status", "unknown")
 
         keyboard = [
-            [InlineKeyboardButton(text="⬅️ Dashboard", callback_data="bots:main_menu")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to Dashboard", callback_data="bots:main_menu"
+                )
+            ]
         ]
 
         if status == "success":
@@ -2021,7 +2034,7 @@ async def handle_confirm_stop_bot(update: Update, context: Context) -> None:
     except Exception as e:
         logger.error(f"Error stopping bot: {e}", exc_info=True)
         keyboard = [
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:back_to_bot")]
+            [InlineKeyboardButton(text="« Back", callback_data="bots:back_to_bot")]
         ]
         await query.message.edit_text(
             f"*Failed*\n\nError: {escape_markdown_v2(str(e)[:150])}",
@@ -2160,9 +2173,7 @@ async def show_bot_logs(update: Update, context: Context) -> None:
     else:
         lines.append("_No logs available_")
 
-    keyboard = [
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:back_to_bot")]
-    ]
+    keyboard = [[InlineKeyboardButton(text="« Back", callback_data="bots:back_to_bot")]]
 
     message = "\n".join(lines)
     if len(message) > 4000:

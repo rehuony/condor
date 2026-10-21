@@ -14,6 +14,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_compact_number,
@@ -85,7 +86,11 @@ async def handle_plot_liquidity(
 
     # Edit original message to show loading status
     await query.message.edit_text(
-        f"🔄 Fetching liquidity data from {len(selected_pools)} pools..."
+        "⏳ "
+        + escape_markdown_v2(
+            f"Fetching liquidity data from {len(selected_pools)} pools…"
+        ),
+        parse_mode="MarkdownV2",
     )
 
     try:
@@ -147,7 +152,10 @@ async def handle_plot_liquidity(
 
         if not pools_data:
             await query.message.edit_text(
-                f"❌ Failed to fetch pool data. All {len(selected_pools)} pools failed or timed out."
+                format_error_message(
+                    f"Failed to fetch pool data. All {len(selected_pools)} pools failed or timed out."
+                ),
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -158,14 +166,20 @@ async def handle_plot_liquidity(
         # Check if we have any bins at all
         if total_bins == 0:
             await query.message.edit_text(
-                f"❌ No liquidity bin data available for the {len(pools_data)} pools. "
-                "The pools may not have detailed bin data exposed via the API."
+                format_error_message(
+                    f"No liquidity bin data available for the {len(pools_data)} pools. The pools may not have detailed bin data exposed via the API."
+                ),
+                parse_mode="MarkdownV2",
             )
             return
 
         # Update loading message
         await query.message.edit_text(
-            f"📊 Generating aggregated chart for {len(pools_data)} pools ({total_bins} bins)..."
+            "⏳ "
+            + escape_markdown_v2(
+                f"Generating aggregated chart for {len(pools_data)} pools ({total_bins} bins)…"
+            ),
+            parse_mode="MarkdownV2",
         )
 
         # Generate aggregated chart
@@ -226,7 +240,9 @@ async def handle_plot_liquidity(
                 InlineKeyboardButton(
                     text="« Back to List", callback_data="dex:pool_list_back"
                 ),
-                InlineKeyboardButton(text="« LP Menu", callback_data="dex:liquidity"),
+                InlineKeyboardButton(
+                    text="« Back to LP Menu", callback_data="dex:liquidity"
+                ),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -271,7 +287,10 @@ async def handle_pool_ohlcv(
     pool_info = context.user_data.get("selected_pool_info", {})
 
     if not pool:
-        await query.message.answer("No pool selected. Please select a pool first.")
+        await query.message.answer(
+            ui.notice("warning", "No pool selected", "Select a pool first."),
+            parse_mode="MarkdownV2",
+        )
         return
 
     pool_address = pool.get("pool_address", pool.get("address", ""))
@@ -436,7 +455,7 @@ async def handle_pool_ohlcv(
 
     except Exception as e:
         logger.error(f"Error generating OHLCV chart: {e}", exc_info=True)
-        error_msg = escape_markdown_v2(f"❌ Error: {str(e)[:100]}")
+        error_msg = format_error_message(str(e)[:100])
         keyboard = [
             [
                 InlineKeyboardButton(
@@ -483,7 +502,10 @@ async def handle_pool_combined_chart(
     pool_info = context.user_data.get("selected_pool_info", {})
 
     if not pool:
-        await query.message.answer("No pool selected. Please select a pool first.")
+        await query.message.answer(
+            ui.notice("warning", "No pool selected", "Select a pool first."),
+            parse_mode="MarkdownV2",
+        )
         return
 
     pool_address = pool.get("pool_address", pool.get("address", ""))
@@ -539,7 +561,10 @@ async def handle_pool_combined_chart(
             )
 
         if not ohlcv_data and not bins:
-            await loading_msg.edit_text("❌ No data available for this pool")
+            await loading_msg.edit_text(
+                format_error_message("No data available for this pool"),
+                parse_mode="MarkdownV2",
+            )
             return
 
         # Get lower/upper prices from add_position_params if available
@@ -566,7 +591,10 @@ async def handle_pool_combined_chart(
         )
 
         if not chart_buf:
-            await loading_msg.edit_text("❌ Failed to generate combined chart")
+            await loading_msg.edit_text(
+                format_error_message("Failed to generate combined chart"),
+                parse_mode="MarkdownV2",
+            )
             return
 
         # Toggle currency for button
@@ -636,4 +664,6 @@ async def handle_pool_combined_chart(
 
     except Exception as e:
         logger.error(f"Error generating combined chart: {e}", exc_info=True)
-        await loading_msg.edit_text(f"❌ Error: {str(e)}")
+        await loading_msg.edit_text(
+            format_error_message(str(e)), parse_mode="MarkdownV2"
+        )

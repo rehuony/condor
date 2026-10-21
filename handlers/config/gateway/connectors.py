@@ -10,6 +10,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils.telegram_formatters import format_error_message
 from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import escape_markdown_v2, logger
@@ -430,7 +431,9 @@ async def submit_connector_config(context: Context, bot, chat_id: int) -> None:
 
         if not connector_name or not new_values:
             await bot.send_message(
-                chat_id=chat_id, text="❌ Missing configuration data"
+                chat_id=chat_id,
+                text=format_error_message("Missing configuration data"),
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -617,7 +620,7 @@ def _build_connector_config_message(
     # Always add cancel button
     nav_buttons.append(
         InlineKeyboardButton(
-            text="❌ Cancel",
+            text="✕ Cancel",
             callback_data=f"gateway_connector_cancel_edit_{connector_name}",
         )
     )

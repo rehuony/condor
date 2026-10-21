@@ -11,13 +11,16 @@ from aiogram.types import Message
 import utils.auth as auth
 from config_manager import UserRole
 from handlers import agents, bots
+from handlers.messages import INPUT_CHAT_KEY, track_input_chat
 from handlers.routes import register_handlers
 from tests.conftest import patch_agents
 from tests.support.telegram_offline import message_update, offline_app, update_from
 
 
-def _update(app, content=None, *, kind="message", chat_type="private"):
-    return message_update(app.bot, content, kind=kind, chat_type=chat_type)
+def _update(app, content=None, *, kind="message", chat_type="private", chat_id=7):
+    return message_update(
+        app.bot, content, kind=kind, chat_type=chat_type, chat_id=chat_id
+    )
 
 
 def _photo(**kwargs):
@@ -104,6 +107,8 @@ async def dispatch(monkeypatch, tmp_path):
     state.send = send
     state.cm = cm
     state.user_data = state.app.store.get(7)
+    # Forms the tests arm directly were armed in the chat they send from.
+    state.user_data[INPUT_CHAT_KEY] = 7
     yield state
     await state.app.close()
 
@@ -460,7 +465,7 @@ async def test_trading_form_priority_is_preserved(dispatch, monkeypatch):
     cex, dex = AsyncMock(), AsyncMock()
     monkeypatch.setattr("handlers.cex.cex_message_handler", cex)
     monkeypatch.setattr("handlers.dex.dex_message_handler", dex)
-    dispatch.user_data.update(cex_state="trade", dex_state="swap")
+    dispatch.user_data.update(cex_state="trade_quick", dex_state="swap_quick")
     await dispatch.send({"text": "requested value"})
     cex.assert_awaited_once()
     dex.assert_not_called()
@@ -498,8 +503,8 @@ async def test_unhandled_form_only_falls_through_to_private_ai(
 @pytest.mark.parametrize(
     "key,state",
     [
-        ("cex_state", "trade"),
-        ("dex_state", "swap"),
+        ("cex_state", "trade_quick"),
+        ("dex_state", "swap_quick"),
         ("bots_state", "cfg_bulk_edit"),
         ("executors_state", "wizard_pair_input"),
         ("routines_state", "editing"),
@@ -571,6 +576,10 @@ async def test_config_upload_prompt_does_not_accept_a_non_document(dispatch, con
 @pytest.mark.parametrize(
     "key,state",
     [
+        ("cex_state", "trade"),
+        ("dex_state", "swap"),
+        ("dex_state", "add_position"),
+        ("dex_state", "pool_list_results"),
         ("bots_state", "editing_config"),
         ("bots_state", "deploy_review"),
         ("bots_state", "gs_wizard"),
@@ -730,3 +739,83 @@ async def test_progressive_bot_form_keeps_its_existing_update_contract(
     assert processor.await_args.args[0].raw is update
     assert len(processor.await_args.args) == 2
     dispatch.ai.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chat_type", ["private", "group"])
+async def test_form_armed_in_another_chat_never_reads_this_one(
+    dispatch, monkeypatch, chat_type
+):
+    handler = AsyncMock(return_value=True)
+    monkeypatch.setattr("handlers.cex.cex_message_handler", handler)
+    dispatch.user_data["cex_state"] = "trade_set_amount"
+    dispatch.user_data[INPUT_CHAT_KEY] = 7
+    await dispatch.send({"text": "btc buy 1"}, chat_type=chat_type, chat_id=-100)
+    handler.assert_not_called()
+    assert dispatch.ai.await_count == (1 if chat_type == "private" else 0)
+    assert dispatch.user_data["cex_state"] == "trade_set_amount"
+
+
+@pytest.mark.asyncio
+async def test_arming_an_input_records_its_chat():
+    async def arm(update, context):
+        context.user_data["cex_state"] = "trade_set_amount"
+
+    async def browse(update, context):
+        pass
+
+    user_data = {}
+    context = SimpleNamespace(user_data=user_data)
+    await track_input_chat(arm)(
+        SimpleNamespace(effective_chat=SimpleNamespace(id=5)), context
+    )
+    assert user_data[INPUT_CHAT_KEY] == 5
+    # A tap elsewhere that arms nothing new leaves the binding alone.
+    await track_input_chat(browse)(
+        SimpleNamespace(effective_chat=SimpleNamespace(id=9)), context
+    )
+    assert user_data[INPUT_CHAT_KEY] == 5
+
+
+@pytest.mark.asyncio
+async def test_unrouted_callback_is_answered(dispatch):
+    await dispatch.app.feed(
+        update_from(
+            dispatch.app.bot,
+            {
+                "update_id": 21,
+                "callback_query": {
+                    "id": "q1",
+                    "chat_instance": "c",
+                    "data": "nothing:routes:this",
+                    "from": {"id": 7, "is_bot": False, "first_name": "Tester"},
+                    "message": {
+                        "message_id": 3,
+                        "date": 1,
+                        "chat": {"id": 7, "type": "private"},
+                    },
+                },
+            },
+        )
+    )
+    methods = [method for method, _ in dispatch.app.bot.session.requests]
+    assert "answerCallbackQuery" in methods
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "armed,expected",
+    [(False, "Nothing to cancel"), (True, "Input cancelled")],
+)
+async def test_cancel_says_whether_anything_was_pending(dispatch, armed, expected):
+    if armed:
+        dispatch.user_data["cex_state"] = "trade_set_amount"
+    await dispatch.send(
+        {
+            "text": "/cancel",
+            "entities": [{"type": "bot_command", "offset": 0, "length": 7}],
+        }
+    )
+    text = dispatch.reply.await_args.args[0]
+    assert expected in text
+    assert "cex_state" not in dispatch.user_data

@@ -27,7 +27,7 @@ def test_every_result_page_is_reachable_without_repeating_the_internal_task():
         )
         texts.append(markdown.split("\n\n", 1)[1])
         buttons = [b for row in keyboard.inline_keyboard for b in row]
-        next_buttons = [b for b in buttons if b.text == "→"]
+        next_buttons = [b for b in buttons if b.text == "Next ›"]
         if not next_buttons:
             break
         assert next_buttons[0].callback_data == f"deleg:view:4:{page + 1}"

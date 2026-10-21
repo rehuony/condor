@@ -6,6 +6,7 @@ from condor.telegram.types import (
     Context,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     bind_chat_to_agent,
@@ -41,8 +42,14 @@ async def _handle_talk_to(update: Update, context: Context, page: int = 0) -> No
 
     if not agents:
         await query.message.edit_text(
-            "No agents defined yet. Create one with /agent → Condor, or from the "
-            "dashboard's Agents page.",
+            ui.screen(
+                ui.title("👤", "Talk To"),
+                ui.esc(
+                    "No agents defined yet. Create one with /agent → Condor, "
+                    "or from the dashboard's Agents page."
+                ),
+            ),
+            parse_mode="MarkdownV2",
             reply_markup=_talk_to_keyboard([], 0, current_slug),
         )
         return
@@ -50,9 +57,15 @@ async def _handle_talk_to(update: Update, context: Context, page: int = 0) -> No
     # Indices are resolved against this snapshot, so the pick handler must
     # re-read the same list (AgentStore.list_specialists is directory order).
     await query.message.edit_text(
-        "Who do you want to talk to?\n\n"
-        "A domain Agent answers with its own identity, tools and memory. "
-        "Condor is the general coordinator.",
+        ui.screen(
+            ui.title("👤", "Talk To"),
+            ui.esc(
+                "A domain agent answers with its own identity, tools and memory. "
+                "Condor is the general coordinator."
+            ),
+            ui.hint("Who do you want to talk to?"),
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=_talk_to_keyboard(agents, page, current_slug),
     )
 
@@ -75,7 +88,14 @@ async def _handle_talk_pick(update: Update, context: Context, index: int) -> Non
         # are positions in it, so the two must not diverge.
         agents = AgentStore().list_specialists()
         if index >= len(agents):
-            await query.message.edit_text("That agent no longer exists.")
+            await query.message.edit_text(
+                ui.notice(
+                    "warning",
+                    "Agent not found",
+                    "It may have been deleted. " "Open Talk To again.",
+                ),
+                parse_mode="MarkdownV2",
+            )
             return
         agent_slug = agents[index].slug
         label = agents[index].name or agent_slug
@@ -124,10 +144,11 @@ async def _raise_agent(
     switching = bool(session and session.alive)
     verb = "Switching to" if switching else "Starting"
 
+    waiting = "⏳ " + ui.esc(f"{verb} {label}…")
     if status is None:
-        status = await update.message.answer(f"{verb} {label}...")
+        status = await update.message.answer(waiting, parse_mode="MarkdownV2")
     else:
-        await status.edit_text(f"{verb} {label}...")
+        await status.edit_text(waiting, parse_mode="MarkdownV2")
     await destroy_session(chat_id)
 
     try:
@@ -143,7 +164,12 @@ async def _raise_agent(
     except Exception as e:
         log.exception("Failed to bind session to agent %r", agent_slug)
         await status.edit_text(
-            f"Could not {'switch to' if switching else 'start'} {label}: {e}"
+            ui.notice(
+                "error",
+                f"Could not {'switch to' if switching else 'start'} {label}",
+                str(e),
+            ),
+            parse_mode="MarkdownV2",
         )
         return
 
@@ -162,7 +188,11 @@ async def _raise_agent(
         )
 
     await status.edit_text(
-        f"Now talking to {label}."
-        + (" The conversation so far is carried over." if carried else "")
-        + "\n\nSend a message to continue."
+        ui.notice(
+            "success",
+            f"Now talking to {label}",
+            ("The conversation so far is carried over. " if carried else "")
+            + "Send a message to continue.",
+        ),
+        parse_mode="MarkdownV2",
     )

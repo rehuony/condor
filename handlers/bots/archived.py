@@ -22,6 +22,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_error_message,
@@ -370,7 +371,7 @@ async def show_archived_menu(update: Update, context: Context, page: int = 0) ->
                     "📜 No archived bots found.\n\nArchived bots will appear here after you stop a running bot."
                 )
             keyboard = [
-                [InlineKeyboardButton(text="🔙 Back", callback_data="bots:main_menu")]
+                [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
             ]
 
             if query:
@@ -453,7 +454,7 @@ async def show_archived_menu(update: Update, context: Context, page: int = 0) ->
             if page > 0:
                 nav_row.append(
                     InlineKeyboardButton(
-                        text="◀️", callback_data=f"bots:archived_page:{page-1}"
+                        text="‹ Prev", callback_data=f"bots:archived_page:{page-1}"
                     )
                 )
             nav_row.append(
@@ -464,7 +465,7 @@ async def show_archived_menu(update: Update, context: Context, page: int = 0) ->
             if page < total_pages - 1:
                 nav_row.append(
                     InlineKeyboardButton(
-                        text="▶️", callback_data=f"bots:archived_page:{page+1}"
+                        text="Next ›", callback_data=f"bots:archived_page:{page+1}"
                     )
                 )
             keyboard.append(nav_row)
@@ -482,7 +483,7 @@ async def show_archived_menu(update: Update, context: Context, page: int = 0) ->
         )
         keyboard.append(
             [
-                InlineKeyboardButton(text="🔙 Back", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="« Back", callback_data="bots:main_menu"),
             ]
         )
 
@@ -513,7 +514,7 @@ async def show_archived_menu(update: Update, context: Context, page: int = 0) ->
         logger.error(f"Error showing archived menu: {e}", exc_info=True)
         error_msg = format_error_message(f"Failed to fetch archived bots: {str(e)}")
         keyboard = [
-            [InlineKeyboardButton(text="🔙 Back", callback_data="bots:main_menu")]
+            [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
         ]
 
         if query:
@@ -532,7 +533,12 @@ async def show_archived_detail(update: Update, context: Context, db_index: int) 
     try:
         db_path = _get_db_path_by_index(context, db_index)
         if not db_path:
-            await query.message.answer("Bot not found. Please refresh the list.")
+            await query.message.answer(
+                ui.notice(
+                    "warning", "Bot not found", "Refresh the list and try again."
+                ),
+                parse_mode="MarkdownV2",
+            )
             return
 
         context.user_data["archived_current_db"] = db_path
@@ -546,7 +552,7 @@ async def show_archived_detail(update: Update, context: Context, db_index: int) 
         if not summary:
             error_msg = format_error_message("Could not fetch bot data")
             keyboard = [
-                [InlineKeyboardButton(text="🔙 Back", callback_data="bots:archived")]
+                [InlineKeyboardButton(text="« Back", callback_data="bots:archived")]
             ]
             await query.message.edit_text(
                 error_msg,
@@ -643,7 +649,7 @@ async def show_archived_detail(update: Update, context: Context, db_index: int) 
                 ),
             ],
             [
-                InlineKeyboardButton(text="🔙 Back", callback_data="bots:archived"),
+                InlineKeyboardButton(text="« Back", callback_data="bots:archived"),
             ],
         ]
 
@@ -657,7 +663,7 @@ async def show_archived_detail(update: Update, context: Context, db_index: int) 
         logger.error(f"Error showing archived detail: {e}", exc_info=True)
         error_msg = format_error_message(f"Failed to fetch bot details: {str(e)}")
         keyboard = [
-            [InlineKeyboardButton(text="🔙 Back", callback_data="bots:archived")]
+            [InlineKeyboardButton(text="« Back", callback_data="bots:archived")]
         ]
         await query.message.edit_text(
             error_msg,
@@ -768,7 +774,7 @@ async def show_timeline_chart(update: Update, context: Context) -> None:
             )
 
             keyboard = [
-                [InlineKeyboardButton(text="🔙 Back", callback_data="bots:archived")]
+                [InlineKeyboardButton(text="« Back", callback_data="bots:archived")]
             ]
 
             # Delete loading message and send chart
@@ -801,7 +807,12 @@ async def show_bot_chart(update: Update, context: Context, db_index: int) -> Non
     try:
         db_path = _get_db_path_by_index(context, db_index)
         if not db_path:
-            await query.message.answer("Bot not found. Please refresh the list.")
+            await query.message.answer(
+                ui.notice(
+                    "warning", "Bot not found", "Refresh the list and try again."
+                ),
+                parse_mode="MarkdownV2",
+            )
             return
 
         # Show loading message
@@ -852,7 +863,7 @@ async def show_bot_chart(update: Update, context: Context, db_index: int) -> Non
                         callback_data=f"bots:archived_report:{db_index}",
                     ),
                     InlineKeyboardButton(
-                        text="🔙 Back", callback_data=f"bots:archived_select:{db_index}"
+                        text="« Back", callback_data=f"bots:archived_select:{db_index}"
                     ),
                 ]
             ]
@@ -894,7 +905,12 @@ async def handle_generate_report(
     try:
         db_path = _get_db_path_by_index(context, db_index)
         if not db_path:
-            await query.message.answer("Bot not found. Please refresh the list.")
+            await query.message.answer(
+                ui.notice(
+                    "warning", "Bot not found", "Refresh the list and try again."
+                ),
+                parse_mode="MarkdownV2",
+            )
             return
 
         # Show progress message
@@ -924,7 +940,7 @@ async def handle_generate_report(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="🔙 Back", callback_data=f"bots:archived_select:{db_index}"
+                        text="« Back", callback_data=f"bots:archived_select:{db_index}"
                     )
                 ]
             ]

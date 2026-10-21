@@ -87,7 +87,7 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
         return ax.text(x, y, s, fontproperties=f, color=c, ha=ha, va=va)
 
     base, quote = pair.split("-")
-    T(62, 104, "交 易 计 划", sans(26), MUTE)
+    T(62, 104, "T R A D E   P L A N", sans(26), MUTE)
     T(962, 104, "T R A D E   N O T E", sans(20), MUTE, ha="right")
     T(
         62,
@@ -95,9 +95,9 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
         f"{base} / {quote}",
         serif(88 * min(1, 9 / (len(base) + len(quote) + 3))),
     )
-    T(62, 292, f"永续合约 · {tf} · UTC+8", sans(28), MUTE)
+    T(62, 292, f"Perpetual · {tf} · UTC+8", sans(28), MUTE)
     ax.add_patch(plt.Circle((738, 228), 11, color=RED if short else GRN, lw=0))
-    T(962, 242, "做空  SHORT" if short else "做多  LONG", sans(32), INK, ha="right")
+    T(962, 242, "SHORT" if short else "LONG", sans(32), INK, ha="right")
 
     CT, CB, CL, CR = 350, 790, 60, 620
     BX0, BX1 = 640, 890
@@ -159,10 +159,10 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
     # Keep the four right-hand labels at least 26px apart (tight short-term plans).
     labels = sorted(
         [
-            (Y(stop), "止损", RED),
-            (Y(entry), "进场", INK),
-            (Y(tp1), "止盈1", GRN),
-            (Y(tp2), "止盈2", GRN),
+            (Y(stop), "Stop", RED),
+            (Y(entry), "Entry", INK),
+            (Y(tp1), "TP1", GRN),
+            (Y(tp2), "TP2", GRN),
         ]
     )
     ys = [y for y, _, _ in labels]
@@ -179,14 +179,14 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
     tl = times[-1]
     ax.plot([xl, xl], [Y(px_last) + 14, ty - 26], color=MUTE, lw=0.8, alpha=0.5)
     T(xl, ty, tl.strftime("%m-%d %H:%M"), sans(19), INK, ha="center")
-    T(xl, ty + 26, f"现价 {_px(px_last)}", sans(18), MUTE, ha="center")
+    T(xl, ty + 26, f"Last {_px(px_last)}", sans(18), MUTE, ha="center")
 
     rng = f"{_px(lo_p)}–{_px(hi_p)}"
     cols = [
-        (62, "进场区间", None, rng, 46),
-        (336, "止损价", RED, _px(stop), 66),
-        (560, "止盈价 1", GRN, _px(tp1), 66),
-        (778, "止盈价 2", GRN, _px(tp2), 66),
+        (62, "Entry zone", None, rng, 46),
+        (336, "Stop", RED, _px(stop), 66),
+        (560, "TP 1", GRN, _px(tp1), 66),
+        (778, "TP 2", GRN, _px(tp2), 66),
     ]
     for index, (x, lab, dot, val, fs) in enumerate(cols):
         off = 0
@@ -205,12 +205,12 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
 
     now = times[-1]
     ax.plot([62, 962], [1136, 1136], color=MUTE, lw=0.8, alpha=0.5)
-    T(62, 1200, "计划盈亏比", sans(26), MUTE)
+    T(62, 1200, "Planned reward / risk", sans(26), MUTE)
     T(250, 1202, f"1 : {rr1:.1f} / {rr2:.1f}", serif(40))
     T(
         962,
         1200,
-        f"数据截至 {now.strftime('%m-%d %H:%M')} · {venue_label(connector_name)}",
+        f"Data as of {now.strftime('%m-%d %H:%M')} · {venue_label(connector_name)}",
         sans(22),
         MUTE,
         ha="right",

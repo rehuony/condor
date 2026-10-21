@@ -341,7 +341,7 @@ def _build_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🔄 Refresh", callback_data="dex:refresh"),
-            InlineKeyboardButton(text="✖️ Close", callback_data="dex:close"),
+            InlineKeyboardButton(text="✕ Close", callback_data="dex:close"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -350,7 +350,7 @@ def _build_menu_keyboard() -> InlineKeyboardMarkup:
 def _build_loading_message(server_name: str = None) -> str:
     """Build the initial loading message"""
     if server_name:
-        title = f"🔄 *DEX Trading* \\| _Server: {escape_markdown_v2(server_name)}_"
+        title = f"🔄 *DEX Trading*\n_Server: {escape_markdown_v2(server_name)}_"
     else:
         title = r"🔄 *DEX Trading*"
 
@@ -367,7 +367,7 @@ def _build_menu_with_data(
 ) -> str:
     """Build the menu message with gateway data"""
     if server_name:
-        header = f"🔄 *DEX Trading* \\| _Server: {escape_markdown_v2(server_name)}_\n\n"
+        header = f"🔄 *DEX Trading*\n_Server: {escape_markdown_v2(server_name)}_\n\n"
     else:
         header = r"🔄 *DEX Trading*" + "\n\n"
 

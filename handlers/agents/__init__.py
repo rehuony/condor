@@ -13,10 +13,12 @@ from condor.telegram.approvals import parse_approval, resolve_confirmation
 from condor.telegram.types import Context, Update
 from handlers import clear_all_input_states
 from handlers._routing import HandlerFunc, PrefixRoute, dispatch_action, noop
+from utils import telegram_ui as ui
 from utils.auth import restricted
 
 from ._shared import (
     COMPACT_PROMPT_AUTO,
+    PRIVATE_ONLY,
     remember_chat_conversation,
     resolve_chat_binding,
     selectable_agent_options,
@@ -146,7 +148,7 @@ async def agent_command(update: Update, context: Context) -> None:
     """
     chat_type = update.effective_chat.type
     if chat_type in ("group", "supergroup"):
-        await update.message.answer("The agent is only available in private chats.")
+        await update.message.answer(PRIVATE_ONLY, parse_mode="MarkdownV2")
         return
 
     clear_all_input_states(context)
@@ -161,12 +163,19 @@ async def agent_command(update: Update, context: Context) -> None:
         available = [k for k in selectable_agent_options() if _is_agent_available(k)]
         if not available:
             await update.message.answer(
-                "No agent CLI found.\n\n"
-                "Install one of:\n"
-                "• claude-agent-acp (Claude Agent)\n"
-                "• gemini (Gemini CLI)\n"
-                "• npx @agentclientprotocol/codex-acp (ChatGPT Codex ACP bridge)\n\n"
-                "Then restart the bot."
+                ui.screen(
+                    ui.notice("error", "No agent CLI found", "Install one of:"),
+                    [
+                        ui.bullet("claude-agent-acp", "Claude Agent"),
+                        ui.bullet("gemini", "Gemini CLI"),
+                        ui.bullet(
+                            "npx @agentclientprotocol/codex-acp",
+                            "ChatGPT Codex ACP bridge",
+                        ),
+                    ],
+                    ui.hint("Then restart the bot."),
+                ),
+                parse_mode="MarkdownV2",
             )
             return
         # A temporary fallback is not a new shared preference. Remember which
@@ -193,8 +202,13 @@ async def _secret_notices_off(update: Update, context: Context) -> None:
 
     set_secret_notices(context.user_data, False)
     await update.callback_query.message.edit_text(
-        "I will not flag key-shaped values again. It is back on from "
-        "/agent → Settings whenever you want it."
+        ui.notice(
+            "info",
+            "Key-shape warnings off",
+            "I will not flag key-shaped values again. Turn them back on from "
+            "/agent → Change LLM whenever you want.",
+        ),
+        parse_mode="MarkdownV2",
     )
 
 
@@ -293,7 +307,7 @@ async def agent_callback_handler(update: Update, context: Context) -> None:
 
     chat_type = update.effective_chat.type
     if chat_type in ("group", "supergroup"):
-        await query.message.edit_text("Agent mode is only available in private chats.")
+        await query.message.edit_text(PRIVATE_ONLY, parse_mode="MarkdownV2")
         return
 
     # A tap supersedes any half-finished typing prompt. Cleared before dispatch
@@ -315,10 +329,16 @@ async def agent_callback_handler(update: Update, context: Context) -> None:
             request_id, approved=approved, by_user_id=update.effective_user.id
         )
         if not resolved:
-            text = "Request expired."
+            text = ui.notice(
+                "stale",
+                "Request expired",
+                "It was already answered or timed out.",
+            )
+        elif approved:
+            text = ui.notice("success", "Approved")
         else:
-            text = "Approved." if approved else "Rejected."
-        await query.message.edit_text(text)
+            text = ui.notice("rejected", "Rejected")
+        await query.message.edit_text(text, parse_mode="MarkdownV2")
 
 
 __all__ = [

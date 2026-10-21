@@ -388,10 +388,7 @@ def format_bot_status(
         elif server_status == "error":
             status_emoji = "⚠️"
 
-        message += f"\n{'⎯' * 30}\n"
-        message += (
-            f"{' ' * 15}_Server: {escape_markdown_v2(server_name)} {status_emoji}_"
-        )
+        message += f"\n_Server: {escape_markdown_v2(server_name)} {status_emoji}_"
 
     return message
 
@@ -410,21 +407,11 @@ def format_error_message(
     Returns:
         Formatted error message
     """
-    msg = f"❌ *Error*\n\n{escape_markdown_v2(error)}"
+    from utils.telegram_ui import hint, notice, server_meta
 
-    # Add server footer at the bottom right
+    msg = notice("error", "Error", error)
     if server_name:
-        status_emoji = "🟢"
-        if server_status == "offline":
-            status_emoji = "🔴"
-        elif server_status == "auth_error":
-            status_emoji = "🟠"
-        elif server_status == "error":
-            status_emoji = "⚠️"
-
-        separator = "⎯" * 15
-        msg += f"\n\n{separator} _Server: {escape_markdown_v2(server_name)} {status_emoji}_"
-
+        msg += "\n\n" + hint(server_meta(server_name, server_status or "online"))
     return msg
 
 
@@ -714,7 +701,7 @@ def format_portfolio_overview(
         elif server_status == "error":
             status_emoji = "⚠️"
 
-        message = f"💼 *Portfolio Details* \\| _Server: {escape_markdown_v2(server_name)} {status_emoji}_\n\n"
+        message = f"💼 *Portfolio Details*\n_Server: {escape_markdown_v2(server_name)} {status_emoji}_\n\n"
     else:
         message = "💼 *Portfolio Details*\n\n"
 

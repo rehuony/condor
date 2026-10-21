@@ -107,7 +107,7 @@ async def _show_wizard_connector_step(update: Update, context: Context) -> None:
         r"a reference price, forming a \"grid\.\"" + "\n\n"
         r"[📖 Read the strategy guide](https://hummingbot.org/blog/strategy-guide-grid-strike/)"
         + "\n\n"
-        r"─────────────────────────" + "\n\n"
+        "\n"
         r"*Step 1: Select Exchange*" + "\n\n"
         r"Grid Strike works on both spot and perpetual exchanges\.",
     )
@@ -197,8 +197,8 @@ async def _show_wizard_side_step(update: Update, context: Context) -> None:
             InlineKeyboardButton(text="📉 SHORT", callback_data="bots:gs_side:short"),
         ],
         [
-            InlineKeyboardButton(text="⬅️ Back", callback_data="bots:gs_back_to_pair"),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="« Back", callback_data="bots:gs_back_to_pair"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -271,8 +271,8 @@ async def _show_wizard_leverage_step(update: Update, context: Context) -> None:
             InlineKeyboardButton(text="75x", callback_data="bots:gs_leverage:75"),
         ],
         [
-            InlineKeyboardButton(text="⬅️ Back", callback_data="bots:gs_back_to_side"),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="« Back", callback_data="bots:gs_back_to_side"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -425,9 +425,9 @@ async def _show_wizard_amount_step(update: Update, context: Context) -> None:
         ],
         [
             InlineKeyboardButton(
-                text="⬅️ Back", callback_data="bots:gs_back_to_leverage"
+                text="« Back", callback_data="bots:gs_back_to_leverage"
             ),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -602,7 +602,7 @@ async def _show_wizard_prices_step(
 
         if not current_price:
             keyboard = [
-                [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:main_menu")]
+                [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
             ]
             try:
                 await query.message.edit_text(
@@ -731,9 +731,9 @@ async def _show_wizard_prices_step(
             ],
             [
                 InlineKeyboardButton(
-                    text="⬅️ Back", callback_data="bots:gs_back_to_amount"
+                    text="« Back", callback_data="bots:gs_back_to_amount"
                 ),
-                InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
             ],
         ]
 
@@ -841,7 +841,9 @@ async def _show_wizard_prices_step(
 
     except Exception as e:
         logger.error(f"Error in prices step: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton(text="Back", callback_data="bots:main_menu")]]
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
+        ]
         error_msg = format_error_message(f"Error fetching market data: {str(e)}")
         try:
             if getattr(query.message, "photo", None):
@@ -948,7 +950,7 @@ async def _show_wizard_take_profit_step(update: Update, context: Context) -> Non
             InlineKeyboardButton(text="0.2%", callback_data="bots:gs_tp:0.002"),
             InlineKeyboardButton(text="0.5%", callback_data="bots:gs_tp:0.005"),
         ],
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")],
     ]
 
     message_text = (
@@ -1099,7 +1101,7 @@ async def _update_wizard_message_for_side(update: Update, context: Context) -> N
             InlineKeyboardButton(text="📈 LONG", callback_data="bots:gs_side:long"),
             InlineKeyboardButton(text="📉 SHORT", callback_data="bots:gs_side:short"),
         ],
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")],
     ]
 
     # Determine total steps based on connector type

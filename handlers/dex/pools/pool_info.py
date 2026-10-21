@@ -38,7 +38,7 @@ async def handle_pool_info(update: Update, context: Context) -> None:
         r"`pancakeswap 0x2...def bsc`"
     )
 
-    keyboard = [[InlineKeyboardButton(text="« Cancel", callback_data="dex:liquidity")]]
+    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "pool_info"
@@ -90,7 +90,9 @@ async def process_pool_info(update: Update, context: Context, user_input: str) -
             network = await resolve_network_id(client, parts[2])
 
         # Send loading message
-        loading_msg = await update.message.answer("🔄 Loading pool details...")
+        loading_msg = await update.message.answer(
+            "⏳ " + escape_markdown_v2("Loading pool details…"), parse_mode="MarkdownV2"
+        )
 
         # Fetch pool info
         result = await client.gateway_clmm.get_pool_info(

@@ -43,6 +43,7 @@ from .menu import (
 from .params import (
     _invalidate_trade_cache,
     handle_trade_connector_select,
+    handle_trade_quick,
     handle_trade_set_amount,
     handle_trade_set_connector,
     handle_trade_set_leverage,
@@ -92,6 +93,7 @@ __all__ = [
     "handle_close",
     "handle_trade",
     "handle_trade_connector_select",
+    "handle_trade_quick",
     "handle_trade_execute",
     "handle_trade_get_quote",
     "handle_trade_pair_select",

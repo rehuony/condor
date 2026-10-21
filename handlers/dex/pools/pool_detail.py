@@ -15,6 +15,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_compact_number,
@@ -301,7 +302,7 @@ async def _show_pool_detail(
     base_val = balances.get("base_value", 0)
     quote_val = balances.get("quote_value", 0)
 
-    message += "\n" + escape_markdown_v2("━━━ Wallet Balances ━━━") + "\n"
+    message += "\n*Wallet Balances*\n"
     base_bal_str = format_compact_number(base_bal)
     base_val_str = f"${format_compact_number(base_val)}" if base_val > 0 else ""
     message += f"💰 `{escape_markdown_v2(base_symbol)}`: `{escape_markdown_v2(base_bal_str)}` {escape_markdown_v2(base_val_str)}\n"
@@ -311,7 +312,7 @@ async def _show_pool_detail(
     message += f"💵 `{escape_markdown_v2(quote_symbol)}`: `{escape_markdown_v2(quote_bal_str)}` {escape_markdown_v2(quote_val_str)}\n"
 
     # ========== POSITION PREVIEW ==========
-    message += "\n" + escape_markdown_v2("━━━ Position Preview ━━━") + "\n"
+    message += "\n*Position Preview*\n"
 
     # Get amounts and calculate actual values
     base_amount_str = params.get("amount_base", "10%")
@@ -422,7 +423,7 @@ async def _show_pool_detail(
     base_edit = params.get("amount_base") or "10%"
     quote_edit = params.get("amount_quote") or "10%"
 
-    message += f"\n_To edit, send:_\n"
+    message += "\n" + ui.hint("Tap ⌨️ Quick Edit, then send:") + "\n"
     message += f"`L:{escape_markdown_v2(l_pct_edit)}`\n"
     message += f"`U:{escape_markdown_v2(u_pct_edit)}`\n"
     message += f"`B:{escape_markdown_v2(base_edit)}`\n"
@@ -453,6 +454,7 @@ async def _show_pool_detail(
             InlineKeyboardButton(
                 text=f"🎯 {strategy_name}", callback_data="dex:pos_toggle_strategy"
             ),
+            ui.action_button("quick", "Quick Edit", "dex:pos_quick_edit"),
             InlineKeyboardButton(
                 text="➕ Add Position", callback_data="dex:pos_add_confirm"
             ),
@@ -482,12 +484,18 @@ async def _show_pool_detail(
                 InlineKeyboardButton(
                     text="« Back to List", callback_data="dex:pool_list_back"
                 ),
-                InlineKeyboardButton(text="« LP Menu", callback_data="dex:liquidity"),
+                InlineKeyboardButton(
+                    text="« Back to LP Menu", callback_data="dex:liquidity"
+                ),
             ]
         )
     else:
         keyboard.append(
-            [InlineKeyboardButton(text="« LP Menu", callback_data="dex:liquidity")]
+            [
+                InlineKeyboardButton(
+                    text="« Back to LP Menu", callback_data="dex:liquidity"
+                )
+            ]
         )
 
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -619,6 +627,9 @@ async def _show_pool_detail(
 async def handle_pool_select(update: Update, context: Context, pool_index: int) -> None:
     """Handle pool selection from numbered button"""
     query = update.callback_query
+    if not ui.is_current_menu(context.user_data, "dex_pool_list", query.message):
+        await ui.refuse_stale_menu(query, "dex:pool_list_back")
+        return
     cached_pools = context.user_data.get("pool_list_cache", [])
 
     if 0 <= pool_index < len(cached_pools):
@@ -687,7 +698,7 @@ async def handle_pool_detail_refresh(
         loading_msg += r"_Fetching OHLCV data\.\.\._"
 
         loading_keyboard = [
-            [InlineKeyboardButton(text="⏳ Loading...", callback_data="noop")]
+            [InlineKeyboardButton(text="⏳ Loading…", callback_data="dex:noop")]
         ]
 
         try:

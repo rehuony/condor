@@ -22,6 +22,8 @@ from .menu import (
 from .params import (
     _parse_amount,
     handle_pos_add_confirm,
+    handle_pos_quick_cancel,
+    handle_pos_quick_edit,
     handle_pos_set_base,
     handle_pos_set_connector,
     handle_pos_set_lower,
@@ -52,6 +54,8 @@ __all__ = [
     "_validate_bin_range",
     "handle_add_position",
     "handle_pos_add_confirm",
+    "handle_pos_quick_cancel",
+    "handle_pos_quick_edit",
     "handle_pos_help",
     "handle_pos_refresh",
     "handle_pos_set_base",

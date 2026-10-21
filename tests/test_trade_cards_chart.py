@@ -76,10 +76,10 @@ def test_chart_renders_chinese_with_shipped_fonts_from_any_directory(
         ),
         "hyperliquid_perpetual",
     )
-    assert "交 易 计 划" in rendered_text
+    assert "T R A D E   P L A N" in rendered_text
     # The footer names the connector the candles came from, not a fixed venue.
     assert any(text.endswith("· Hyperliquid Perp") for text in rendered_text)
-    assert ("做多  LONG" if side == "long" else "做空  SHORT") in rendered_text
+    assert ("LONG" if side == "long" else "SHORT") in rendered_text
     with Image.open(BytesIO(png)) as image:
         assert image.format == "PNG"
         assert image.size == (1024, 1280)

@@ -12,6 +12,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2
 
 from ._format import _extract_pools_from_response, _format_volume
@@ -194,7 +195,7 @@ async def show_recent_trades(update: Update, context: Context) -> None:
         logger.error(f"Error fetching trades: {e}", exc_info=True)
         try:
             await loading_msg.edit_text(
-                f"❌ Error loading trades: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not load trades", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
@@ -209,7 +210,7 @@ async def show_recent_trades(update: Update, context: Context) -> None:
             )
         except Exception:
             await chat.send_message(
-                f"❌ Error loading trades: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not load trades", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[

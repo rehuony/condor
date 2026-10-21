@@ -513,10 +513,10 @@ async def process_deploy_custom_name_input(
         context.user_data.pop("deploy_generated_name", None)
 
         keyboard = [
-            [InlineKeyboardButton(text="View Bots", callback_data="bots:main_menu")],
+            [InlineKeyboardButton(text="👁 View Bots", callback_data="bots:main_menu")],
             [
                 InlineKeyboardButton(
-                    text="Deploy More", callback_data="bots:deploy_menu"
+                    text="🚀 Deploy More", callback_data="bots:deploy_menu"
                 )
             ],
         ]
@@ -567,10 +567,10 @@ async def process_deploy_custom_name_input(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="Try Again", callback_data="bots:deploy_confirm"
+                    text="🔁 Try Again", callback_data="bots:deploy_confirm"
                 )
             ],
-            [InlineKeyboardButton(text="Back", callback_data="bots:deploy_config")],
+            [InlineKeyboardButton(text="« Back", callback_data="bots:deploy_config")],
         ]
         await context.bot.edit_message_text(
             chat_id=chat_id,

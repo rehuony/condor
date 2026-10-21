@@ -43,7 +43,7 @@ async def test_revoked_or_deleted_fixed_target_never_falls_back(
         get_client_for_chat=AsyncMock(return_value="other server"),
     )
     monkeypatch.setattr(config_manager, "get_config_manager", lambda: manager)
-    with pytest.raises(execution.ExecutionError, match="无权交易"):
+    with pytest.raises(execution.ExecutionError, match="cannot trade"):
         await execution._client(card)
     manager.get_client.assert_not_awaited()
     manager.get_client_for_chat.assert_not_awaited()
@@ -108,7 +108,7 @@ async def test_target_rebinding_or_missing_identity_stops_before_any_request(
     monkeypatch.setattr(config_manager, "get_config_manager", lambda: manager)
     call = AsyncMock()
     monkeypatch.setattr(execution, "request", call)
-    with pytest.raises(execution.ExecutionError, match="服务器地址"):
+    with pytest.raises(execution.ExecutionError, match="server address"):
         await execution.read_group(card)
     manager.get_client.assert_not_awaited()
     call.assert_not_awaited()
@@ -125,11 +125,11 @@ async def test_old_api_and_risk_errors_are_chinese_without_order_fallback(
         )
     )
     monkeypatch.setattr(execution, "request", call)
-    with pytest.raises(execution.ExecutionError, match="先更新执行端"):
+    with pytest.raises(execution.ExecutionError, match="Update the executor"):
         await execution.preview(card)
     call.assert_awaited_once()
     call.side_effect = aiohttp.ClientResponseError(
         None, (), status=422, message="minimum notional violated"
     )
-    with pytest.raises(execution.ExecutionError, match="最小订单"):
+    with pytest.raises(execution.ExecutionError, match="minimum order"):
         await execution.open_group(card)

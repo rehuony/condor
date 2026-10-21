@@ -35,6 +35,8 @@ from .add_position.menu import (
 from .add_position.params import (
     _parse_amount,
     handle_pos_add_confirm,
+    handle_pos_quick_cancel,
+    handle_pos_quick_edit,
     handle_pos_set_base,
     handle_pos_set_connector,
     handle_pos_set_lower,
@@ -75,6 +77,7 @@ from .pool_list import (
     handle_pool_list,
     handle_pool_list_back,
     handle_pool_list_orca,
+    handle_pool_list_search,
     process_pool_list,
 )
 from .positions import (
@@ -121,10 +124,13 @@ __all__ = [
     "handle_pool_info",
     "handle_pool_list",
     "handle_pool_list_back",
+    "handle_pool_list_search",
     "handle_pool_list_orca",
     "handle_pool_ohlcv",
     "handle_pool_select",
     "handle_pos_add_confirm",
+    "handle_pos_quick_cancel",
+    "handle_pos_quick_edit",
     "handle_pos_close_confirm",
     "handle_pos_close_execute",
     "handle_pos_collect_fees",

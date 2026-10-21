@@ -9,6 +9,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils.telegram_formatters import format_error_message
 
 from ._shared import escape_markdown_v2, logger
 
@@ -268,7 +269,7 @@ async def show_provider_details(query, context: Context, provider_key: str) -> N
 
     except Exception as e:
         logger.error(f"Error showing provider details: {e}", exc_info=True)
-        error_text = f"❌ Error: {escape_markdown_v2(str(e))}"
+        error_text = format_error_message(str(e))
         keyboard = [
             [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_providers")]
         ]
@@ -301,7 +302,7 @@ async def prompt_api_key_input(query, context: Context, provider_key: str) -> No
     keyboard = [
         [
             InlineKeyboardButton(
-                text="✖ Cancel", callback_data=f"gateway_rpc_{provider_key}"
+                text="✕ Cancel", callback_data=f"gateway_rpc_{provider_key}"
             )
         ]
     ]
@@ -357,13 +358,16 @@ async def _handle_api_key_input(
             logger.error(f"Unknown provider: {provider_key}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"❌ Unknown provider: {provider_key}",
+                text=format_error_message(f"Unknown provider: {provider_key}"),
+                parse_mode="MarkdownV2",
             )
             return
 
         if not api_key:
             await context.bot.send_message(
-                chat_id=update.effective_chat.id, text="❌ API key cannot be empty"
+                chat_id=update.effective_chat.id,
+                text=format_error_message("API key cannot be empty"),
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -373,7 +377,9 @@ async def _handle_api_key_input(
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text=f"💾 Saving {provider_info['name']} API key...",
+                    text="⏳ "
+                    + escape_markdown_v2(f"Saving {provider_info['name']} API key…"),
+                    parse_mode="MarkdownV2",
                 )
             except Exception as edit_err:
                 logger.debug(f"Could not edit message: {edit_err}")
@@ -411,7 +417,7 @@ async def _handle_api_key_input(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="🔄 Restart Gateway", callback_data="gateway_restart"
+                    text="🔁 Restart Gateway", callback_data="gateway_restart"
                 )
             ],
             [
@@ -454,7 +460,8 @@ async def _handle_api_key_input(
         try:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"❌ Error saving API key: {str(e)}",
+                text=format_error_message(f"Error saving API key: {str(e)}"),
+                parse_mode="MarkdownV2",
             )
         except Exception as send_err:
             logger.error(f"Could not send error message: {send_err}")
@@ -480,7 +487,9 @@ async def _handle_url_input(update: Update, context: Context, input_type: str) -
 
         if not node_url:
             await context.bot.send_message(
-                chat_id=update.effective_chat.id, text="❌ URL cannot be empty"
+                chat_id=update.effective_chat.id,
+                text=format_error_message("URL cannot be empty"),
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -488,7 +497,8 @@ async def _handle_url_input(update: Update, context: Context, input_type: str) -
         if not node_url.startswith(("http://", "https://")):
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="❌ URL must start with http:// or https://",
+                text=format_error_message("URL must start with http:// or https://"),
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -498,7 +508,9 @@ async def _handle_url_input(update: Update, context: Context, input_type: str) -
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text=f"💾 Saving node URL for {network_id}...",
+                    text="⏳ "
+                    + escape_markdown_v2(f"Saving node URL for {network_id}…"),
+                    parse_mode="MarkdownV2",
                 )
             except Exception as edit_err:
                 logger.debug(f"Could not edit message: {edit_err}")
@@ -557,7 +569,7 @@ async def _handle_url_input(update: Update, context: Context, input_type: str) -
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="🔄 Restart Gateway", callback_data="gateway_restart"
+                        text="🔁 Restart Gateway", callback_data="gateway_restart"
                     )
                 ],
                 [
@@ -600,7 +612,9 @@ async def _handle_url_input(update: Update, context: Context, input_type: str) -
         logger.error(f"Error handling URL input: {e}", exc_info=True)
         try:
             await context.bot.send_message(
-                chat_id=update.effective_chat.id, text=f"❌ Error saving URL: {str(e)}"
+                chat_id=update.effective_chat.id,
+                text=format_error_message(f"Error saving URL: {str(e)}"),
+                parse_mode="MarkdownV2",
             )
         except Exception as send_err:
             logger.error(f"Could not send error message: {send_err}")
@@ -694,7 +708,7 @@ async def activate_custom_url(query, context: Context, network_id: str) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="🔄 Restart Gateway", callback_data="gateway_restart"
+                    text="🔁 Restart Gateway", callback_data="gateway_restart"
                 )
             ],
             [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_url_menu")],
@@ -894,7 +908,7 @@ async def show_network_rpc_config(query, context: Context, network_idx: int) -> 
 
     except Exception as e:
         logger.error(f"Error showing network RPC config: {e}", exc_info=True)
-        error_text = f"❌ Error: {escape_markdown_v2(str(e))}"
+        error_text = format_error_message(str(e))
         keyboard = [
             [InlineKeyboardButton(text="« Back", callback_data="gateway_rpc_url_menu")]
         ]
@@ -921,7 +935,7 @@ async def prompt_node_url_input(query, context: Context, network_id: str) -> Non
     context.user_data["rpc_chat_id"] = query.message.chat.id
 
     keyboard = [
-        [InlineKeyboardButton(text="✖ Cancel", callback_data="gateway_rpc_url_menu")]
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="gateway_rpc_url_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 

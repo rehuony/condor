@@ -16,6 +16,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_error_message,
@@ -29,6 +30,7 @@ from .helpers import (
     DEFAULT_LEVERAGE,
     _get_leverage_cache_key,
     _get_position_mode_cache_key,
+    _is_perpetual_connector,
 )
 from .menu import show_trade_menu
 
@@ -262,6 +264,33 @@ async def handle_trade_connector_select(
     context.user_data["cex_state"] = "trade"
 
     await show_trade_menu(update, context)
+
+
+async def handle_trade_quick(update: Update, context: Context) -> None:
+    """Arm one quick-trade line; the trade menu itself never captures text."""
+    params = context.user_data.get("trade_params", {})
+    pair = params.get("trading_pair", "BTC-USDT")
+    perpetual = _is_perpetual_connector(params.get("connector", ""))
+    syntax = "pair side amount [type] [price]" + (" [position]" if perpetual else "")
+    limit_example = f"{pair} SELL 0.5 LIMIT 150" + (" CLOSE" if perpetual else "")
+    text = ui.prompt(
+        "Quick Trade",
+        ui.screen(
+            ui.esc("Send one order line. It is placed as soon as it arrives."),
+            [
+                ui.bullet("Format", syntax, code_value=True),
+                ui.bullet("Market", f"{pair} BUY 0.5", code_value=True),
+                ui.bullet("Limit", limit_example, code_value=True),
+            ],
+        ),
+        raw=True,
+    )
+    context.user_data["cex_state"] = "trade_quick"
+    await update.callback_query.message.edit_text(
+        text,
+        parse_mode="MarkdownV2",
+        reply_markup=ui.keyboard([ui.cancel_button("cex:trade")]),
+    )
 
 
 async def handle_trade_set_pair(update: Update, context: Context) -> None:

@@ -9,6 +9,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     AGENT_OPTIONS,
@@ -48,6 +49,9 @@ def _clear_custom_input(context: Context) -> None:
         context.user_data.pop(key, None)
 
 
+_TITLE = ui.title("🔌", "Custom Endpoints")
+
+
 async def _show(
     update: Update,
     text: str,
@@ -56,17 +60,26 @@ async def _show(
 ):
     """Render a screen, whichever way the user got here.
 
-    Callback taps edit the message in place; typed input has no message of
-    ours to edit, so it gets a fresh one (or reuses an explicit placeholder).
+    ``text`` is plain prose; every screen of this flow shows it escaped under
+    the flow's title. Callback taps edit the message in place; typed input has
+    no message of ours to edit, so it gets a fresh one (or reuses an explicit
+    placeholder).
     """
+    text = ui.screen(_TITLE, ui.esc(text))
     if placeholder is not None:
-        await placeholder.edit_text(text, reply_markup=keyboard)
+        await placeholder.edit_text(
+            text, parse_mode="MarkdownV2", reply_markup=keyboard
+        )
         return placeholder
     query = update.callback_query
     if query is not None:
-        await query.message.edit_text(text, reply_markup=keyboard)
+        await query.message.edit_text(
+            text, parse_mode="MarkdownV2", reply_markup=keyboard
+        )
         return query.message
-    return await update.effective_chat.send_message(text, reply_markup=keyboard)
+    return await update.effective_chat.send_message(
+        text, parse_mode="MarkdownV2", reply_markup=keyboard
+    )
 
 
 async def _handle_custom_list(
@@ -84,18 +97,14 @@ async def _handle_custom_list(
     providers = get_custom_providers(context.user_data)
 
     if providers:
-        body = (
-            "Custom OpenAI-compatible endpoints\n\n"
-            "Pick an endpoint to choose a model from it."
-        )
+        body = "Pick an OpenAI-compatible endpoint to choose a model from it."
     else:
         body = (
-            "Custom OpenAI-compatible endpoints\n\n"
             "Connect any OpenAI-compatible API — Venice AI, Together, "
             "Fireworks, or your own vLLM / LM Studio server."
         )
 
-    text = f"{notice}\n\n{body}" if notice else body
+    text = f"ℹ️ {notice}\n\n{body}" if notice else body
     await _show(
         update,
         text,
@@ -127,8 +136,9 @@ async def _handle_custom_url_prompt(update: Update, context: Context) -> None:
         update,
         "Send the base URL of the OpenAI-compatible API as a message.\n\n"
         "Examples:\n"
-        "  https://api.venice.ai/api/v1\n"
-        "  http://localhost:8000/v1",
+        "• https://api.venice.ai/api/v1\n"
+        "• http://localhost:8000/v1\n\n"
+        "Send /cancel to cancel.",
         _custom_input_keyboard(),
     )
 
@@ -141,7 +151,7 @@ async def _resolve_custom_url(update: Update, context: Context, text: str) -> No
     from .menu import _custom_input_keyboard, _custom_key_prompt_keyboard
 
     raw = text.strip()
-    if raw.lower() in ("/cancel", "cancel"):
+    if raw.lower() == "cancel":
         await _handle_custom_list(update, context, notice="Cancelled.")
         return
 
@@ -152,7 +162,9 @@ async def _resolve_custom_url(update: Update, context: Context, text: str) -> No
         # parse can't trap them in a loop of "that isn't a URL either".
         context.user_data["_custom_typing_url"] = True
         await _show(
-            update, f"{e}\n\nSend another URL, or cancel.", _custom_input_keyboard()
+            update,
+            f"⚠️ {e}\n\nSend another URL, or /cancel to cancel.",
+            _custom_input_keyboard(),
         )
         return
 
@@ -163,10 +175,10 @@ async def _resolve_custom_url(update: Update, context: Context, text: str) -> No
 
     await _show(
         update,
-        f"Endpoint: {base_url}\nIt will be saved as '{name}'.\n\n"
+        f"• Endpoint: {base_url}\n• Saved as: {name}\n\n"
         "Now send the API key as a message. Your message is deleted from the "
         "chat as soon as it's read; the key is stored on this bot's host so it "
-        "can sign requests.",
+        "can sign requests.\n\nSend /cancel to cancel.",
         _custom_key_prompt_keyboard(),
     )
 
@@ -179,7 +191,7 @@ async def _handle_custom_no_key(update: Update, context: Context) -> None:
 async def _resolve_custom_key(update: Update, context: Context, text: str) -> None:
     """Consume the typed API key and validate the endpoint with it."""
     key = text.strip()
-    if key.lower() in ("/cancel", "cancel"):
+    if key.lower() == "cancel":
         await _handle_custom_list(update, context, notice="Cancelled.")
         return
 
@@ -209,34 +221,41 @@ async def _validate_and_save(update: Update, context: Context, api_key: str) -> 
         )
         return
 
-    placeholder = await _show(update, f"Checking {base_url}...")
+    placeholder = await _show(update, f"⏳ Checking {base_url}…")
 
     try:
         resolved_url, models = await fetch_models(base_url, api_key)
     except CustomProviderError as e:
-        await placeholder.edit_text(
-            f"Couldn't use that endpoint: {e}",
-            reply_markup=_custom_error_keyboard("agent:cu_retry"),
+        await _show(
+            update,
+            f"❌ Couldn't use that endpoint: {e}",
+            _custom_error_keyboard("agent:cu_retry"),
+            placeholder=placeholder,
         )
         return
 
     try:
         saved = save_custom_provider(context.user_data, name, resolved_url, api_key)
     except ValueError as e:
-        await placeholder.edit_text(
-            str(e), reply_markup=_custom_error_keyboard("agent:cu_retry")
+        await _show(
+            update,
+            f"❌ {e}",
+            _custom_error_keyboard("agent:cu_retry"),
+            placeholder=placeholder,
         )
         return
 
     _clear_custom_input(context)
     _cache_models(context, saved["name"], models)
 
-    await placeholder.edit_text(
-        f"'{saved['name']}' saved — {len(models)} chat models available at "
+    await _show(
+        update,
+        f"✅ '{saved['name']}' saved — {len(models)} chat models available at "
         f"{resolved_url}.\n\nSelect the model for new sessions:",
-        reply_markup=_custom_picker_keyboard(
+        _custom_picker_keyboard(
             models, page=0, current_id=_current_custom_model(context)
         ),
+        placeholder=placeholder,
     )
 
 
@@ -252,8 +271,9 @@ async def _handle_custom_retry(update: Update, context: Context) -> None:
 
     await _show(
         update,
-        f"Endpoint: {context.user_data['_custom_pending_url']}\n\n"
-        "Send the API key again, or continue without one.",
+        f"• Endpoint: {context.user_data['_custom_pending_url']}\n\n"
+        "Send the API key again, or continue without one.\n\n"
+        "Send /cancel to cancel.",
         _custom_key_prompt_keyboard(),
     )
 
@@ -296,18 +316,20 @@ async def _handle_custom_use(
     models = _cached_models(context, name)
 
     if models is None:
-        placeholder = await _show(update, f"Fetching models from {name}...")
+        placeholder = await _show(update, f"⏳ Fetching models from {name}…")
         try:
             resolved_url, models = await fetch_models(
                 provider["base_url"], provider.get("api_key", "")
             )
         except CustomProviderError as e:
-            await placeholder.edit_text(
-                f"'{name}' isn't responding: {e}",
-                reply_markup=_custom_error_keyboard(
+            await _show(
+                update,
+                f"❌ '{name}' isn't responding: {e}",
+                _custom_error_keyboard(
                     f"agent:cu_use:{key}",
-                    secondary=("Change API Key", f"agent:cu_key:{key}"),
+                    secondary=("✏️ Change API Key", f"agent:cu_key:{key}"),
                 ),
+                placeholder=placeholder,
             )
             return
         _cache_models(context, name, models)
@@ -362,7 +384,8 @@ async def _handle_custom_search_prompt(update: Update, context: Context) -> None
     context.user_data["_custom_typing_search"] = True
     await _show(
         update,
-        "Send a search term to filter the model list (e.g. 'llama' or '70b').",
+        "Send a search term to filter the model list (e.g. 'llama' or '70b').\n\n"
+        "Send /cancel to cancel.",
         _custom_input_keyboard(),
     )
 
@@ -370,7 +393,7 @@ async def _handle_custom_search_prompt(update: Update, context: Context) -> None
 async def _resolve_custom_search(update: Update, context: Context, text: str) -> None:
     """Apply a typed search term and re-render page 1."""
     term = text.strip()
-    if term.lower() in ("/cancel", "cancel"):
+    if term.lower() == "cancel":
         term = ""
     context.user_data["_custom_filter"] = term
     await _handle_custom_page(update, context, page=0)
@@ -407,15 +430,15 @@ async def _handle_custom_pick(update: Update, context: Context, token: str) -> N
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Change Model", callback_data="agent:cu_page:0"
+                    text="✏️ Change Model", callback_data="agent:cu_page:0"
                 )
             ],
-            [InlineKeyboardButton(text="Back to Agent", callback_data="agent:menu")],
+            [ui.back_button("agent:menu", "Agent")],
         ]
     )
     await _show(
         update,
-        f"LLM set to {model_id} via '{provider_name}'.\n\n"
+        f"✅ LLM set to {model_id} via '{provider_name}'.\n\n"
         "New sessions will use this model.",
         keyboard,
     )
@@ -434,13 +457,13 @@ async def _handle_custom_manage(update: Update, context: Context) -> None:
         return
 
     lines = [
-        f"{p['name']} — {p['base_url']} "
+        f"• {p['name']} — {p['base_url']} "
         f"({'API key saved' if p.get('api_key') else 'no API key'})"
         for p in providers
     ]
     await _show(
         update,
-        "Manage endpoints\n\n" + "\n".join(lines),
+        "Manage your saved endpoints:\n\n" + "\n".join(lines),
         _custom_manage_keyboard(providers),
     )
 
@@ -466,7 +489,7 @@ async def _handle_custom_rekey(
     await _show(
         update,
         f"Send the new API key for '{provider['name']}' ({provider['base_url']}).\n\n"
-        "Your message is deleted as soon as it's read.",
+        "Your message is deleted as soon as it's read.\n\nSend /cancel to cancel.",
         _custom_key_prompt_keyboard(),
     )
 
@@ -483,7 +506,7 @@ async def _handle_custom_delete_confirm(
 
     await _show(
         update,
-        f"Forget '{provider['name']}' ({provider['base_url']})?\n\n"
+        f"🗑 Forget '{provider['name']}' ({provider['base_url']})?\n\n"
         "The saved URL and API key are deleted from this bot.",
         _custom_delete_keyboard(provider["name"]),
     )

@@ -19,6 +19,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.auth import gateway_required
 from utils.telegram_formatters import (
     KNOWN_TOKENS,
@@ -546,7 +547,7 @@ async def show_liquidity_menu(
 
         # Show active positions
         if positions:
-            help_text += rf"━━━ Active Positions \({len(positions)}\) ━━━" + "\n"
+            help_text += rf"*Active Positions \({len(positions)}\)*" + "\n"
             for i, pos in enumerate(positions[:5], 1):  # Show max 5
                 line = _format_compact_position_line(
                     pos, token_cache, index=i, token_prices=token_prices
@@ -604,14 +605,14 @@ async def show_liquidity_menu(
         ]  # Most recent 5
 
         if closed_positions:
-            help_text += r"━━━ Closed Positions ━━━" + "\n"
+            help_text += r"*Closed Positions*" + "\n"
             for pos in closed_positions:
                 line = _format_closed_position_line(pos, token_cache, token_prices)
                 help_text += escape_markdown_v2(line) + "\n"
             help_text += "\n"
 
         # Add explore pools section
-        help_text += r"━━━ 🔍 Explore Pools ━━━" + "\n"
+        help_text += r"*🔍 Explore Pools*" + "\n"
         help_text += r"🦎 Gecko \- Trending, top, new pools" + "\n"
         help_text += r"🔍 Pool Info \- Look up pool by address" + "\n"
         help_text += r"📋 Meteora \- Search Meteora DLMM pools" + "\n"
@@ -709,21 +710,25 @@ async def show_liquidity_menu(
 
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+    # The message now showing lp_positions_cache, for the stale-menu guard
+    menu_id = None
     if send_new or not update.callback_query:
         if update.message:
-            await update.message.answer(
+            sent = await update.message.answer(
                 help_text,
                 parse_mode="MarkdownV2",
                 reply_markup=reply_markup,
                 link_preview_options=NO_LINK_PREVIEW,
             )
+            menu_id = sent.message_id
         elif update.callback_query:
-            await update.callback_query.message.answer(
+            sent = await update.callback_query.message.answer(
                 help_text,
                 parse_mode="MarkdownV2",
                 reply_markup=reply_markup,
                 link_preview_options=NO_LINK_PREVIEW,
             )
+            menu_id = sent.message_id
     else:
         msg = update.callback_query.message
         try:
@@ -733,13 +738,15 @@ async def show_liquidity_menu(
                     await msg.delete()
                 except Exception:
                     pass
-                await msg.answer(
+                sent = await msg.answer(
                     help_text,
                     parse_mode="MarkdownV2",
                     reply_markup=reply_markup,
                     link_preview_options=NO_LINK_PREVIEW,
                 )
+                menu_id = sent.message_id
             else:
+                menu_id = msg.message_id
                 await msg.edit_text(
                     help_text,
                     parse_mode="MarkdownV2",
@@ -751,14 +758,16 @@ async def show_liquidity_menu(
                 logger.warning(f"Failed to edit liquidity menu: {e}")
                 # Fallback: send new message
                 try:
-                    await msg.answer(
+                    sent = await msg.answer(
                         help_text,
                         parse_mode="MarkdownV2",
                         reply_markup=reply_markup,
                         link_preview_options=NO_LINK_PREVIEW,
                     )
+                    menu_id = sent.message_id
                 except Exception:
                     pass
+    ui.remember_menu(context.user_data, "dex_lp", menu_id)
 
 
 async def handle_lp_refresh(update: Update, context: Context) -> None:
@@ -775,6 +784,11 @@ async def handle_lp_refresh(update: Update, context: Context) -> None:
 async def handle_lp_pos_view(update: Update, context: Context, pos_index: int) -> None:
     """Handle position view button - shows detailed position info"""
     from .pools import handle_pos_view
+
+    query = update.callback_query
+    if not ui.is_current_menu(context.user_data, "dex_lp", query.message):
+        await ui.refuse_stale_menu(query, "dex:liquidity")
+        return
 
     # Get position from lp_positions_cache (list) and copy to positions_cache (dict)
     positions = context.user_data.get("lp_positions_cache", [])
@@ -1038,7 +1052,7 @@ async def handle_lp_history(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        text="🔄 Clear Filters", callback_data="dex:lp_hist_clear"
+                        text="🧹 Clear Filters", callback_data="dex:lp_hist_clear"
                     )
                 ]
             )
@@ -1105,7 +1119,7 @@ async def handle_lp_history(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="🔄 Clear Filters", callback_data="dex:lp_hist_clear"
+                    text="🧹 Clear Filters", callback_data="dex:lp_hist_clear"
                 ),
                 InlineKeyboardButton(text="« Back", callback_data="dex:lp_refresh"),
             ]

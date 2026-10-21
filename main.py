@@ -408,6 +408,20 @@ async def error_handler(update: Update | None, context: Context) -> None:
 
     logger.exception("Exception while handling an update:", exc_info=context.error)
 
+    # Say so in the chat: a handler that failed after answering its button,
+    # or a command that crashed, otherwise just goes quiet.
+    chat = update.effective_chat if update is not None else None
+    if chat is None or context.bot is None:
+        return
+    from utils.telegram_ui import SOMETHING_WRONG
+
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id, text=SOMETHING_WRONG, parse_mode="MarkdownV2"
+        )
+    except Exception as exc:
+        logger.debug("Could not report the failure to chat %s: %s", chat.id, exc)
+
 
 def run() -> None:
     """Configure logging and run the bot."""

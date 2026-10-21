@@ -9,6 +9,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_error_message,
@@ -46,7 +47,7 @@ async def handle_pool_list(
         r"`USDC 5`" + "\n"
     )
 
-    keyboard = [[InlineKeyboardButton(text="« Cancel", callback_data="dex:liquidity")]]
+    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "pool_list"
@@ -58,6 +59,12 @@ async def handle_pool_list(
     await update.callback_query.message.edit_text(
         help_text, parse_mode="MarkdownV2", reply_markup=reply_markup
     )
+
+
+async def handle_pool_list_search(update: Update, context: Context) -> None:
+    """Search again on the connector the current results came from"""
+    connector = context.user_data.get("pool_list_connector", "meteora")
+    await handle_pool_list(update, context, connector=connector)
 
 
 async def handle_pool_list_orca(update: Update, context: Context) -> None:
@@ -213,8 +220,12 @@ def _build_pool_selection_keyboard(
     # Add search again and back buttons
     keyboard.append(
         [
-            InlineKeyboardButton(text="🔍 New Search", callback_data="dex:pool_list"),
-            InlineKeyboardButton(text="« LP Menu", callback_data="dex:liquidity"),
+            InlineKeyboardButton(
+                text="🔍 New Search", callback_data="dex:pool_list_search"
+            ),
+            InlineKeyboardButton(
+                text="« Back to LP Menu", callback_data="dex:liquidity"
+            ),
         ]
     )
 
@@ -333,7 +344,11 @@ async def process_pool_list(update: Update, context: Context, user_input: str) -
             message = escape_markdown_v2("📋 No pools found")
             context.user_data["pool_list_cache"] = []
             keyboard = [
-                [InlineKeyboardButton(text="« LP Menu", callback_data="dex:liquidity")]
+                [
+                    InlineKeyboardButton(
+                        text="« Back to LP Menu", callback_data="dex:liquidity"
+                    )
+                ]
             ]
             reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         else:
@@ -375,8 +390,8 @@ async def process_pool_list(update: Update, context: Context, user_input: str) -
                 display_pools, search_term, is_pair_search
             )
 
-        # Keep state for pool selection
-        context.user_data["dex_state"] = "pool_list"
+        # Results are picked with buttons; a new search re-arms the prompt
+        context.user_data["dex_state"] = "pool_list_results"
 
         # Edit the loading message with results (we already have message_id/chat_id from loading step)
         message_id = context.user_data.get("pool_list_message_id")
@@ -397,6 +412,11 @@ async def process_pool_list(update: Update, context: Context, user_input: str) -
             )
             context.user_data["pool_list_message_id"] = sent_msg.message_id
             context.user_data["pool_list_chat_id"] = sent_msg.chat.id
+        ui.remember_menu(
+            context.user_data,
+            "dex_pool_list",
+            context.user_data.get("pool_list_message_id"),
+        )
 
     except Exception as e:
         logger.error(f"Error listing pools: {e}", exc_info=True)
@@ -427,8 +447,8 @@ async def handle_pool_list_back(update: Update, context: Context) -> None:
         cached_pools, search_term, is_pair_search
     )
 
-    # Keep state for pool selection
-    context.user_data["dex_state"] = "pool_list"
+    # Results are picked with buttons; a new search re-arms the prompt
+    context.user_data["dex_state"] = "pool_list_results"
 
     # Delete the current message (could be a photo) and send new text message
     chat = update.callback_query.message.chat
@@ -445,3 +465,4 @@ async def handle_pool_list_back(update: Update, context: Context) -> None:
     # Store message ID for future navigation
     context.user_data["pool_list_message_id"] = sent_msg.message_id
     context.user_data["pool_list_chat_id"] = chat.id
+    ui.remember_menu(context.user_data, "dex_pool_list", sent_msg.message_id)

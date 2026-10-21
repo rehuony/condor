@@ -23,6 +23,7 @@ from condor.preferences import get_chat_binding
 from handlers import agents as agents_mod
 from handlers.agents import menu as menu_mod
 from tests.conftest import patch_agents
+from tests.support.markdown_v2 import plain
 
 # --- doubles -----------------------------------------------------------------
 
@@ -66,11 +67,11 @@ class _Message:
         self.message_id = 7
 
     async def edit_text(self, text, **kw):
-        self._rendered.append(text)
+        self._rendered.append(plain(text))
         return self
 
     async def answer(self, text, **kw):
-        self._rendered.append(text)
+        self._rendered.append(plain(text))
         return self
 
 

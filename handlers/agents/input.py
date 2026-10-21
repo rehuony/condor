@@ -17,6 +17,7 @@ from condor.telegram.types import (
     Context,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     forget_chat_conversation,
@@ -82,7 +83,10 @@ async def _consume_agent_text_input(update, context, text: str) -> bool:
         # "Fresh" is the whole point of the verb: without this the auto-create
         # below would replay the transcript the user just asked to leave.
         forget_chat_conversation(context.user_data)
-        await update.message.answer("Session reset. Send a message to start fresh.")
+        await update.message.answer(
+            ui.notice("success", "Session reset", "Send a message to start fresh."),
+            parse_mode="MarkdownV2",
+        )
         return True
 
     # Handle custom compact input

@@ -10,6 +10,7 @@ from condor.telegram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     stored_chat_conversation,
@@ -84,7 +85,11 @@ async def _handle_pasted_secrets(update, context, text: str, *, messages=None) -
                 "and deleted the message", "but could not delete all source messages"
             )
         )
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=notice)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=ui.notice("warning", "Recovery phrase removed", notice),
+            parse_mode="MarkdownV2",
+        )
 
     from condor.preferences import secret_notices_enabled
 
@@ -105,12 +110,17 @@ async def _handle_pasted_secrets(update, context, text: str, *, messages=None) -
         told.append(kind)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=_AMBIGUOUS_NOTICE[kind] + _AMBIGUOUS_TAIL,
+            text=ui.notice(
+                "warning",
+                "Possible key in that message",
+                _AMBIGUOUS_NOTICE[kind] + _AMBIGUOUS_TAIL,
+            ),
+            parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="Stop Warning Me",
+                            text="🔕 Stop Warning Me",
                             callback_data="agent:secret_notices_off",
                         )
                     ]

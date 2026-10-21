@@ -458,9 +458,12 @@ def test_an_overwrite_confirmation_carries_the_recorded_impact(
         detail=pending.detail,
     )
     asyncio.run(TelegramChannel(_Bot(), 42).deliver(pending))
-    assert expected in sent["text"]
-    assert sent["text"].index(pending.summary) < sent["text"].index(expected)
-    assert sent["text"].endswith("Approve this action?")
+    from utils.telegram_ui import esc
+
+    assert esc(expected) in sent["text"]
+    assert sent["text"].index(esc(pending.summary)) < sent["text"].index(esc(expected))
+    assert sent["text"].endswith("_Approve this action?_")
+    assert sent["parse_mode"] == "MarkdownV2"
 
 
 def test_condor_targeting_another_agent_reads_that_agents_preview(

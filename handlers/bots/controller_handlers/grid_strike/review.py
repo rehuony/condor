@@ -136,7 +136,7 @@ async def _show_wizard_review_step(update: Update, context: Context) -> None:
             InlineKeyboardButton(text="✅ Save Config", callback_data="bots:gs_save"),
         ],
         [
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -247,7 +247,7 @@ async def _update_wizard_message_for_review(update: Update, context: Context) ->
             InlineKeyboardButton(text="✅ Save Config", callback_data="bots:gs_save"),
         ],
         [
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
         ],
     ]
 
@@ -281,7 +281,7 @@ async def handle_gs_edit_id(update: Update, context: Context) -> None:
                 text=f"Keep: {current_id[:25]}", callback_data="bots:gs_save"
             )
         ],
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_review_back")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_review_back")],
     ]
 
     # Delete current message (could be photo)
@@ -327,7 +327,7 @@ async def handle_gs_edit_tp(update: Update, context: Context) -> None:
     current_tp = config.get("triple_barrier_config", {}).get("take_profit", 0.0001)
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_review_back")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_review_back")],
     ]
 
     try:
@@ -358,7 +358,7 @@ async def handle_gs_edit_act(update: Update, context: Context) -> None:
     current_act = config.get("activation_bounds", 0.01)
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_review_back")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_review_back")],
     ]
 
     try:
@@ -389,7 +389,7 @@ async def handle_gs_edit_max_orders(update: Update, context: Context) -> None:
     current = config.get("max_open_orders", 3)
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_review_back")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_review_back")],
     ]
 
     try:
@@ -420,7 +420,7 @@ async def handle_gs_edit_batch(update: Update, context: Context) -> None:
     current = config.get("max_orders_per_batch", 1)
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_review_back")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_review_back")],
     ]
 
     try:
@@ -458,7 +458,7 @@ async def handle_gs_edit_min_amt(update: Update, context: Context) -> None:
     )
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_review_back")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_review_back")],
     ]
 
     try:
@@ -490,7 +490,7 @@ async def handle_gs_edit_spread(update: Update, context: Context) -> None:
     current = config.get("min_spread_between_orders", 0.0001)
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_review_back")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_review_back")],
     ]
 
     try:
@@ -541,10 +541,10 @@ async def handle_gs_save(update: Update, context: Context) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="Edit Prices", callback_data="bots:gs_back_to_prices"
+                    text="✏️ Edit Prices", callback_data="bots:gs_back_to_prices"
                 )
             ],
-            [InlineKeyboardButton(text="Cancel", callback_data="bots:main_menu")],
+            [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")],
         ]
         try:
             await query.message.delete()
@@ -588,12 +588,12 @@ async def handle_gs_save(update: Update, context: Context) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="Create Another", callback_data="bots:new_grid_strike"
+                    text="➕ Create Another", callback_data="bots:new_grid_strike"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Back to Configs", callback_data="bots:controller_configs"
+                    text="« Back to Configs", callback_data="bots:controller_configs"
                 )
             ],
         ]
@@ -608,8 +608,8 @@ async def handle_gs_save(update: Update, context: Context) -> None:
     except Exception as e:
         logger.error(f"Error saving config: {e}", exc_info=True)
         keyboard = [
-            [InlineKeyboardButton(text="Try Again", callback_data="bots:gs_save")],
-            [InlineKeyboardButton(text="Back", callback_data="bots:gs_review_back")],
+            [InlineKeyboardButton(text="🔁 Try Again", callback_data="bots:gs_save")],
+            [InlineKeyboardButton(text="« Back", callback_data="bots:gs_review_back")],
         ]
         await status_msg.edit_text(
             format_error_message(f"Failed to save: {str(e)}"),
@@ -679,7 +679,7 @@ async def _update_wizard_message_for_prices_after_edit(
         [
             InlineKeyboardButton(text="💾 Save Config", callback_data="bots:gs_save"),
         ],
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")],
     ]
 
     # Get config values
@@ -843,7 +843,7 @@ async def _update_wizard_caption_only(
         [
             InlineKeyboardButton(text="💾 Save Config", callback_data="bots:gs_save"),
         ],
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")],
     ]
 
     # Grid analysis info
@@ -922,7 +922,7 @@ async def handle_gs_edit_price(
     context.user_data["gs_wizard_step"] = field
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:gs_back_to_prices")]
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:gs_back_to_prices")]
     ]
 
     await query.message.edit_text(

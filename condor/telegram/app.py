@@ -190,6 +190,11 @@ class TelegramApp:
         async def _on_callback(query: CallbackQuery, event_update: Update) -> None:
             handler = get_routes().callback_for(query.data)
             if handler is None:
+                # Stop the button's spinner; nothing else claims this tap.
+                try:
+                    await query.answer()
+                except Exception as exc:
+                    log.debug("Unrouted callback answer failed: %s", exc)
                 return
             update = TgUpdate(callback_query=query, raw=event_update)
             await handler(update, self._context_for(update))

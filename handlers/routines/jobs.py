@@ -401,8 +401,9 @@ async def _interval_job_callback(job: ScheduledJob) -> None:
     interval_str = _format_schedule(schedule)
     icon = "✅" if not result.startswith("Error") else "❌"
     markdown = (
-        f"{icon} **{_display_name(routine_name)}** `{instance_id}`\n"
-        f"{interval_str} · Run #{run_count} · {_format_duration(duration)}\n\n"
+        f"{icon} **{_display_name(routine_name)}**\n"
+        f"_{interval_str} · Run #{run_count} · {_format_duration(duration)} · "
+        f"`{instance_id}`_\n\n"
         f"{result}"
     )
     try:
@@ -453,7 +454,7 @@ async def _oneshot_job_callback(job: ScheduledJob) -> None:
         icon = "✅" if not result.startswith("Error") else "❌"
         markdown = (
             f"{icon} **{_display_name(routine_name)}**\n"
-            f"Duration: {_format_duration(duration)}\n\n"
+            f"_Duration: {_format_duration(duration)}_\n\n"
             f"{result}"
         )
         try:
@@ -513,7 +514,7 @@ async def _daily_job_callback(job: ScheduledJob) -> None:
 
     # Send notification
     icon = "✅" if not result.startswith("Error") else "❌"
-    markdown = f"{icon} **Daily: {_display_name(routine_name)}**\n\n{result}"
+    markdown = f"{icon} **{_display_name(routine_name)}**\n_Daily run_\n\n{result}"
     try:
         await _send_routine_result(context.bot, chat_id, markdown, report_id)
     except Exception as e:

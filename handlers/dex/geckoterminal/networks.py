@@ -11,6 +11,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2
 
 from .._shared import cached_call
@@ -72,7 +73,7 @@ async def handle_gecko_networks(update: Update, context: Context) -> None:
     except Exception as e:
         logger.error(f"Error fetching networks: {e}", exc_info=True)
         await query.message.edit_text(
-            f"❌ Error fetching networks: {escape_markdown_v2(str(e))}",
+            ui.notice("error", "Could not fetch networks", str(e)),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[

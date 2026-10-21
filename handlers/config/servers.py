@@ -12,8 +12,9 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.auth import restricted
-from utils.telegram_formatters import escape_markdown_v2
+from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ async def show_api_servers(query, context: Context) -> None:
                         text="➕ Add Server", callback_data="api_server_add"
                     )
                 ],
-                [InlineKeyboardButton(text="« Close", callback_data="config_close")],
+                [InlineKeyboardButton(text="✕ Close", callback_data="config_close")],
             ]
         else:
             # Build server list with status
@@ -181,7 +182,7 @@ async def show_api_servers(query, context: Context) -> None:
                     InlineKeyboardButton(
                         text="🔄 Refresh", callback_data="config_api_servers"
                     ),
-                    InlineKeyboardButton(text="« Close", callback_data="config_close"),
+                    InlineKeyboardButton(text="✕ Close", callback_data="config_close"),
                 ]
             ]
 
@@ -201,7 +202,7 @@ async def show_api_servers(query, context: Context) -> None:
         logger.error(f"Error showing API servers: {e}", exc_info=True)
         error_text = f"❌ Error loading API servers: {escape_markdown_v2(str(e))}"
         keyboard = [
-            [InlineKeyboardButton(text="« Close", callback_data="config_close")]
+            [InlineKeyboardButton(text="✕ Close", callback_data="config_close")]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await query.message.edit_text(
@@ -488,7 +489,7 @@ async def confirm_delete_server(query, context: Context, server_name: str) -> No
         ],
         [
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data="api_server_cancel_delete"
+                text="✕ Cancel", callback_data="api_server_cancel_delete"
             )
         ],
     ]
@@ -596,7 +597,7 @@ def _build_add_server_message(server_data: dict, current_field: str) -> tuple:
         )
 
     buttons.append(
-        InlineKeyboardButton(text="❌ Cancel", callback_data="config_api_servers")
+        InlineKeyboardButton(text="✕ Cancel", callback_data="config_api_servers")
     )
 
     keyboard = [buttons]
@@ -686,7 +687,7 @@ async def show_add_server_confirmation(context: Context, bot, chat_id: int) -> N
             InlineKeyboardButton(
                 text="✅ Confirm & Add", callback_data="add_server_confirm"
             ),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="config_api_servers"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="config_api_servers"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1164,7 +1165,10 @@ async def handle_modify_value_input(update: Update, context: Context) -> None:
         if not server_name or not field:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="❌ Session expired. Please start over with /config",
+                text=format_error_message(
+                    "Session expired. Please start over with /config"
+                ),
+                parse_mode="MarkdownV2",
             )
             context.user_data.pop("awaiting_modify_input", None)
             return
@@ -1183,7 +1187,10 @@ async def handle_modify_value_input(update: Update, context: Context) -> None:
                 else:
                     await context.bot.send_message(
                         chat_id=chat_id,
-                        text="❌ Port must be a number. Please try again:",
+                        text=format_error_message(
+                            "Port must be a number. Please try again:"
+                        ),
+                        parse_mode="MarkdownV2",
                     )
                 return
 
@@ -1245,7 +1252,10 @@ async def handle_modify_value_input(update: Update, context: Context) -> None:
                 context.user_data.pop("modify_chat_id", None)
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"✅ Successfully updated {field} for server '{server_name}'",
+                    text=ui.notice(
+                        "success", f"Updated {field} for server '{server_name}'"
+                    ),
+                    parse_mode="MarkdownV2",
                 )
         else:
             # Clean up state even on failure
@@ -1261,7 +1271,9 @@ async def handle_modify_value_input(update: Update, context: Context) -> None:
                 )
             else:
                 await context.bot.send_message(
-                    chat_id=chat_id, text="❌ Failed to update server."
+                    chat_id=chat_id,
+                    text=format_error_message("Failed to update server."),
+                    parse_mode="MarkdownV2",
                 )
 
     except Exception as e:
@@ -1271,7 +1283,11 @@ async def handle_modify_value_input(update: Update, context: Context) -> None:
         context.user_data.pop("modify_message_id", None)
         context.user_data.pop("modify_chat_id", None)
         try:
-            await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=format_error_message(str(e)),
+                parse_mode="MarkdownV2",
+            )
         except:
             pass
 
@@ -1446,7 +1462,7 @@ async def start_share_flow(query, context: Context, server_name: str) -> None:
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        text="❌ Cancel",
+                        text="✕ Cancel",
                         callback_data=f"api_server_share_cancel_{server_name}",
                     )
                 ]
@@ -1463,7 +1479,7 @@ async def start_share_flow(query, context: Context, server_name: str) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="❌ Cancel",
+                    text="✕ Cancel",
                     callback_data=f"api_server_share_cancel_{server_name}",
                 )
             ]
@@ -1520,7 +1536,7 @@ async def select_share_user(
         ],
         [
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
+                text="✕ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
             )
         ],
     ]
@@ -1559,7 +1575,7 @@ async def start_manual_share_flow(query, context: Context, server_name: str) -> 
     keyboard = [
         [
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
+                text="✕ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
             )
         ]
     ]
@@ -1606,7 +1622,7 @@ async def handle_share_user_id_input(update: Update, context: Context) -> None:
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="❌ Cancel",
+                                text="✕ Cancel",
                                 callback_data=f"api_server_share_cancel_{server_name}",
                             )
                         ]
@@ -1629,7 +1645,7 @@ async def handle_share_user_id_input(update: Update, context: Context) -> None:
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="❌ Cancel",
+                                text="✕ Cancel",
                                 callback_data=f"api_server_share_cancel_{server_name}",
                             )
                         ]
@@ -1651,7 +1667,7 @@ async def handle_share_user_id_input(update: Update, context: Context) -> None:
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="❌ Cancel",
+                                text="✕ Cancel",
                                 callback_data=f"api_server_share_cancel_{server_name}",
                             )
                         ]
@@ -1688,7 +1704,7 @@ async def handle_share_user_id_input(update: Update, context: Context) -> None:
         ],
         [
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
+                text="✕ Cancel", callback_data=f"api_server_share_cancel_{server_name}"
             )
         ],
     ]

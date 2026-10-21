@@ -67,6 +67,8 @@ def clear_all_input_states(context: Context) -> None:
     context.user_data.pop("trade_menu_chat_id", None)
     context.user_data.pop("current_market_price", None)
     context.user_data.pop("swap_params", None)
+    context.user_data.pop("swap_menu_message_id", None)
+    context.user_data.pop("swap_menu_chat_id", None)
 
     # DEX trading states
     context.user_data.pop("dex_state", None)
@@ -81,6 +83,11 @@ def clear_all_input_states(context: Context) -> None:
     context.user_data.pop("quote_swap_params", None)
     context.user_data.pop("execute_swap_params", None)
     context.user_data.pop("dex_previous_state", None)
+    context.user_data.pop("add_position_prompt_msg_id", None)
+    context.user_data.pop("pool_list_message_id", None)
+    context.user_data.pop("pool_list_chat_id", None)
+    context.user_data.pop("pool_detail_message_id", None)
+    context.user_data.pop("pool_detail_chat_id", None)
 
     # Config - server modification states
     context.user_data.pop("modifying_server", None)
@@ -102,10 +109,12 @@ def clear_all_input_states(context: Context) -> None:
     context.user_data.pop("awaiting_wallet_input", None)
     context.user_data.pop("wallet_chain", None)
     context.user_data.pop("wallet_address", None)
+    context.user_data.pop("editing_wallet_networks", None)
 
     # Gateway - pool states
     context.user_data.pop("awaiting_pool_input", None)
     context.user_data.pop("pool_connector", None)
+    context.user_data.pop("pending_pool_delete", None)
 
     # Gateway - connector states
     context.user_data.pop("awaiting_connector_input", None)
@@ -122,6 +131,7 @@ def clear_all_input_states(context: Context) -> None:
     # Gateway - token states
     context.user_data.pop("awaiting_token_input", None)
     context.user_data.pop("token_network", None)
+    context.user_data.pop("pending_token_delete", None)
 
     # Gateway - RPC provider states
     context.user_data.pop("awaiting_rpc_input", None)
@@ -137,6 +147,9 @@ def clear_all_input_states(context: Context) -> None:
     context.user_data.pop("controller_configs_list", None)
     context.user_data.pop("selected_controllers", None)
     context.user_data.pop("editing_controller_field", None)
+    context.user_data.pop("editing_ctrl_field", None)
+    context.user_data.pop("cfg_edit_field", None)
+    context.user_data.pop("deploy_current_field", None)
     context.user_data.pop("deploy_params", None)
     context.user_data.pop("editing_deploy_field", None)
     context.user_data.pop("selected_configs", None)
@@ -171,6 +184,7 @@ def clear_all_input_states(context: Context) -> None:
     context.user_data.pop("_custom_pending_url", None)
     context.user_data.pop("_custom_pending_name", None)
     context.user_data.pop("_custom_rekey_provider", None)
+    context.user_data.pop("_custom_filter", None)
 
     # Routines states
     context.user_data.pop("routines_state", None)
@@ -209,6 +223,9 @@ def clear_all_input_states(context: Context) -> None:
         except Exception:
             pass
 
+    # The chat the armed input belonged to (see handlers.messages)
+    context.user_data.pop("_input_chat_id", None)
+
     # Portfolio snapshot states (large transient data)
     context.user_data.pop("portfolio_text_message_id", None)
     context.user_data.pop("portfolio_photo_message_id", None)
@@ -239,12 +256,26 @@ async def cancel_command(update: Update, context: Context) -> None:
 
     @restricted
     async def _cancel(update: Update, context: Context) -> None:
+        from handlers.agents.input import _ARMED_TEXT_INPUT_KEYS
+        from handlers.messages import _input_snapshot
         from handlers.trade_cards import cancel_amount_input
+        from utils.telegram_ui import notice
 
+        armed = bool(_input_snapshot(context.user_data)) or any(
+            context.user_data.get(key) for key in _ARMED_TEXT_INPUT_KEYS
+        )
         cancelled_card_input = await cancel_amount_input(update, context)
         clear_all_input_states(context)
-        await update.message.answer(
-            "已取消自定义金额。" if cancelled_card_input else "Cancelled."
-        )
+        if cancelled_card_input:
+            text = notice(
+                "cancelled",
+                "Custom amount cancelled",
+                "The card is back to amount selection.",
+            )
+        elif armed:
+            text = notice("cancelled", "Input cancelled")
+        else:
+            text = notice("info", "Nothing to cancel")
+        await update.message.answer(text, parse_mode="MarkdownV2")
 
     await _cancel(update, context)

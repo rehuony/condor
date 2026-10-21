@@ -14,6 +14,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2
 
 from .._shared import format_timeframe_label
@@ -319,7 +320,7 @@ async def _show_pool_chart(
         except Exception:
             # If loading_msg was deleted, send new error message
             await chat.send_message(
-                f"❌ Error loading chart: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not load the chart", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[

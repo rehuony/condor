@@ -10,6 +10,7 @@ from condor.runtime import client as runtime
 from condor.telegram.output import runs
 from condor.telegram.output.runs import RunTarget, register_run
 from handlers.agents.stop import handle_stop_callback, stop_command
+from tests.support.markdown_v2 import plain
 
 CHAT_ID = 4242
 USER_ID = 7
@@ -33,7 +34,7 @@ def approved_user(monkeypatch):
 
 def update(replies, *, token=None, message_id=19, user_id=USER_ID):
     async def answer(text="", **kwargs):
-        replies.append(text)
+        replies.append(plain(text))
 
     return SimpleNamespace(
         message=SimpleNamespace(text="/stop", answer=answer),
@@ -92,7 +93,7 @@ def test_stop_snapshots_preparing_queued_and_running_across_conversations(
         "later"
     ]
     assert not unrelated.stopped
-    assert "cleared the queue" in replies[0]
+    assert "the queue is clear" in replies[0]
 
 
 def test_repeated_old_button_does_not_stop_later_input(monkeypatch):
@@ -150,7 +151,7 @@ def test_button_requires_the_original_message_and_owner(
 def test_stop_on_idle_chat_changes_nothing(approved_user):
     replies = []
     asyncio.run(stop_command(update(replies), SimpleNamespace(user_data={})))
-    assert replies == ["Nothing to stop — the agent is idle."]
+    assert replies == ["ℹ️ Nothing to stop\n\nThe agent is idle."]
 
 
 def test_stop_is_private_chat_only(approved_user):

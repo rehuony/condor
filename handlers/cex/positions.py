@@ -11,6 +11,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_error_message,
@@ -112,6 +113,11 @@ async def handle_positions(update: Update, context: Context) -> None:
         await update.callback_query.message.edit_text(
             message, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
+        ui.remember_menu(
+            context.user_data,
+            "cex_positions",
+            update.callback_query.message.message_id,
+        )
 
     except Exception as e:
         logger.error(f"Error getting positions: {e}", exc_info=True)
@@ -125,6 +131,11 @@ async def handle_trade_position(
     update: Update, context: Context, position_index: int
 ) -> None:
     """Handle quick trade for a specific position - opens trade menu with position details pre-filled"""
+    if not ui.is_current_menu(
+        context.user_data, "cex_positions", update.callback_query.message
+    ):
+        await ui.refuse_stale_menu(update.callback_query, "cex:positions")
+        return
     from .trade import show_trade_menu
 
     try:
@@ -185,6 +196,11 @@ async def handle_close_position(
     update: Update, context: Context, position_index: int
 ) -> None:
     """Handle closing a specific position"""
+    if not ui.is_current_menu(
+        context.user_data, "cex_positions", update.callback_query.message
+    ):
+        await ui.refuse_stale_menu(update.callback_query, "cex:positions")
+        return
     try:
         positions = context.user_data.get("current_positions", [])
 
@@ -266,7 +282,7 @@ async def handle_close_position(
                     text="✅ Confirm Close",
                     callback_data=f"cex:confirm_close:{position_index}",
                 ),
-                InlineKeyboardButton(text="❌ Cancel", callback_data="cex:positions"),
+                InlineKeyboardButton(text="✕ Cancel", callback_data="cex:positions"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -287,6 +303,11 @@ async def handle_confirm_close_position(
     update: Update, context: Context, position_index: int
 ) -> None:
     """Confirm and execute closing a position"""
+    if not ui.is_current_menu(
+        context.user_data, "cex_positions", update.callback_query.message
+    ):
+        await ui.refuse_stale_menu(update.callback_query, "cex:positions")
+        return
     from ._shared import invalidate_cache
 
     try:

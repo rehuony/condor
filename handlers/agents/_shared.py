@@ -12,8 +12,6 @@ handler imports keep working. New code should import from the new homes.
 import hashlib
 import logging
 
-# Re-exports for Telegram callers (ARCH-190) — the implementations live in
-# condor/ now; condor/ itself must never import back through this module.
 from condor.llm.options import (  # noqa: F401
     AGENT_OPTIONS,
     DEFAULT_AGENT,
@@ -48,7 +46,17 @@ from condor.runtime.toolsets import (  # noqa: F401
     get_project_dir,
 )
 
+# Re-exports for Telegram callers (ARCH-190) — the implementations live in
+# condor/ now; condor/ itself must never import back through this module.
+from utils import telegram_ui as ui
+
 log = logging.getLogger(__name__)
+
+#: Shared agent notices (MarkdownV2).
+NO_SESSION = ui.notice("info", "No active session", "Send a message to start one.")
+PRIVATE_ONLY = ui.notice(
+    "info", "Private chats only", "The agent is only available in private chats."
+)
 
 
 def bind_chat_to_agent(user_data: dict | None, agent_slug: str) -> None:
@@ -70,10 +78,17 @@ def bind_chat_to_agent(user_data: dict | None, agent_slug: str) -> None:
 
 
 def stale_binding_notice(slug: str) -> str:
-    """Told once, when a bound Agent's directory is gone by the time we respawn."""
-    return (
-        f"The agent '{slug}' no longer exists, so this chat is back to Condor. "
-        "Use /agent → Talk To if you want to bind it to another one."
+    """Told once, when a bound Agent's directory is gone by the time we respawn.
+
+    MarkdownV2, like every agent screen it is prepended to.
+    """
+    from utils.telegram_ui import notice
+
+    return notice(
+        "warning",
+        "Agent no longer exists",
+        f"The agent '{slug}' was removed, so this chat is back to Condor. "
+        "Use /agent → Talk To to bind it to another one.",
     )
 
 

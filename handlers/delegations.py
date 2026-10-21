@@ -56,7 +56,7 @@ def _list_text_and_keyboard(context: Context):
 
     if not items:
         text = (
-            "*Background tasks*\n\n"
+            "🤖 *Background Tasks*\n\n"
             "No delegations in this session\\.\n\n"
             "_Start one with the_ `delegate` _tool or the web dashboard\\._"
         )
@@ -65,7 +65,7 @@ def _list_text_and_keyboard(context: Context):
         ]
         return text, InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    lines = ["*Background tasks*", ""]
+    lines = ["🤖 *Background Tasks*", ""]
     keyboard = []
     for idx, dt in enumerate(items):
         emoji = _STATUS_EMOJI.get(dt.status, "•")
@@ -101,22 +101,23 @@ def _detail_text_and_keyboard(dt, idx: int, page: int = 0):
         body += f"\n\nPartial progress (task incomplete):\n{dt.result}"
     pages = split_text(body, RICH_MAX_LEN) or ["no output yet"]
     page = max(0, min(page, len(pages) - 1))
-    heading = f"{emoji} **{dt.agent_slug.replace('_', ' ')}** · {dt.status}"
+    # Standard Markdown: the result body is model-authored Markdown.
+    heading = f"{emoji} **{dt.agent_slug.replace('_', ' ')}**\n_{dt.status}_"
     text = f"{heading}\n\n{pages[page]}"
 
     buttons = []
     if dt.status == "running":
         buttons.append(
-            InlineKeyboardButton(text="⏹ Stop", callback_data=f"deleg:stop:{idx}")
+            InlineKeyboardButton(text="🛑 Stop", callback_data=f"deleg:stop:{idx}")
         )
-    buttons.append(InlineKeyboardButton(text="↩ Back", callback_data="deleg:list"))
+    buttons.append(InlineKeyboardButton(text="« Back", callback_data="deleg:list"))
     keyboard = []
     if len(pages) > 1:
         navigation = []
         if page:
             navigation.append(
                 InlineKeyboardButton(
-                    text="←", callback_data=f"deleg:view:{idx}:{page - 1}"
+                    text="‹ Prev", callback_data=f"deleg:view:{idx}:{page - 1}"
                 )
             )
         navigation.append(
@@ -128,7 +129,7 @@ def _detail_text_and_keyboard(dt, idx: int, page: int = 0):
         if page + 1 < len(pages):
             navigation.append(
                 InlineKeyboardButton(
-                    text="→", callback_data=f"deleg:view:{idx}:{page + 1}"
+                    text="Next ›", callback_data=f"deleg:view:{idx}:{page + 1}"
                 )
             )
         keyboard.append(navigation)

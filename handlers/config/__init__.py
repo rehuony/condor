@@ -10,6 +10,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils.auth import restricted
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _get_start_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="👑 Admin", callback_data="start:admin")]
         )
     keyboard.append(
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="start:cancel")]
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="start:cancel")]
     )
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -148,6 +149,7 @@ async def _show_start_menu(query, context: Context) -> None:
     )
 
 
+@restricted
 async def config_callback_handler(update: Update, context: Context) -> None:
     """
     Handle callback queries from config menu buttons - Routes to appropriate sub-module

@@ -428,7 +428,7 @@ def test_a_failed_run_is_not_offered_a_restart():
 
     labels = [b.text for row in keyboard.inline_keyboard for b in row]
     assert "Restart Now" not in labels
-    assert labels == ["Back"]
+    assert labels == ["« Back"]
 
 
 def test_a_pending_relaunch_is_still_offered_a_restart():
@@ -444,7 +444,7 @@ def test_a_pending_relaunch_is_still_offered_a_restart():
         keyboard = update_handler._run_keyboard(run)
 
     labels = [b.text for row in keyboard.inline_keyboard for b in row]
-    assert "Restart Now" in labels
+    assert "🔁 Restart Now" in labels
 
 
 def test_a_failed_exec_leaves_a_record(tmp_path, monkeypatch):

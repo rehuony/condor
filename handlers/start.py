@@ -2,7 +2,8 @@
 
 from condor.telegram.types import NO_LINK_PREVIEW, Context, Update
 from handlers import clear_all_input_states
-from utils.auth import restricted
+from utils import telegram_ui as ui
+from utils.auth import ACCESS_DENIED, restricted
 
 
 async def start_command(update: Update, context: Context) -> None:
@@ -24,21 +25,23 @@ async def start_command(update: Update, context: Context) -> None:
 
     # Handle blocked users
     if role == UserRole.BLOCKED:
-        await update.message.answer("Access denied.")
+        await update.message.answer(ACCESS_DENIED, parse_mode="MarkdownV2")
         return
+
+    identity = [
+        ui.bullet("User ID", str(user_id), code_value=True),
+        ui.bullet("Username", handle_display),
+    ]
 
     # Handle pending users
     if role == UserRole.PENDING:
-        reply_text = f"""Access Pending
-
-Your access request is awaiting admin approval.
-
-Your Info:
-User ID: {user_id}
-Username: {handle_display}
-
-You will be notified when approved."""
-        await update.message.answer(reply_text)
+        reply_text = ui.screen(
+            ui.title("⏳", "Access Pending"),
+            ui.esc("Your access request is awaiting admin approval."),
+            identity,
+            ui.hint("You will be notified when approved."),
+        )
+        await update.message.answer(reply_text, parse_mode="MarkdownV2")
         return
 
     # Handle new users - register as pending
@@ -52,34 +55,42 @@ You will be notified when approved."""
         if is_new:
             await _notify_admin_new_user(context, user_id, username)
 
-        reply_text = f"""Access Request Submitted
-
-Your request has been sent to the admin for approval.
-
-Your Info:
-User ID: {user_id}
-Username: {handle_display}
-
-You will be notified when approved."""
-        await update.message.answer(reply_text)
+        reply_text = ui.screen(
+            ui.title("🔒", "Access Request Submitted"),
+            ui.esc("Your request has been sent to the admin for approval."),
+            identity,
+            ui.hint("You will be notified when approved."),
+        )
+        await update.message.answer(reply_text, parse_mode="MarkdownV2")
         return
 
     # User is approved (USER or ADMIN role)
     _capture_identity(update)
     clear_all_input_states(context)
 
-    reply_text = """I can help you create and manage trading bots on any CEX or DEX using Hummingbot API servers\\.
-
-See [this manual](https://github.com/rehuony/condor#readme) if you're new to Condor\\.
-
-You can control me by sending these commands:
-
-/keys \\- add exchange API keys
-/portfolio \\- view balances across exchanges
-/bots \\- deploy and manage trading bots
-/trade \\- place CEX and DEX orders
-/agent \\- AI trading assistant
-/web \\- open the web dashboard"""
+    reply_text = ui.screen(
+        ui.title("🦅", "Condor"),
+        ui.esc(
+            "I help you create and manage trading bots on any CEX or DEX "
+            "through Hummingbot API servers."
+        ),
+        [
+            ui.section("Commands"),
+            *(
+                ui.esc(f"/{name} — {text}")
+                for name, text in (
+                    ("keys", "add exchange API keys"),
+                    ("portfolio", "view balances across exchanges"),
+                    ("bots", "deploy and manage trading bots"),
+                    ("trade", "place CEX and DEX orders"),
+                    ("agent", "AI trading assistant"),
+                    ("web", "open the web dashboard"),
+                )
+            ),
+        ],
+        ui.hint("New to Condor? See", raw=False)
+        + " [the manual](https://github.com/rehuony/condor#readme)\\.",
+    )
 
     await update.message.answer(
         reply_text, parse_mode="MarkdownV2", link_preview_options=NO_LINK_PREVIEW

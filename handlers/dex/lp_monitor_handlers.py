@@ -19,7 +19,11 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
-from utils.telegram_formatters import escape_markdown_v2, resolve_token_symbol
+from utils.telegram_formatters import (
+    escape_markdown_v2,
+    format_error_message,
+    resolve_token_symbol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +124,7 @@ def format_position_detail_view(
         if index > 0:
             nav_row.append(
                 InlineKeyboardButton(
-                    text="◀️ Prev",
+                    text="‹ Prev",
                     callback_data=f"dex:lpm_detail:{instance_id}:{index - 1}",
                 )
             )
@@ -132,7 +136,7 @@ def format_position_detail_view(
         if index < total - 1:
             nav_row.append(
                 InlineKeyboardButton(
-                    text="Next ▶️",
+                    text="Next ›",
                     callback_data=f"dex:lpm_detail:{instance_id}:{index + 1}",
                 )
             )
@@ -144,14 +148,14 @@ def format_position_detail_view(
                 text="💰 Collect Fees", callback_data=f"dex:lpm_collect:{cache_key}"
             ),
             InlineKeyboardButton(
-                text="❌ Close", callback_data=f"dex:pos_close:{cache_key}"
+                text="🔻 Close Position", callback_data=f"dex:pos_close:{cache_key}"
             ),
         ]
     )
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="🔄 Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
+                text="⚖️ Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
             ),
             InlineKeyboardButton(
                 text="✅ Dismiss", callback_data=f"dex:lpm_dismiss:{instance_id}"
@@ -278,7 +282,7 @@ async def handle_lpm_navigation(
         if new_index > 0:
             nav_row.append(
                 InlineKeyboardButton(
-                    text="◀️ Prev",
+                    text="‹ Prev",
                     callback_data=f"dex:lpm_nav:{instance_id}:{new_index - 1}",
                 )
             )
@@ -290,7 +294,7 @@ async def handle_lpm_navigation(
         if new_index < total - 1:
             nav_row.append(
                 InlineKeyboardButton(
-                    text="Next ▶️",
+                    text="Next ›",
                     callback_data=f"dex:lpm_nav:{instance_id}:{new_index + 1}",
                 )
             )
@@ -299,7 +303,7 @@ async def handle_lpm_navigation(
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="❌ Close", callback_data=f"dex:pos_close:{cache_key}"
+                text="🔻 Close Position", callback_data=f"dex:pos_close:{cache_key}"
             ),
             InlineKeyboardButton(
                 text="⏭ Skip", callback_data=f"dex:lpm_skip:{cache_key}"
@@ -367,7 +371,7 @@ async def handle_lpm_oor_navigation(
     if index > 0:
         nav_row.append(
             InlineKeyboardButton(
-                text="◀️ Prev", callback_data=f"dex:lpm_oor:{instance_id}:{index - 1}"
+                text="‹ Prev", callback_data=f"dex:lpm_oor:{instance_id}:{index - 1}"
             )
         )
     nav_row.append(
@@ -378,7 +382,7 @@ async def handle_lpm_oor_navigation(
     if index < len(oor_positions) - 1:
         nav_row.append(
             InlineKeyboardButton(
-                text="Next ▶️", callback_data=f"dex:lpm_oor:{instance_id}:{index + 1}"
+                text="Next ›", callback_data=f"dex:lpm_oor:{instance_id}:{index + 1}"
             )
         )
     if nav_row:
@@ -390,14 +394,14 @@ async def handle_lpm_oor_navigation(
                 text="💰 Collect Fees", callback_data=f"dex:lpm_collect:{cache_key}"
             ),
             InlineKeyboardButton(
-                text="❌ Close", callback_data=f"dex:pos_close:{cache_key}"
+                text="🔻 Close Position", callback_data=f"dex:pos_close:{cache_key}"
             ),
         ]
     )
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="🔄 Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
+                text="⚖️ Rebalance", callback_data=f"dex:lpm_rebalance:{cache_key}"
             ),
         ]
     )
@@ -481,7 +485,9 @@ async def handle_lpm_collect_fees(
 
         client = await get_client(chat_id, user_data=context.user_data)
         if not client or not hasattr(client, "gateway_clmm"):
-            await query.message.answer("❌ Gateway not available")
+            await query.message.answer(
+                format_error_message("Gateway not available"), parse_mode="MarkdownV2"
+            )
             return
 
         # Get position details
@@ -502,11 +508,16 @@ async def handle_lpm_collect_fees(
                 parse_mode="MarkdownV2",
             )
         else:
-            await query.message.answer("❌ Failed: No response from gateway")
+            await query.message.answer(
+                format_error_message("Failed: No response from gateway"),
+                parse_mode="MarkdownV2",
+            )
 
     except Exception as e:
         logger.error(f"Failed to collect fees: {e}")
-        await query.message.answer(f"❌ Error: {str(e)[:100]}")
+        await query.message.answer(
+            format_error_message(str(e)[:100]), parse_mode="MarkdownV2"
+        )
 
 
 # ============================================
@@ -537,9 +548,8 @@ async def handle_lpm_rebalance(
     upper = pos.get("upper_price", pos.get("price_upper", 0))
 
     text = (
-        f"🔄 *Rebalance Position*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"*{escape_markdown_v2(pair)}*\n\n"
+        f"⚖️ *Rebalance Position*\n"
+        f"_{escape_markdown_v2(pair)}_\n\n"
         f"This will:\n"
         f"1\\. Close the current position\n"
         f"2\\. Open a new position with the same range\n"
@@ -555,7 +565,7 @@ async def handle_lpm_rebalance(
                 callback_data=f"dex:lpm_rebalance_confirm:{cache_key}",
             ),
             InlineKeyboardButton(
-                text="❌ Cancel",
+                text="✕ Cancel",
                 callback_data=f"dex:lpm_dismiss:{cache_key.split('_')[1]}",
             ),
         ]
@@ -598,7 +608,9 @@ async def handle_lpm_rebalance_execute(
 
         client = await get_client(chat_id, user_data=context.user_data)
         if not client or not hasattr(client, "gateway_clmm"):
-            await query.message.edit_text("❌ Gateway not available")
+            await query.message.edit_text(
+                format_error_message("Gateway not available"), parse_mode="MarkdownV2"
+            )
             return
 
         # Get position details
@@ -618,7 +630,10 @@ async def handle_lpm_rebalance_execute(
 
         if not close_result:
             await query.message.edit_text(
-                "❌ Failed to close position: No response from gateway"
+                format_error_message(
+                    "Failed to close position: No response from gateway"
+                ),
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -749,8 +764,7 @@ async def handle_lpm_rebalance_execute(
 
         lines = [
             f"✅ *Rebalance Complete*",
-            f"━━━━━━━━━━━━━━━━━━━━━",
-            f"*{escape_markdown_v2(pair)}*",
+            f"_{escape_markdown_v2(pair)}_",
             "",
             f"✅ Old position closed",
             opened_line,
@@ -770,7 +784,9 @@ async def handle_lpm_rebalance_execute(
 
     except Exception as e:
         logger.error(f"Failed to rebalance position: {e}", exc_info=True)
-        await query.message.edit_text(f"❌ Error: {str(e)[:200]}")
+        await query.message.edit_text(
+            format_error_message(str(e)[:200]), parse_mode="MarkdownV2"
+        )
 
 
 # ============================================

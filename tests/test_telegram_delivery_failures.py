@@ -521,3 +521,17 @@ def test_global_network_error_identifies_phase_without_claiming_retry(
     assert "does not retry the update" in caplog.text
     assert "will retry" not in caplog.text
     assert "SECRET" not in caplog.text
+
+
+def test_unhandled_error_tells_the_chat():
+    import main
+    from tests.support.markdown_v2 import assert_valid
+
+    bot = SimpleNamespace(send_message=AsyncMock())
+    update = SimpleNamespace(update_id=1, effective_chat=SimpleNamespace(id=42))
+    context = SimpleNamespace(error=RuntimeError("boom"), bot=bot)
+    asyncio.run(main.error_handler(update, context))
+    kwargs = bot.send_message.await_args.kwargs
+    assert kwargs["chat_id"] == 42 and kwargs["parse_mode"] == "MarkdownV2"
+    assert_valid(kwargs["text"])
+    assert "boom" not in kwargs["text"]

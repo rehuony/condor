@@ -22,6 +22,7 @@ from condor.runtime.confirmations import (
     get_registry,
 )
 from condor.telegram.transport import message_id_of, telegram_call
+from utils import telegram_ui as ui
 
 APPROVE_PREFIX = "confirm_trade:"
 REJECT_PREFIX = "reject_trade:"
@@ -50,11 +51,11 @@ class TelegramChannel:
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Approve",
+                        text="✅ Approve",
                         callback_data=approval_callback(pending.id, True),
                     ),
                     InlineKeyboardButton(
-                        text="Reject",
+                        text="❌ Reject",
                         callback_data=approval_callback(pending.id, False),
                     ),
                 ]
@@ -63,16 +64,22 @@ class TelegramChannel:
         # Naming the asker is not decoration: one chat can talk to several
         # agents on several servers, and "Approve this action?" on its own does
         # not say whose action, or where it lands.
-        asked_by = f"\nRequested by {pending.origin}\n" if pending.origin else ""
-        # What the call leaves behind (a controller overwrite's impact), sent
-        # as plain text like the summary: no parse mode, nothing to escape.
-        detail = f"\n\n{pending.detail}" if pending.detail else ""
+        # What the call leaves behind (a controller overwrite's impact) follows
+        # the summary; both are escaped prose under the standard title.
+        text = ui.screen(
+            ui.title(
+                "⚠️",
+                "Trade Confirmation",
+                f"Requested by {pending.origin}" if pending.origin else None,
+            ),
+            ui.esc(pending.summary),
+            ui.esc(pending.detail) if pending.detail else None,
+            ui.hint("Approve this action?"),
+        )
         result = await self._bot.send_message(
             chat_id=self._chat_id,
-            text=(
-                f"Trade Confirmation\n{asked_by}\n"
-                f"{pending.summary}{detail}\n\nApprove this action?"
-            ),
+            text=text,
+            parse_mode="MarkdownV2",
             reply_markup=keyboard,
             disable_notification=False,
         )

@@ -10,6 +10,7 @@ from condor.telegram.types import (
     Update,
 )
 from handlers._deeds import record_telegram_deed
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 from .._shared import (
@@ -92,7 +93,7 @@ async def show_deploy_menu(update: Update, context: Context) -> None:
 
         if not configs:
             keyboard = [
-                [InlineKeyboardButton(text="Back", callback_data="bots:main_menu")]
+                [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
             ]
             await query.message.edit_text(
                 r"*Deploy Controllers*" + "\n\n"
@@ -151,7 +152,7 @@ async def show_deploy_menu(update: Update, context: Context) -> None:
 
         keyboard.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="« Back", callback_data="bots:main_menu"),
             ]
         )
 
@@ -168,7 +169,9 @@ async def show_deploy_menu(update: Update, context: Context) -> None:
     except Exception as e:
         logger.error(f"Error loading deploy menu: {e}", exc_info=True)
         error_msg = format_error_message(f"Failed to load configs: {str(e)}")
-        keyboard = [[InlineKeyboardButton(text="Back", callback_data="bots:main_menu")]]
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
+        ]
         await query.message.edit_text(
             error_msg,
             parse_mode="MarkdownV2",
@@ -271,7 +274,7 @@ async def show_deploy_form(update: Update, context: Context) -> None:
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Deploy Now", callback_data="bots:execute_deploy"
+                    text="🚀 Deploy Now", callback_data="bots:execute_deploy"
                 ),
             ]
         )
@@ -279,7 +282,7 @@ async def show_deploy_form(update: Update, context: Context) -> None:
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="Back to Selection", callback_data="bots:deploy_menu"
+                text="« Back to Selection", callback_data="bots:deploy_menu"
             ),
         ]
     )
@@ -363,7 +366,7 @@ def _build_deploy_progressive_message(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"Use Default: {default_value[:20]}",
+                    text=f"✅ Use Default: {default_value[:20]}",
                     callback_data=f"bots:deploy_use_default:{current_field}",
                 )
             ]
@@ -385,7 +388,7 @@ def _build_deploy_progressive_message(
             InlineKeyboardButton(text="« Back", callback_data="bots:deploy_prev_field")
         )
     nav_buttons.append(
-        InlineKeyboardButton(text="❌ Cancel", callback_data="bots:deploy_menu")
+        InlineKeyboardButton(text="✕ Cancel", callback_data="bots:deploy_menu")
     )
     keyboard.append(nav_buttons)
 
@@ -430,7 +433,8 @@ async def handle_deploy_progressive_input(update: Update, context: Context) -> N
         chat_id = context.user_data.get("deploy_chat_id", update.effective_chat.id)
         error_msg = await bot.send_message(
             chat_id=chat_id,
-            text=f"❌ Invalid value. Please enter a valid {field_type}.",
+            text=ui.notice("error", "Invalid value", f"Enter a valid {field_type}."),
+            parse_mode="MarkdownV2",
         )
         await asyncio.sleep(3)
         try:
@@ -662,7 +666,7 @@ async def handle_deploy_set_field(
     message += r"Type the new value or tap Cancel\."
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:deploy_form_back")]
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:deploy_form_back")]
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -678,7 +682,10 @@ async def process_deploy_field_input(
     field_name = context.user_data.get("editing_deploy_field")
 
     if not field_name:
-        await update.message.answer("No field selected. Please try again.")
+        await update.message.answer(
+            ui.notice("warning", "No field selected", "Pick a field and try again."),
+            parse_mode="MarkdownV2",
+        )
         return
 
     deploy_params = context.user_data.get("deploy_params", DEPLOY_DEFAULTS.copy())
@@ -700,7 +707,9 @@ async def process_deploy_field_input(
 
         # Show confirmation
         label = field_name.replace("_", " ").title()
-        await update.message.answer(f"{label} set to: {value}")
+        await update.message.answer(
+            ui.notice("success", f"{label} set to {value}"), parse_mode="MarkdownV2"
+        )
 
         # Show button to return to form
         keyboard = [
@@ -717,7 +726,10 @@ async def process_deploy_field_input(
         )
 
     except ValueError as e:
-        await update.message.answer(f"Invalid value. Please enter a valid number.")
+        await update.message.answer(
+            ui.notice("error", "Invalid value", "Enter a valid number."),
+            parse_mode="MarkdownV2",
+        )
 
 
 async def handle_execute_deploy(update: Update, context: Context) -> None:
@@ -774,10 +786,10 @@ async def handle_execute_deploy(update: Update, context: Context) -> None:
         context.user_data.pop("bots_state", None)
 
         keyboard = [
-            [InlineKeyboardButton(text="View Bots", callback_data="bots:main_menu")],
+            [InlineKeyboardButton(text="👁 View Bots", callback_data="bots:main_menu")],
             [
                 InlineKeyboardButton(
-                    text="Deploy More", callback_data="bots:deploy_menu"
+                    text="🚀 Deploy More", callback_data="bots:deploy_menu"
                 )
             ],
         ]
@@ -829,10 +841,14 @@ async def handle_execute_deploy(update: Update, context: Context) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="Try Again", callback_data="bots:execute_deploy"
+                    text="🔁 Try Again", callback_data="bots:execute_deploy"
                 )
             ],
-            [InlineKeyboardButton(text="Back", callback_data="bots:deploy_form_back")],
+            [
+                InlineKeyboardButton(
+                    text="« Back", callback_data="bots:deploy_form_back"
+                )
+            ],
         ]
         await query.message.edit_text(
             f"*Deployment Failed*\n\n" f"Error: {escape_markdown_v2(str(e)[:200])}",

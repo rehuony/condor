@@ -12,6 +12,8 @@ from handlers.cex._shared import (
     get_trading_rules,
     validate_trading_pair,
 )
+from utils import telegram_ui as ui
+from utils.telegram_formatters import format_error_message
 
 from ..._shared import (
     GRID_STRIKE_DEFAULTS,
@@ -426,7 +428,12 @@ async def process_gs_wizard_input(
                 config["min_order_amount_quote"] = required_min
                 # Send warning message
                 warn_msg = await update.message.answer(
-                    f"Min order must be >= ${required_min:.2f}. Set to ${required_min:.2f}."
+                    ui.notice(
+                        "warning",
+                        "Minimum order adjusted",
+                        f"The minimum order is ${required_min:.2f}, so it was set to that.",
+                    ),
+                    parse_mode="MarkdownV2",
                 )
                 await asyncio.sleep(3)
                 try:
@@ -564,7 +571,8 @@ async def process_gs_wizard_input(
         # Send error and let user try again
         logger.warning(f"GS wizard input ValueError: {e}")
         error_msg = await update.message.answer(
-            f"Invalid input. Please enter a valid value."
+            ui.notice("error", "Invalid input", "Enter a valid value."),
+            parse_mode="MarkdownV2",
         )
         # Auto-delete error after 3 seconds
         await asyncio.sleep(3)
@@ -577,7 +585,8 @@ async def process_gs_wizard_input(
         logger.error(f"GS wizard input error: {e}", exc_info=True)
         try:
             error_msg = await update.message.answer(
-                f"Error processing input: {str(e)[:100]}"
+                format_error_message(f"Could not process the input: {str(e)[:100]}"),
+                parse_mode="MarkdownV2",
             )
             await asyncio.sleep(3)
             await error_msg.delete()

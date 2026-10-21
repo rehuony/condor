@@ -132,7 +132,7 @@ async def test_mode_is_fixed_on_card_and_invalid_mode_never_sends(setup, monkeyp
 @pytest.mark.asyncio
 async def test_ambiguous_send_is_not_replayed(setup):
     setup.send_photo.side_effect = TimeoutError()
-    with pytest.raises(RuntimeError, match="未确认"):
+    with pytest.raises(RuntimeError, match="unconfirmed"):
         await published(setup, signal_id="123")
     assert await published(setup, signal_id="123") is None
     assert store.get_store().all()[0].delivery_status == "unknown"
@@ -300,9 +300,9 @@ async def test_detach_delete_failure_removes_buttons_and_retries_without_trading
     assert not result.message_deleted
     edited = setup.edit_message_caption.await_args.kwargs
     assert edited["reply_markup"] is None
-    assert edited["parse_mode"] == "HTML"
-    assert "已停止托管" in edited["caption"]
-    assert "暂未删除" in edited["caption"]
+    assert edited["parse_mode"] == "MarkdownV2"
+    assert "Management stopped" in edited["caption"]
+    assert "not deleted yet" in edited["caption"]
     setup.delete_message.side_effect = None
     await tracker.tick(setup)
     assert get_card(card.id, owner_id=7).message_deleted
@@ -371,7 +371,7 @@ async def test_open_partial_fill_can_cancel_entries_once_and_keep_protection(set
         for row in render.keyboard(card).inline_keyboard
         for button in row
     )
-    with pytest.raises(ValueError, match="不属于当前用户"):
+    with pytest.raises(ValueError, match="belongs to someone else"):
         await service.act(
             card.id, "cancel_entry", owner_id=8, chat_id=7, message_id=11, bot=setup
         )
@@ -461,7 +461,7 @@ async def test_closed_settlement_recovers_without_reopening_and_retries_failed_e
     await tracker.tick(setup)
     closed = get_card(card.id, owner_id=7)
     assert closed.status == CardStatus.CLOSED
-    assert "盈亏待核对" in render.caption(closed)
+    assert "PnL pending check" in render.caption(closed)
     monkeypatch.setattr(store, "_store", None)
     execution.read_group.side_effect = execution.ExecutionError("missing", status=404)
     await tracker.tick(setup)
@@ -489,7 +489,7 @@ async def test_closed_settlement_recovers_without_reopening_and_retries_failed_e
     assert "+4.78 USDT" in render.result_row(settled)
     setup.edit_message_caption.side_effect = None
     await tracker.tick(setup)
-    assert "+4.78 USDT" in setup.edit_message_caption.await_args.kwargs["caption"]
+    assert "\\+4\\.78 USDT" in setup.edit_message_caption.await_args.kwargs["caption"]
     assert execution.read_group.await_count == 4
     execution.open_group.assert_awaited_once()
     execution.command.assert_not_awaited()
@@ -509,7 +509,7 @@ async def test_closed_result_keeps_photo_and_unchanged_tick_does_not_edit(setup)
     kb = render.keyboard(closed)
     assert len(kb.inline_keyboard) == len(kb.inline_keyboard[0]) == 1
     assert kb.inline_keyboard[0][0].callback_data == f"tc:noop:{card.id}"
-    assert "止盈2" in render.caption(closed)
+    assert "TP2" in render.caption(closed)
     count = setup.edit_message_caption.await_count
     await tracker.tick(setup)
     assert setup.edit_message_caption.await_count == count
@@ -551,20 +551,20 @@ async def test_caption_reports_estimates_expiry_and_incomplete_results(setup):
     card = await published(setup)
     card.plan = plan(score=87)
     proposed = render.caption(card)
-    assert "清晰度  <b>87/100</b>" in proposed and "UTC+8" in proposed
+    assert "• Clarity: *87/100*" in proposed and "UTC\\+8" in proposed
     await action(setup, card, "invest")
     card = await action(setup, card, "amount", margin="10")
     text = render.caption(card)
-    assert "止损亏损" in text and "预计强平价" in text and "手续费" in text
+    assert "Loss at stop" in text and "Est\\. liquidation" in text and "fees" in text
     card.execution = {"close_reason": "MANUAL_CLOSE", "pnl_complete": False, "pnl": "0"}
-    assert render.result_row(card) == "手动平仓 · 盈亏待核对"
+    assert render.result_row(card) == "Manual close · PnL pending check"
     card.execution = {
         "close_reason": "TAKE_PROFIT",
         "pnl": "3",
         "pnl_complete": True,
         "legs": [{"level_id": f"{card.id}:2", "close_reason": "TAKE_PROFIT"}],
     }
-    assert "止盈2" in render.result_row(card)
+    assert "TP2" in render.result_row(card)
 
 
 @pytest.mark.asyncio
@@ -609,7 +609,7 @@ async def test_live_liquidation_and_negative_net_target_profit_are_not_fabricate
 
     card = await reviewed(setup)
     card.quote = validate_quote(quote(profit_tp1="-0.02"))
-    assert "<b>-0.02 / " in render.caption(card)
+    assert "*\\-0\\.02 / " in render.caption(card)
     card.status = CardStatus.OPEN
     card.mode = "live"
     card.execution = group(
@@ -618,8 +618,8 @@ async def test_live_liquidation_and_negative_net_target_profit_are_not_fabricate
         liquidation_price_kind="exchange",
         pnl_complete=False,
     )
-    assert "交易所强平价  <b>93</b>" in render.caption(card)
-    assert "盈亏数据尚未完整核对" in render.caption(card)
+    assert "• Exchange liquidation: *93*" in render.caption(card)
+    assert "PnL is not fully reconciled yet" in render.caption(card)
 
 
 @pytest.mark.asyncio
@@ -710,7 +710,7 @@ async def test_real_telegram_routes_keep_custom_input_on_original_photo_and_clea
             sum(method == "sendMessage" for method, _ in app.bot.session.requests)
             == sent_before
         )
-        assert "请输入有效" in get_card(card.id, owner_id=7).note
+        assert "Enter a valid" in get_card(card.id, owner_id=7).note
         await app.feed(message_update(app.bot, {"text": "12.5"}))
         assert get_card(card.id, owner_id=7).status == CardStatus.REVIEW
         assert get_trade_card_margin(state) == "12.5"
@@ -774,3 +774,18 @@ async def test_tracker_start_and_handler_reload_preserve_single_task(
     )
     await tracker.stop_tracker()
     assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_every_card_caption_is_valid_markdown_v2(setup):
+    from tests.support.markdown_v2 import assert_valid
+
+    card = await reviewed(setup)
+    for status in CardStatus:
+        card.status = status
+        card.confirm_action = None
+        card.note = "Note with [brackets] (and) 1.5% #tags!"
+        assert_valid(render.caption(card))
+    card.status = CardStatus.OPEN
+    card.confirm_action = "close"
+    assert_valid(render.caption(card))

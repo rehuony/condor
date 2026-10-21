@@ -13,8 +13,10 @@ from condor.telegram.types import (
     Context,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.auth import restricted
 
+from ._shared import NO_SESSION, PRIVATE_ONLY
 from .session import destroy_session
 
 log = logging.getLogger(__name__)
@@ -48,15 +50,25 @@ async def stop_command(update: Update, context: Context) -> None:
     """Stop the requests already in this chat; preserve later input and context."""
     chat_type = update.effective_chat.type
     if chat_type in ("group", "supergroup"):
-        await update.message.answer("The agent is only available in private chats.")
+        await update.message.answer(PRIVATE_ONLY, parse_mode="MarkdownV2")
         return
 
     targets = _claim_stop(update.effective_chat.id, update.effective_user.id)
     if not targets:
-        await update.message.answer("Nothing to stop — the agent is idle.")
+        await update.message.answer(
+            ui.notice("info", "Nothing to stop", "The agent is idle."),
+            parse_mode="MarkdownV2",
+        )
         return
     await _cancel_snapshot(targets)
-    await update.message.answer("⏹ Stopped the current requests and cleared the queue.")
+    await update.message.answer(
+        ui.notice(
+            "stopped",
+            "Stopped",
+            "The current requests ended and the queue is clear. The session is kept.",
+        ),
+        parse_mode="MarkdownV2",
+    )
 
 
 async def _handle_stop(update: Update, context: Context) -> None:
@@ -70,9 +82,14 @@ async def _handle_stop(update: Update, context: Context) -> None:
     destroyed = await destroy_session(chat_id)
 
     if destroyed:
-        await query.message.edit_text("Agent session ended.")
+        await query.message.edit_text(
+            ui.notice(
+                "info", "Session ended", "Your next message starts a new session."
+            ),
+            parse_mode="MarkdownV2",
+        )
     else:
-        await query.message.edit_text("No active session.")
+        await query.message.edit_text(NO_SESSION, parse_mode="MarkdownV2")
 
 
 async def handle_stop_callback(

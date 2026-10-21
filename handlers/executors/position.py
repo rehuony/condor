@@ -27,6 +27,7 @@ from handlers.cex._shared import (
     get_trading_rules,
     validate_trading_pair,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 from ._shared import (
@@ -164,7 +165,6 @@ def _build_step_2_text(
 
     lines = [
         "🎯 *Position Executor \\- Step 2/2*",
-        "─────────────────────────",
         "",
         f"🏦 `{escape_markdown_v2(connector)}` \\| 🔗 `{escape_markdown_v2(pair)}`",
     ]
@@ -263,9 +263,9 @@ def _build_step_2_keyboard(
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="⬅️ Back", callback_data="executors:create_position"
+                text="« Back", callback_data="executors:create_position"
             ),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -311,11 +311,11 @@ async def show_step_1_connector(update: Update, context: Context) -> None:
 
         if not connectors:
             keyboard = [
-                [InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu")]
+                [InlineKeyboardButton(text="« Back", callback_data="executors:menu")]
             ]
             await query.message.edit_text(
                 "🎯 *Position Executor \\- Step 1/2*\n"
-                "─────────────────────────\n\n"
+                "\n"
                 "_No CEX connectors configured\\._\n\n"
                 "Add API keys via /keys first\\.",
                 parse_mode="MarkdownV2",
@@ -340,12 +340,11 @@ async def show_step_1_connector(update: Update, context: Context) -> None:
             keyboard.append(row)
 
         keyboard.append(
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu")]
+            [InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu")]
         )
 
         lines = [
             "🎯 *Position Executor \\- Step 1/2*",
-            "─────────────────────────",
             "",
             "🏦 *Select Exchange*",
         ]
@@ -359,7 +358,7 @@ async def show_step_1_connector(update: Update, context: Context) -> None:
     except Exception as e:
         logger.error(f"Error in position step 1: {e}", exc_info=True)
         keyboard = [
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu")]
+            [InlineKeyboardButton(text="« Back", callback_data="executors:menu")]
         ]
         await query.message.edit_text(
             format_error_message(f"Error: {str(e)[:100]}"),
@@ -387,7 +386,6 @@ async def handle_connector_select(
 
     lines = [
         "🎯 *Position Executor \\- Step 1/2*",
-        "─────────────────────────",
         "",
         f"🏦 `{escape_markdown_v2(connector)}`",
         "",
@@ -417,9 +415,9 @@ async def handle_connector_select(
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="⬅️ Back", callback_data="executors:create_position"
+                text="« Back", callback_data="executors:create_position"
             ),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
         ]
     )
 
@@ -607,7 +605,7 @@ async def show_step_2_config(update: Update, context: Context) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="⬅️ Back", callback_data="executors:create_position"
+                    text="« Back", callback_data="executors:create_position"
                 )
             ]
         ]
@@ -745,13 +743,19 @@ async def handle_config_input(update: Update, context: Context, text: str) -> No
 
     if errors:
         await context.bot.send_message(
-            chat_id=chat_id, text=f"Errors: {', '.join(errors)}"
+            chat_id=chat_id,
+            text=ui.notice(
+                "warning", "Some values were not applied", ", ".join(errors)
+            ),
+            parse_mode="MarkdownV2",
         )
         return
 
     if not updates:
         await context.bot.send_message(
-            chat_id=chat_id, text="No valid updates. Send key=value"
+            chat_id=chat_id,
+            text=ui.notice("error", "No valid updates", "Send values as key=value."),
+            parse_mode="MarkdownV2",
         )
         return
 
@@ -953,7 +957,7 @@ async def handle_deploy(update: Update, context: Context) -> None:
                 InlineKeyboardButton(
                     text="📋 View Executors", callback_data="executors:menu"
                 ),
-                InlineKeyboardButton(text="❌ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="✕ Close", callback_data="executors:close"),
             ]
         ]
 
@@ -972,7 +976,7 @@ async def handle_deploy(update: Update, context: Context) -> None:
             chat_id=chat_id,
             message_id=loading_msg_id,
             text=f"✅ *Position Executor Deployed*\n"
-            f"─────────────────────────\n\n"
+            "\n"
             f"{side_emoji} *{escape_markdown_v2(pair_display)}* \\| {escape_markdown_v2(side_label)} {leverage}x\n"
             f"💰 Amount: `{escape_markdown_v2(amount_str)}`\n"
             f"🆔 `{escape_markdown_v2(str(executor_id)[:30])}`\n\n"
@@ -990,9 +994,9 @@ async def handle_deploy(update: Update, context: Context) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="🔄 Try Again", callback_data="executors:pos_step2"
+                    text="🔁 Try Again", callback_data="executors:pos_step2"
                 ),
-                InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
+                InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
             ]
         ]
 

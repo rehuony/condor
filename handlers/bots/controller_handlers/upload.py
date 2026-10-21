@@ -35,7 +35,7 @@ async def show_upload_config_prompt(update: Update, context: Context) -> None:
     )
 
     keyboard = [
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:upload_cancel")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:upload_cancel")],
     ]
 
     await query.message.edit_text(
@@ -128,7 +128,7 @@ async def handle_config_file_upload(update: Update, context: Context) -> None:
                 ],
                 [
                     InlineKeyboardButton(
-                        text="⬅️ Back to Menu", callback_data="bots:main_menu"
+                        text="« Back to Menu", callback_data="bots:main_menu"
                     )
                 ],
             ]

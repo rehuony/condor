@@ -30,6 +30,7 @@ from condor.web.models import WebUser
 from handlers import agents as agents_mod
 from handlers.agents import menu as menu_mod
 from tests.conftest import patch_agents
+from tests.support.markdown_v2 import plain
 
 CHAT_ID = 4242
 USER_ID = 99
@@ -83,7 +84,7 @@ class _Message:
         self.message_id = 7
 
     async def edit_text(self, text, **kw):
-        self._rendered.append((text, kw.get("reply_markup")))
+        self._rendered.append((plain(text), kw.get("reply_markup")))
         return self
 
 
@@ -364,7 +365,7 @@ def test_picking_the_conversation_already_open_does_not_respawn(store, monkeypat
 
     assert world.specs == []
     assert world.destroyed == 0
-    assert "already in that conversation" in rendered[-1][0]
+    assert "Already in that conversation" in rendered[-1][0]
 
 
 def test_a_conversation_deleted_between_render_and_tap_is_not_an_error(

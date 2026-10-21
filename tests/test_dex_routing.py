@@ -118,3 +118,36 @@ def test_history_filters_bind_their_filter_name():
     handler = router._filter(fake_filter, "connector")
     asyncio.run(handler(None, None, "jupiter"))
     assert calls == [("connector", "jupiter")]
+
+
+def test_dex_menus_never_capture_text():
+    for menu_state in ("swap", "add_position", "pool_list_results", "liquidity"):
+        assert menu_state not in router.MESSAGE_STATE_HANDLERS
+    assert router.MESSAGE_STATE_HANDLERS["swap_quick"] is router.process_swap
+    assert router.MESSAGE_STATE_HANDLERS["add_position_quick"] is (
+        router.process_add_position
+    )
+
+
+def test_add_position_text_never_opens_a_position():
+    """A positional line used to open a position on-chain; now it is refused."""
+    from unittest.mock import AsyncMock
+
+    import handlers.dex.pools.add_position.input as add_input
+
+    answer = AsyncMock()
+    user_data = {"dex_state": "add_position_quick", "add_position_params": {}}
+    update = SimpleNamespace(
+        message=SimpleNamespace(answer=answer, delete=AsyncMock()),
+        effective_chat=SimpleNamespace(id=1),
+    )
+    context = SimpleNamespace(user_data=user_data, bot=SimpleNamespace())
+
+    asyncio.run(
+        add_input.process_add_position(update, context, "PoolAddr 0.8 1.2 10 20")
+    )
+
+    assert not hasattr(add_input, "get_client")
+    assert user_data["add_position_params"] == {}
+    assert user_data["dex_state"] == "add_position_quick"
+    assert "/cancel" in answer.await_args.args[0]

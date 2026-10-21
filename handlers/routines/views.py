@@ -74,13 +74,12 @@ async def _show_menu(update: Update, context: Context) -> None:
 
     if not routines:
         text = (
-            "⚡ *ROUTINES*\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚡ *Routines*\n\n"
             "No routines found\\.\n\n"
             "Add Python files to `routines/` folder\\."
         )
         keyboard = [
-            [InlineKeyboardButton(text="🔄 Reload", callback_data="routines:reload")]
+            [InlineKeyboardButton(text="🔄 Refresh", callback_data="routines:reload")]
         ]
     else:
         keyboard = []
@@ -114,15 +113,14 @@ async def _show_menu(update: Update, context: Context) -> None:
             )
 
         keyboard.append(
-            [InlineKeyboardButton(text="🔄 Reload", callback_data="routines:reload")]
+            [InlineKeyboardButton(text="🔄 Refresh", callback_data="routines:reload")]
         )
 
         status = f"🟢 {total_running} running" if total_running else "All idle"
         text = (
-            "⚡ *ROUTINES*\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Status: {escape_markdown_v2(status)}\n\n"
-            "Select a routine to configure and run\\."
+            "⚡ *Routines*\n"
+            f"_{escape_markdown_v2(status)}_\n\n"
+            "_Select a routine to configure and run\\._"
         )
 
     await _edit_or_send(update, text, InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -140,12 +138,12 @@ async def _show_tasks(update: Update, context: Context) -> None:
     ]
 
     if not running:
-        text = "📋 *RUNNING TASKS*\n" "━━━━━━━━━━━━━━━━━━━━━\n\n" "No tasks running\\."
+        text = "📋 *Running Tasks*\n\n" "No tasks running\\."
         keyboard = [
             [InlineKeyboardButton(text="« Back", callback_data="routines:menu")]
         ]
     else:
-        lines = ["📋 *RUNNING TASKS*", "━━━━━━━━━━━━━━━━━━━━━\n"]
+        lines = ["📋 *Running Tasks*", ""]
         keyboard = []
 
         for iid, inst in running:
@@ -223,30 +221,28 @@ async def _show_detail(update: Update, context: Context, routine_name: str) -> N
     # Build instances section
     inst_section = ""
     if running:
-        inst_lines = ["\n┌─ Running Instances ────────"]
+        inst_lines = ["\n*Running Instances*"]
         for iid, inst in running[:5]:
             sched = _format_schedule(inst.get("schedule", {}))
             ago = _format_ago(inst.get("created_at", time.time()))
             cfg_prev = _config_preview(inst.get("config", {}), 1)
             runs = inst.get("run_count", 0)
-            inst_lines.append(f"│ `{iid}` {escape_markdown_v2(cfg_prev)}")
+            inst_lines.append(f"• `{iid}` {escape_markdown_v2(cfg_prev)}")
             inst_lines.append(
-                f"│   {escape_markdown_v2(sched)} \\| {runs} runs \\| {escape_markdown_v2(ago)}"
+                f"   {escape_markdown_v2(sched)} · {runs} runs · {escape_markdown_v2(ago)}"
             )
         if len(running) > 5:
-            inst_lines.append(f"│ _\\+{len(running) - 5} more_")
-        inst_lines.append("└────────────────────────────")
+            inst_lines.append(f"_\\+{len(running) - 5} more_")
         inst_section = "\n".join(inst_lines)
 
     text = (
-        f"⚡ *{escape_markdown_v2(_display_name(routine_name).upper())}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"_{escape_markdown_v2(routine.description)}_\n"
-        f"{type_str}\n\n"
-        f"Status: {escape_markdown_v2(status)}\n\n"
-        f"┌─ Config ─────────────────\n"
-        f"```\n{chr(10).join(config_lines)}\n```\n"
-        f"└─ _✏️ send key\\=value to edit_"
+        f"⚡ *{escape_markdown_v2(_display_name(routine_name))}*\n"
+        f"_{escape_markdown_v2(routine.description)}_\n\n"
+        f"• Type: *{type_str}*\n"
+        f"• Status: *{escape_markdown_v2(status)}*\n\n"
+        f"*Config*\n"
+        f"```\n{escape_markdown_v2_code(chr(10).join(config_lines))}\n```\n"
+        f"_✏️ Send key\\=value to edit\\._"
         f"{inst_section}"
     )
 
@@ -268,7 +264,7 @@ async def _show_detail(update: Update, context: Context, routine_name: str) -> N
                     text="▶️ Run", callback_data=f"routines:run:{routine_name}"
                 ),
                 InlineKeyboardButton(
-                    text="🔄 Background", callback_data=f"routines:bg:{routine_name}"
+                    text="🌙 Background", callback_data=f"routines:bg:{routine_name}"
                 ),
             ],
             [
@@ -321,8 +317,7 @@ async def _show_schedule_menu(
         return
 
     text = (
-        f"⏱️ *Schedule: {escape_markdown_v2(_display_name(routine_name))}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⏱️ *Schedule: {escape_markdown_v2(_display_name(routine_name))}*\n\n"
         f"Choose how often to run this routine\\.\n"
         f"Config will be frozen at schedule time\\.\n"
         f"Results will be sent as messages\\."
@@ -352,7 +347,7 @@ async def _show_schedule_menu(
         ],
         [
             InlineKeyboardButton(
-                text="« Cancel", callback_data=f"routines:select:{routine_name}"
+                text="✕ Cancel", callback_data=f"routines:select:{routine_name}"
             )
         ],
     ]
@@ -363,8 +358,7 @@ async def _show_schedule_menu(
 async def _show_daily_menu(update: Update, context: Context, routine_name: str) -> None:
     """Show daily schedule time options."""
     text = (
-        f"📅 *Daily Schedule: {escape_markdown_v2(_display_name(routine_name))}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📅 *Daily Schedule: {escape_markdown_v2(_display_name(routine_name))}*\n\n"
         f"Choose a time \\(server timezone\\)\\.\n"
         f"Or send custom time as `HH:MM`\\."
     )
@@ -440,8 +434,8 @@ async def _show_help(update: Update, context: Context, routine_name: str) -> Non
         return
 
     lines = [
-        f"❓ *{escape_markdown_v2(_display_name(routine_name).upper())}*",
-        "━━━━━━━━━━━━━━━━━━━━━\n",
+        f"❓ *{escape_markdown_v2(_display_name(routine_name))}*",
+        "",
     ]
 
     for name, info in routine.get_fields().items():
@@ -509,20 +503,19 @@ async def _refresh_detail_msg(
         icon = "❌" if result.startswith("Error") else "✅"
         dur_str = _format_duration(duration) if duration else ""
         result_section = (
-            f"\n\n┌─ {icon} Result ─ {escape_markdown_v2(dur_str)} ────\n"
-            f"```\n{escape_markdown_v2_code(result[:250])}\n```\n"
-            f"└────────────────────────────"
+            f"\n\n*{icon} Result*"
+            + (f" _{escape_markdown_v2(dur_str)}_" if dur_str else "")
+            + f"\n```\n{escape_markdown_v2_code(result[:250])}\n```"
         )
 
     text = (
-        f"⚡ *{escape_markdown_v2(_display_name(routine_name).upper())}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"_{escape_markdown_v2(routine.description)}_\n"
-        f"{type_str}\n\n"
-        f"Status: {escape_markdown_v2(status)}\n\n"
-        f"┌─ Config ─────────────────\n"
-        f"```\n{chr(10).join(config_lines)}\n```\n"
-        f"└─ _✏️ send key\\=value to edit_"
+        f"⚡ *{escape_markdown_v2(_display_name(routine_name))}*\n"
+        f"_{escape_markdown_v2(routine.description)}_\n\n"
+        f"• Type: *{type_str}*\n"
+        f"• Status: *{escape_markdown_v2(status)}*\n\n"
+        f"*Config*\n"
+        f"```\n{escape_markdown_v2_code(chr(10).join(config_lines))}\n```\n"
+        f"_✏️ Send key\\=value to edit\\._"
         f"{result_section}"
     )
 
@@ -542,7 +535,7 @@ async def _refresh_detail_msg(
                     text="▶️ Run", callback_data=f"routines:run:{routine_name}"
                 ),
                 InlineKeyboardButton(
-                    text="🔄 Background", callback_data=f"routines:bg:{routine_name}"
+                    text="🌙 Background", callback_data=f"routines:bg:{routine_name}"
                 ),
             ],
             [

@@ -6,6 +6,7 @@ from condor.telegram.types import (
     Context,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     AGENT_OPTIONS,
@@ -41,7 +42,10 @@ async def _handle_settings(update: Update, context: Context) -> None:
     query = update.callback_query
     current_llm = _reclaim_default_agent(context)
     await query.message.edit_text(
-        "Select the LLM for new sessions:",
+        ui.screen(
+            ui.title("⚙️", "LLM Settings"), ui.hint("Select the LLM for new sessions.")
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=_settings_keyboard(
             current_llm,
             secret_notices_enabled(context.user_data),
@@ -54,7 +58,7 @@ async def _handle_set_llm(update: Update, context: Context, llm_key: str) -> Non
     """Update the preferred LLM."""
     query = update.callback_query
     if llm_key not in AGENT_OPTIONS:
-        await query.message.edit_text("Unknown LLM option.")
+        await query.message.edit_text(ui.STALE_BUTTON, parse_mode="MarkdownV2")
         return
 
     set_active_llm(context, llm_key)
@@ -73,11 +77,19 @@ async def _handle_set_llm(update: Update, context: Context, llm_key: str) -> Non
 
     state = (await _probe_llm_readiness()).get(readiness.base_of(llm_key))
     warning = (
-        f"\n\n⚠️ Not usable yet: {state.detail}"
+        ui.notice("warning", "Not usable yet", state.detail)
         if state is not None and not state.usable
-        else ""
+        else None
     )
     await query.message.edit_text(
-        f"LLM set to {label}. New sessions will use this model.{warning}\n\n"
-        "Use /agent to continue."
+        ui.screen(
+            ui.notice(
+                "success",
+                f"LLM set to {label}",
+                "New sessions will use this model.",
+            ),
+            warning,
+            ui.hint("Use /agent to continue."),
+        ),
+        parse_mode="MarkdownV2",
     )

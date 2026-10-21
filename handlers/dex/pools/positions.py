@@ -179,7 +179,7 @@ def _format_position_detail(
             try:
                 base_amt_str = format_amount(float(base_amount))
                 quote_amt_str = format_amount(float(quote_amount))
-                lines.append(f"━━━ Holdings ━━━")
+                lines.append("Holdings:")
                 lines.append(
                     f"💰 {base_amt_str} {base_symbol} / {quote_amt_str} {quote_symbol}"
                 )
@@ -202,7 +202,7 @@ def _format_position_detail(
                 pass
 
         lines.append("")  # Separator
-        lines.append("━━━ Performance ━━━")
+        lines.append("Performance:")
 
         # PnL from pnl_summary - convert to USD
         total_pnl = pnl_summary.get("total_pnl_quote")
@@ -444,7 +444,7 @@ async def handle_manage_positions(update: Update, context: Context) -> None:
                         text="💰 Fees", callback_data=f"dex:pos_collect:{i}"
                     ),
                     InlineKeyboardButton(
-                        text="❌ Close", callback_data=f"dex:pos_close:{i}"
+                        text="🔻 Close Position", callback_data=f"dex:pos_close:{i}"
                     ),
                 ]
             )
@@ -532,7 +532,7 @@ async def handle_pos_view(
         loading_msg += r"• Generating chart"
 
         loading_keyboard = [
-            [InlineKeyboardButton(text="⏳ Loading...", callback_data="noop")]
+            [InlineKeyboardButton(text="⏳ Loading…", callback_data="dex:noop")]
         ]
 
         # Handle loading state for both photo and text messages
@@ -675,7 +675,7 @@ async def handle_pos_view(
                     text="💰 Collect Fees", callback_data=f"dex:pos_collect:{pos_index}"
                 ),
                 InlineKeyboardButton(
-                    text="❌ Close", callback_data=f"dex:pos_close:{pos_index}"
+                    text="🔻 Close Position", callback_data=f"dex:pos_close:{pos_index}"
                 ),
             ],
         ]
@@ -960,7 +960,7 @@ async def handle_pos_collect_fees(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="🔄 Retry", callback_data=f"dex:pos_collect:{pos_index}"
+                        text="🔁 Retry", callback_data=f"dex:pos_collect:{pos_index}"
                     )
                 ],
                 [InlineKeyboardButton(text="« Back", callback_data="dex:liquidity")],
@@ -1014,7 +1014,7 @@ async def handle_pos_close_confirm(
                     text="✅ Yes, Close",
                     callback_data=f"dex:pos_close_exec:{pos_index}",
                 ),
-                InlineKeyboardButton(text="❌ Cancel", callback_data="dex:liquidity"),
+                InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1139,7 +1139,7 @@ async def handle_position_list(update: Update, context: Context) -> None:
         r"`meteora solana\-mainnet\-beta POOL_ADDRESS`"
     )
 
-    keyboard = [[InlineKeyboardButton(text="« Cancel", callback_data="dex:liquidity")]]
+    keyboard = [[InlineKeyboardButton(text="✕ Cancel", callback_data="dex:liquidity")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     context.user_data["dex_state"] = "position_list"

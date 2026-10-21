@@ -1,13 +1,15 @@
 """Route ordinary Telegram input once, with explicit form and chat boundaries."""
 
+from functools import wraps
 from itertools import chain
 
 from condor.telegram.input import InputError, input_has_attachments, message_text
 from condor.telegram.types import Context, Update
+from utils import telegram_ui as ui
 from utils.auth import restricted
 
 _CEX_INPUT_STATES = {
-    "trade",
+    "trade_quick",
     "trade_set_pair",
     "trade_set_amount",
     "trade_set_price",
@@ -24,6 +26,58 @@ _GATEWAY_INPUT_KEYS = (
     "awaiting_rpc_input",
 )
 
+#: The chat an armed input belongs to. ``user_data`` is per user and shared by
+#: every chat, so without it a prompt opened in a private chat would read the
+#: user's next message in any group.
+INPUT_CHAT_KEY = "_input_chat_id"
+
+#: Every key :func:`_text_form_handlers` and the config upload consult.
+_INPUT_KEYS = (
+    "trade_card_amount_input",
+    "cex_state",
+    "dex_state",
+    "bots_state",
+    "executors_state",
+    "awaiting_add_server_input",
+    "awaiting_modify_input",
+    *_GATEWAY_INPUT_KEYS,
+    "routines_state",
+    "awaiting_share_user_id",
+)
+
+
+def _input_snapshot(user_data: dict | None) -> tuple:
+    """The armed-input keys' values; empty when nothing reads the next message."""
+    if not user_data:
+        return ()
+    armed = user_data.get("bots_state") == "awaiting_config_upload" or (
+        next(_text_form_handlers(user_data), None) is not None
+    )
+    if not armed:
+        return ()
+    return tuple(repr(user_data.get(key)) for key in _INPUT_KEYS)
+
+
+def track_input_chat(handler):
+    """Record the chat in which a command or button armed a new input."""
+
+    @wraps(handler)
+    async def tracked(update, context):
+        before = _input_snapshot(context.user_data)
+        try:
+            return await handler(update, context)
+        finally:
+            after = _input_snapshot(context.user_data)
+            chat = update.effective_chat
+            if after and after != before and chat is not None:
+                context.user_data[INPUT_CHAT_KEY] = chat.id
+
+    return tracked
+
+
+def _input_is_here(update: Update, user_data: dict) -> bool:
+    return user_data.get(INPUT_CHAT_KEY) == update.effective_chat.id
+
 
 async def message_handler(update: Update, context: Context) -> None:
     """Ignore ordinary group chat while retaining active forms.
@@ -34,8 +88,9 @@ async def message_handler(update: Update, context: Context) -> None:
     if update.message is None:
         return
     if update.effective_chat.type != "private":
-        uploading = context.user_data.get("bots_state") == "awaiting_config_upload"
-        if not uploading and next(_text_form_handlers(context.user_data), None) is None:
+        if not _input_snapshot(context.user_data) or not _input_is_here(
+            update, context.user_data
+        ):
             return
     await _route_message(update, context)
 
@@ -44,6 +99,14 @@ async def message_handler(update: Update, context: Context) -> None:
 async def _route_message(update: Update, context: Context) -> None:
     """Authorize before attachment reads and preserve explicit form priority."""
     message = update.message
+    if not _input_is_here(update, context.user_data):
+        # An input armed in another chat never reads this one.
+        if update.effective_chat.type == "private":
+            from handlers.agents import agent_message_handler
+
+            await agent_message_handler(update, context)
+        return
+
     if context.user_data.get("bots_state") == "awaiting_config_upload":
         from handlers.bots import handle_config_file_upload
 
@@ -51,7 +114,12 @@ async def _route_message(update: Update, context: Context) -> None:
             await handle_config_file_upload(update, context)
         else:
             await message.answer(
-                "Send the requested configuration file, or use /cancel."
+                ui.notice(
+                    "info",
+                    "Waiting for a configuration file",
+                    "Send the requested file, or /cancel to cancel.",
+                ),
+                parse_mode="MarkdownV2",
             )
         return
 
@@ -61,11 +129,20 @@ async def _route_message(update: Update, context: Context) -> None:
         try:
             text = "" if input_has_attachments(message) else message_text(message)
         except InputError as exc:
-            await message.answer(exc.user_message)
+            await message.answer(
+                ui.notice("warning", "Input not accepted", exc.user_message),
+                parse_mode="MarkdownV2",
+            )
             return
         if not text:
             await message.answer(
-                "Please send text for the current input, or use /cancel before sending attachments."
+                ui.notice(
+                    "warning",
+                    "Text expected",
+                    "Send text for the current input, or /cancel before sending "
+                    "attachments.",
+                ),
+                parse_mode="MarkdownV2",
             )
             return
         form_update = update

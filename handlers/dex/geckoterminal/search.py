@@ -11,6 +11,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2
 
 from ._format import (
@@ -39,7 +40,7 @@ async def handle_gecko_search(update: Update, context: Context) -> None:
                 text=f"🌐 {network_display}", callback_data="dex:gecko_search_network"
             )
         ],
-        [InlineKeyboardButton(text="« Cancel", callback_data="dex:gecko_explore")],
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="dex:gecko_explore")],
     ]
 
     message = (
@@ -209,7 +210,7 @@ async def process_gecko_search(
     except Exception as e:
         logger.error(f"Error searching token: {e}", exc_info=True)
         await loading_msg.edit_text(
-            f"❌ Error searching: {escape_markdown_v2(str(e))}",
+            ui.notice("error", "Search failed", str(e)),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[

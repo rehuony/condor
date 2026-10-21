@@ -27,8 +27,8 @@ from routines.base import RoutineContext, RoutineResult, resolve_server_name
 logger = logging.getLogger(__name__)
 CATEGORY = "Monitoring"
 INTERVAL_SEC = {"4h": 14400, "1h": 3600, "15m": 900}
-SIG_NAME = {"pullback": "顺势回调", "breakout": "4H突破"}
-SIDE_NAME = {"long": "做多", "short": "做空"}
+SIG_NAME = {"pullback": "Trend pullback", "breakout": "4H breakout"}
+SIDE_NAME = {"long": "Long", "short": "Short"}
 
 # Tokenized stocks / ETFs / commodities listed as perps (base asset names).
 DEFAULT_EXCLUDE = [
@@ -79,34 +79,44 @@ DEFAULT_EXCLUDE = [
 class Config(BaseModel):
     """Scan trend pullbacks and publish plans meeting the clarity threshold."""
 
-    connector_name: str = Field(default="binance_perpetual", description="交易所")
-    top_n: int = Field(default=40, description="按 24h 成交额取前 N 个 -USDT 合约")
+    connector_name: str = Field(
+        default="binance_perpetual", description="Exchange connector"
+    )
+    top_n: int = Field(
+        default=40, description="Scan the top N -USDT perpetuals by 24h volume"
+    )
     min_quote_volume: float = Field(
-        default=20_000_000, description="24h 成交额下限(USDT),低于不扫"
+        default=20_000_000,
+        description="Minimum 24h volume in USDT; lower pairs are skipped",
     )
     exclude: list[str] = Field(
         default=DEFAULT_EXCLUDE,
-        description="排除的基础币名(股票/ETF/商品);≥5 个字符的项按包含匹配,如 SKHYNIX 也排除 CSOPSKHYNIX2L",
+        description="Base names to exclude (stocks, ETFs, commodities); entries of 5+ characters match as substrings, so SKHYNIX also excludes CSOPSKHYNIX2L",
     )
-    min_score: float = Field(default=80, description="走势清晰度(0–100)≥ 此值才出卡")
+    min_score: float = Field(
+        default=80, description="Minimum trend clarity (0–100) for a card"
+    )
     enable_breakout: bool = Field(
-        default=False, description="是否出 4H 突破卡片(回测样本内外均为负 R,默认关闭)"
+        default=False,
+        description="Also publish 4H breakout cards (negative R in and out of sample; off by default)",
     )
     pullback_atr: float = Field(
         default=0.6,
-        description="顺势回调:现价距 1H EMA21 ≤ 此倍数 × ATR1H 视为回调到位",
+        description="Trend pullback: price within this multiple of ATR1H from the 1H EMA21 counts as pulled back",
     )
     vol_mult: float = Field(
         default=1.5,
-        description="4H 突破(仅 enable_breakout=True 时生效):突破 K 线成交量 ≥ 前 20 根均量 × 此倍数",
+        description="4H breakout (only with enable_breakout=True): breakout bar volume must reach this multiple of the prior 20-bar average",
     )
     stop_atr: float = Field(
-        default=2.0, description="止损距离 = ATR1H × 此倍数(从进场中点算)"
+        default=2.0,
+        description="Stop distance = ATR1H × this multiple (from the entry midpoint)",
     )
-    tp1_r: float = Field(default=1.0, description="止盈1 = 止损距离 × 此倍数")
-    tp2_r: float = Field(default=2.0, description="止盈2 = 止损距离 × 此倍数")
+    tp1_r: float = Field(default=1.0, description="TP1 = stop distance × this multiple")
+    tp2_r: float = Field(default=2.0, description="TP2 = stop distance × this multiple")
     send: bool = Field(
-        default=True, description="是否发送卡片到 Telegram(关闭时不记入去重)"
+        default=True,
+        description="Send cards to Telegram (when off, nothing is recorded for deduplication)",
     )
 
 
@@ -135,8 +145,8 @@ def _cmp(x: float, op: str, thr: float, unit: str = "") -> str:
 
 
 def _numbered(steps: list[str]) -> str:
-    """ "① a;② b" — numbered so a mobile reader can count what is left."""
-    return ";".join(f"{chr(0x2460 + i)} {s}" for i, s in enumerate(steps))
+    """ "① a; ② b" — numbered so a mobile reader can count what is left."""
+    return "; ".join(f"{chr(0x2460 + i)} {s}" for i, s in enumerate(steps))
 
 
 # ── data ────────────────────────────────────────────────────────────────
@@ -263,11 +273,11 @@ def _pullback(m15, h1, last, cfg):
     pl["bar"] = float(k.timestamp)  # trigger candle: one signal per closed 15m bar
     if up:
         pl["why"] = (
-            f"1H EMA9>21>50 多头排列,回踩 EMA21({_fmt(c.ema21)})后 15m 重新站上 EMA9 收阳"
+            f"1H EMA9>21>50 bullish stack; pulled back to EMA21 ({_fmt(c.ema21)}), then a green 15m close back above EMA9"
         )
     else:
         pl["why"] = (
-            f"1H EMA9<21<50 空头排列,反弹至 EMA21({_fmt(c.ema21)})后 15m 重新跌破 EMA9 收阴"
+            f"1H EMA9<21<50 bearish stack; bounced to EMA21 ({_fmt(c.ema21)}), then a red 15m close back below EMA9"
         )
     return pl, prog
 
@@ -287,16 +297,28 @@ def _breakout(h4, h1c, last, atr1h, cfg):
     if up4:
         d = (hh20 - b.close) / atr4
         near = (
-            (d, f"4H 多头 · 收盘距前 20 根高点 {_fmt(hh20)} 还差 {d:.1f}×ATR4H")
+            (
+                d,
+                f"4H bullish · close is {d:.1f}×ATR4H below the 20-bar high {_fmt(hh20)}",
+            )
             if d > 0
-            else (None, f"4H 多头 · 收盘已在前 20 根高点 {_fmt(hh20)} 之上(不是新突破)")
+            else (
+                None,
+                f"4H bullish · close already above the 20-bar high {_fmt(hh20)} (not a fresh break)",
+            )
         )
     elif down4:
         d = (b.close - ll20) / atr4
         near = (
-            (d, f"4H 空头 · 收盘距前 20 根低点 {_fmt(ll20)} 还差 {d:.1f}×ATR4H")
+            (
+                d,
+                f"4H bearish · close is {d:.1f}×ATR4H above the 20-bar low {_fmt(ll20)}",
+            )
             if d > 0
-            else (None, f"4H 空头 · 收盘已在前 20 根低点 {_fmt(ll20)} 之下(不是新突破)")
+            else (
+                None,
+                f"4H bearish · close already below the 20-bar low {_fmt(ll20)} (not a fresh break)",
+            )
         )
     vx = float(b.volume) / float(h4.volume.iloc[-21:-1].mean())
 
@@ -311,13 +333,13 @@ def _breakout(h4, h1c, last, atr1h, cfg):
             return (
                 None,
                 near,
-                f"4H 收盘突破前 20 根高点 {_fmt(hh20)},但突破 K 线量能不足 {_cmp(vx, '<', cfg.vol_mult, '×')}",
+                f"4H close broke the 20-bar high {_fmt(hh20)}, but breakout volume is short: {_cmp(vx, '<', cfg.vol_mult, '×')}",
             )
         pl = _plan("long", last, atr1h, cfg)
         pl["bar"] = float(b.timestamp)
         pl["why"] = (
-            f"4H 收盘 {_fmt(b.close)} 放量({vx:.1f}× 均量)站上前 20 根高点 {_fmt(hh20)},"
-            f"4H EMA20>EMA50,RSI {b.rsi:.0f}"
+            f"4H close {_fmt(b.close)} on {vx:.1f}× average volume above the 20-bar high {_fmt(hh20)}; "
+            f"4H EMA20>EMA50, RSI {b.rsi:.0f}"
         )
         return pl, near, None
 
@@ -326,13 +348,13 @@ def _breakout(h4, h1c, last, atr1h, cfg):
             return (
                 None,
                 near,
-                f"4H 收盘跌破前 20 根低点 {_fmt(ll20)},但突破 K 线量能不足 {_cmp(vx, '<', cfg.vol_mult, '×')}",
+                f"4H close broke the 20-bar low {_fmt(ll20)}, but breakout volume is short: {_cmp(vx, '<', cfg.vol_mult, '×')}",
             )
         pl = _plan("short", last, atr1h, cfg)
         pl["bar"] = float(b.timestamp)
         pl["why"] = (
-            f"4H 收盘 {_fmt(b.close)} 放量({vx:.1f}× 均量)跌破前 20 根低点 {_fmt(ll20)},"
-            f"4H EMA20<EMA50,RSI {b.rsi:.0f}"
+            f"4H close {_fmt(b.close)} on {vx:.1f}× average volume below the 20-bar low {_fmt(ll20)}; "
+            f"4H EMA20<EMA50, RSI {b.rsi:.0f}"
         )
         return pl, near, None
     return None, near, None
@@ -357,7 +379,7 @@ def _scan_pair(cfg: Config, pair: str, data: dict) -> dict:
     )
     if len(m15_raw) < 100 or len(h1_raw) < 60 or len(h4_raw) < 60:
         out["skip"] = (
-            f"K 线不足(15m {len(m15_raw)} / 1H {len(h1_raw)} / 4H {len(h4_raw)} 根)"
+            f"not enough candles (15m {len(m15_raw)} / 1H {len(h1_raw)} / 4H {len(h4_raw)})"
         )
         return out
     m15, h1, h4 = _closed(m15_raw, "15m"), _closed(h1_raw, "1h"), _closed(h4_raw, "4h")
@@ -400,14 +422,14 @@ def _scan_pair(cfg: Config, pair: str, data: dict) -> dict:
                 dict(
                     plan=pl,
                     fails=[
-                        f"清晰度 {_cmp(c['score'], '<', cfg.min_score)}({_parts(c)})"
+                        f"clarity {_cmp(c['score'], '<', cfg.min_score)} ({_parts(c)})"
                     ],
                 )
             )
         else:
             out["plans"].append(pl)
     if len({pl["side"] for pl in out["plans"]}) > 1:
-        out["notes"].append("多空信号同时出现,走势不清晰,等待")
+        out["notes"].append("long and short signals at once; trend unclear, waiting")
         out["plans"] = []
     if prog:
         out["clar"] = _clarity(h4, h1, prog["side"])
@@ -446,8 +468,8 @@ def _clarity(h4, h1, side) -> dict:
 
 
 def _parts(c) -> str:
-    """ "1H效率 0.31 · 1H强度 1.42 · 4H同向" — the score's inputs, for captions and the report."""
-    return f"1H效率 {c['er1h']:.2f} · 1H强度 {c['trend1h']:.2f} · 4H{'同向' if c['h4_with'] else '逆向'}"
+    """ "1H eff 0.31 · 1H strength 1.42 · 4H aligned" — the score's inputs, for captions and the report."""
+    return f"1H eff {c['er1h']:.2f} · 1H strength {c['trend1h']:.2f} · 4H {'aligned' if c['h4_with'] else 'opposed'}"
 
 
 def _gap(cfg, prog, clar, blocked) -> dict:
@@ -461,28 +483,32 @@ def _gap(cfg, prog, clar, blocked) -> dict:
     if hit:
         steps = hit["fails"]
         return dict(
-            steps=steps, need=f"15m 已触发,{steps[0]}", rank=(-clar["score"], 0)
+            steps=steps, need=f"15m triggered; {steps[0]}", rank=(-clar["score"], 0)
         )
     steps = []
-    verb = "回踩" if side == "long" else "反弹"
+    verb = "pull back" if side == "long" else "bounce"
     if prog["dist"] > cfg.pullback_atr:
         d = _dec(prog["dist"], cfg.pullback_atr)
         steps.append(
-            f"{verb}到 EMA21 附近(现距 {prog['dist']:.{d}f}×ATR1H,需 ≤ {cfg.pullback_atr:.{d}f}×ATR1H)"
+            f"{verb} to near EMA21 (now {prog['dist']:.{d}f}×ATR1H away, needs ≤ {cfg.pullback_atr:.{d}f}×ATR1H)"
         )
     elif not prog["touched"]:
-        steps.append(f"近 3 根 1H 还没{verb}到 EMA21 附近(±0.25×ATR1H 内)")
+        steps.append(
+            f"no {verb} to near EMA21 in the last 3 1H bars (within ±0.25×ATR1H)"
+        )
     if prog["turned"]:
         steps.append(
-            "回调与 4H 突破方向相反,多空冲突"
+            "pullback opposes the 4H breakout; long and short conflict"
         )  # only reachable with breakout on
     else:
-        steps.append(f"15m {'收阳站上' if side == 'long' else '收阴跌破'} EMA9")
+        steps.append(
+            f"15m {'green close above' if side == 'long' else 'red close below'} EMA9"
+        )
     if clar["score"] < cfg.min_score:
-        steps.append(f"清晰度 {_cmp(clar['score'], '<', cfg.min_score)}")
+        steps.append(f"clarity {_cmp(clar['score'], '<', cfg.min_score)}")
     return dict(
         steps=steps,
-        need=f"还差 {len(steps)} 步:{_numbered(steps)}",
+        need=f"{len(steps)} steps left: {_numbered(steps)}",
         rank=(-clar["score"], len(steps)),
     )
 
@@ -493,8 +519,8 @@ def _gap(cfg, prog, clar, blocked) -> dict:
 def _line(pl) -> str:
     return (
         f"{pl['base']} {SIDE_NAME[pl['side']]} · {SIG_NAME[pl['type']]} · {pl['tf']} · "
-        f"进场 {_fmt(pl['lo'])}–{_fmt(pl['hi'])} · 止损 {_fmt(pl['stop'])} · "
-        f"止盈 {_fmt(pl['tp1'])} / {_fmt(pl['tp2'])}(盈亏比 1:{pl['rr1']:.1f} / {pl['rr2']:.1f})"
+        f"entry {_fmt(pl['lo'])}–{_fmt(pl['hi'])} · stop {_fmt(pl['stop'])} · "
+        f"TP {_fmt(pl['tp1'])} / {_fmt(pl['tp2'])} (R:R 1:{pl['rr1']:.1f} / {pl['rr2']:.1f})"
     )
 
 
@@ -521,12 +547,14 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         server=resolve_server_name(context),
     )
     if not client:
-        return "无可用服务器"
+        return "No server available"
 
     tk = await client.market_data.get_tickers(config.connector_name)
     tickers = ((tk or {}).get("tickers") or {}).get(config.connector_name) or {}
     if not tickers:
-        return f"取不到 {config.connector_name} 行情列表,本次跳过"
+        return (
+            f"Could not load the {config.connector_name} ticker list; skipped this run"
+        )
     pairs = _universe(tickers, config)
 
     sem = asyncio.Semaphore(10)
@@ -597,8 +625,8 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     # Closest to a card: highest clarity first (see _gap)
     near = sorted((r for r in results if r["gap"]), key=lambda r: r["gap"]["rank"])
     closest = [
-        f"{r['base']} {_fmt(r['last'])} · 1H {'多头' if r['prog']['side'] == 'long' else '空头'} · "
-        f"清晰度 {r['clar']['score']:.0f} · {r['gap']['need']}"
+        f"{r['base']} {_fmt(r['last'])} · 1H {'bullish' if r['prog']['side'] == 'long' else 'bearish'} · "
+        f"clarity {r['clar']['score']:.0f} · {r['gap']['need']}"
         for r in near[:3]
     ]
     near_b = sorted(
@@ -612,56 +640,56 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     closest_b = [
         f"{r['base']} {_fmt(r['last'])} · {r['near_b'][1]}" for r in near_b[:3]
     ]
-    muted_why = "同一根触发 K 线已发过卡"
+    muted_why = "a card was already sent for this trigger bar"
 
     # ── report ──
     builder = ReportBuilder(f"Trend Watch · {venue_label(config.connector_name)}")
     builder.source("routine", "trend_watch")
     builder.tags(["trend", "monitor", "scanner"])
-    builder.kpi("扫描币数", str(len(results)))
-    builder.kpi("卡片", str(len(cards)))
+    builder.kpi("Pairs scanned", str(len(results)))
+    builder.kpi("Cards", str(len(cards)))
     for t in types:
-        builder.kpi(f"{SIG_NAME[t]} 命中/通过", f"{hits[t]}/{passed[t]}")
-    builder.kpi("用时", f"{elapsed:.1f}s")
+        builder.kpi(f"{SIG_NAME[t]} hits/passed", f"{hits[t]}/{passed[t]}")
+    builder.kpi("Duration", f"{elapsed:.1f}s")
 
     def _row(p, status):
         c = p["clar"]
         return {
-            "币种": p["base"],
-            "方向": SIDE_NAME[p["side"]],
-            "类型": SIG_NAME[p["type"]],
-            "周期": p["tf"],
-            "进场": f"{_fmt(p['lo'])}–{_fmt(p['hi'])}",
-            "止损": _fmt(p["stop"]),
-            "止盈1": _fmt(p["tp1"]),
-            "止盈2": _fmt(p["tp2"]),
-            "盈亏比": f"1:{p['rr1']:.1f}/{p['rr2']:.1f}",
-            "清晰度": f"{p['score']:.0f}",
-            "1H效率": f"{c['er1h']:.2f}",
-            "1H强度": f"{c['trend1h']:.2f}",
-            "4H": "同向" if c["h4_with"] else "逆向",
-            "状态": status,
+            "Pair": p["base"],
+            "Side": SIDE_NAME[p["side"]],
+            "Signal": SIG_NAME[p["type"]],
+            "TF": p["tf"],
+            "Entry": f"{_fmt(p['lo'])}–{_fmt(p['hi'])}",
+            "Stop": _fmt(p["stop"]),
+            "TP1": _fmt(p["tp1"]),
+            "TP2": _fmt(p["tp2"]),
+            "R:R": f"1:{p['rr1']:.1f}/{p['rr2']:.1f}",
+            "Clarity": f"{p['score']:.0f}",
+            "1H eff": f"{c['er1h']:.2f}",
+            "1H strength": f"{c['trend1h']:.2f}",
+            "4H": "aligned" if c["h4_with"] else "opposed",
+            "Status": status,
         }
 
     cols = [
-        "币种",
-        "方向",
-        "类型",
-        "周期",
-        "进场",
-        "止损",
-        "止盈1",
-        "止盈2",
-        "盈亏比",
-        "清晰度",
-        "1H效率",
-        "1H强度",
+        "Pair",
+        "Side",
+        "Signal",
+        "TF",
+        "Entry",
+        "Stop",
+        "TP1",
+        "TP2",
+        "R:R",
+        "Clarity",
+        "1H eff",
+        "1H strength",
         "4H",
-        "状态",
+        "Status",
     ]
     if cards:
         builder.table(
-            [_row(p, "卡片" if config.send else "卡片(未发送)") for p in cards], cols
+            [_row(p, "Card" if config.send else "Card (not sent)") for p in cards], cols
         )
 
     # Every candidate that triggered but did not become a card, with what stopped it
@@ -670,94 +698,101 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     ]
     blocked_rows += [_row(p, muted_why) for p in muted]
     if blocked_rows:
-        builder.markdown("**已触发但没出卡**(清晰度不够 / 同一根 K 线已发过)")
+        builder.markdown(
+            "**Triggered without a card** (clarity too low / already sent for this bar)"
+        )
         builder.table(blocked_rows, cols)
     rule = (
-        f"**出卡条件**(顺势回调):① 1H EMA9/21/50 顺向排列 → ② 现价距 1H EMA21 ≤ "
-        f"{config.pullback_atr:.2f}×ATR1H,且近 3 根 1H 回踩/反弹到 EMA21 附近 → ③ 15m 收阳站上(收阴跌破)EMA9 → "
-        f"④ 走势清晰度 ≥ {config.min_score:g}(1H 效率比、1H 趋势强度、4H 同向三项平均)。"
-        f"不限张数,同一根触发 K 线只出一次"
+        f"**Card rules** (trend pullback): ① 1H EMA9/21/50 stacked with the trend → "
+        f"② price within {config.pullback_atr:.2f}×ATR1H of the 1H EMA21, with a pullback "
+        f"or bounce to near EMA21 in the last 3 1H bars → ③ a green 15m close above "
+        f"(red close below) EMA9 → ④ trend clarity ≥ {config.min_score:g} (mean of 1H "
+        f"efficiency ratio, 1H trend strength and 4H alignment). No card cap; one card "
+        f"per trigger bar"
     )
     if config.enable_breakout:
-        rule += f";4H 突破已开启(突破 K 线量比 ≥ {config.vol_mult:.2f}×)"
+        rule += f"; 4H breakout is on (breakout volume ≥ {config.vol_mult:.2f}×)"
     builder.markdown(rule)
 
     def _status(r):
         if r["plans"]:
-            return "合格信号"
+            return "qualified signal"
         if r["gap"]:
             return r["gap"]["need"]
-        return "1H EMA 未排列,无回调信号"
+        return "1H EMAs not stacked; no pullback signal"
 
     scan_rows = sorted(
         results,
         key=lambda r: (not r["plans"], -(r["clar"]["score"] if r["clar"] else -1)),
     )
     scan_cols = [
-        "币种",
-        "现价",
-        "1H排列",
-        "距EMA21(×ATR1H)",
-        "清晰度",
-        "1H效率",
-        "1H强度",
-        "4H趋势",
-        "离出卡",
+        "Pair",
+        "Price",
+        "1H stack",
+        "To EMA21 (×ATR1H)",
+        "Clarity",
+        "1H eff",
+        "1H strength",
+        "4H trend",
+        "To card",
     ]
     rows = []
     for r in scan_rows:
         p, c = r["prog"], r["clar"]
         row = {
-            "币种": r["base"],
-            "现价": _fmt(r["last"]),
-            "1H排列": ("多头" if p["side"] == "long" else "空头") if p else "—",
-            "距EMA21(×ATR1H)": f"{p['dist']:.2f}" if p else "—",
-            "清晰度": f"{c['score']:.0f}" if c else "—",
-            "1H效率": f"{c['er1h']:.2f}" if c else "—",
-            "1H强度": f"{c['trend1h']:.2f}" if c else "—",
-            "4H趋势": "多头" if r["h4_up"] else "空头",
-            "离出卡": _status(r),
+            "Pair": r["base"],
+            "Price": _fmt(r["last"]),
+            "1H stack": ("bullish" if p["side"] == "long" else "bearish") if p else "—",
+            "To EMA21 (×ATR1H)": f"{p['dist']:.2f}" if p else "—",
+            "Clarity": f"{c['score']:.0f}" if c else "—",
+            "1H eff": f"{c['er1h']:.2f}" if c else "—",
+            "1H strength": f"{c['trend1h']:.2f}" if c else "—",
+            "4H trend": "bullish" if r["h4_up"] else "bearish",
+            "To card": _status(r),
         }
         if config.enable_breakout:
-            row["4H突破"] = r["near_b"][1] if r["near_b"] else "4H 均线无方向"
+            row["4H breakout"] = r["near_b"][1] if r["near_b"] else "4H EMAs flat"
         rows.append(row)
-    builder.table(rows, scan_cols + (["4H突破"] if config.enable_breakout else []))
+    builder.table(rows, scan_cols + (["4H breakout"] if config.enable_breakout else []))
     md = []
     for p in cards:
-        extra = f"(同时满足:{'、'.join(p['also'])})" if p.get("also") else ""
+        extra = f" (also: {', '.join(p['also'])})" if p.get("also") else ""
         md.append(
-            f"**{p['base']} {SIDE_NAME[p['side']]} · {SIG_NAME[p['type']]} · 清晰度 {p['score']:.0f}**"
-            f"{extra}:{p['why']};{_parts(p['clar'])}"
+            f"**{p['base']} {SIDE_NAME[p['side']]} · {SIG_NAME[p['type']]} · clarity {p['score']:.0f}**"
+            f"{extra}: {p['why']}; {_parts(p['clar'])}"
         )
-    notes = [f"{r['base']}:{n}" for r in results for n in r["notes"]]
+    notes = [f"{r['base']}: {n}" for r in results for n in r["notes"]]
     if notes:
-        md.append("**备注**  \n" + "  \n".join(notes))
+        md.append("**Notes**  \n" + "  \n".join(notes))
     if failed or skipped:
-        md.append("**未扫描**:" + ";".join([f"{b}:拉取失败" for b in failed] + skipped))
-    builder.markdown("\n\n".join(md) or "无信号")
+        md.append(
+            "**Not scanned**: "
+            + "; ".join([f"{b}: fetch failed" for b in failed] + skipped)
+        )
+    builder.markdown("\n\n".join(md) or "No signals")
     builder.manual_order()
     await builder.save()
 
-    head = f"趋势扫描 · {len(results)} 币 · 用时 {elapsed:.0f}s"
+    head = f"Trend scan · {len(results)} pairs · {elapsed:.0f}s"
     tail = []
     if muted:
         tail.append(
-            f"{muted_why}:"
-            + "、".join(f"{p['base']} {SIDE_NAME[p['side']]}" for p in muted)
+            f"Skipped, {muted_why}: "
+            + ", ".join(f"{p['base']} {SIDE_NAME[p['side']]}" for p in muted)
         )
     if not cards:
-        lines = [head, "结论:无合格信号,继续等待"]
+        lines = [head, "Result: no qualified signal; still waiting"]
         if closest:
-            lines += ["最接近出卡(按清晰度):"] + [f"• {c}" for c in closest]
+            lines += ["Closest to a card (by clarity):"] + [f"• {c}" for c in closest]
         if closest_b:
-            lines += ["最接近 4H 突破:"] + [f"• {c}" for c in closest_b]
+            lines += ["Closest to a 4H breakout:"] + [f"• {c}" for c in closest_b]
         # Keep no-signal summaries in the report instead of sending a message.
         return RoutineResult(text="\n".join(lines + tail), silent=True)
     lines = [
         head,
-        f"结论:出卡 {len(cards)} 张{'' if config.send else '(send=False,未发送)'}",
+        f"Result: {len(cards)} cards{'' if config.send else ' (send=False, not sent)'}",
     ]
-    lines += [f"卡片 {i + 1}:{p['caption']}" for i, p in enumerate(cards)]
-    lines += [f"预览图片:{p['card']}" for p in cards if p.get("card")]
+    lines += [f"Card {i + 1}: {p['caption']}" for i, p in enumerate(cards)]
+    lines += [f"Preview image: {p['card']}" for p in cards if p.get("card")]
     # Published cards already carry their context; do not send another summary.
     return RoutineResult(text="\n".join(lines + tail), silent=True)

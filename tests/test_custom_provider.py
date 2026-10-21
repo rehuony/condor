@@ -48,6 +48,7 @@ from handlers.agents.menu import (
     _custom_endpoints_keyboard,
     _custom_manage_keyboard,
 )
+from tests.support.markdown_v2 import plain
 
 # -- agent_key routing --
 
@@ -457,7 +458,7 @@ def test_forgetting_an_already_removed_endpoint_reports_it_gone():
         _handle_custom_delete(_FakeUpdate(message), context, _tap(forget_bravo)[1])
     )
 
-    assert "That endpoint is gone." in message.text
+    assert "That endpoint is gone." in plain(message.text)
     assert [p["name"] for p in get_custom_providers(user_data)] == ["alpha", "charlie"]
 
 

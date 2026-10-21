@@ -157,7 +157,7 @@ def build_connector_detail_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="⬅️ Back to Overview", callback_data="portfolio:back_overview"
+                    text="« Back to Overview", callback_data="portfolio:back_overview"
                 )
             ]
         ]
@@ -225,7 +225,7 @@ async def portfolio_command(update: Update, context: Context) -> None:
 
         # Send initial loading message immediately
         text_msg = await message.answer(
-            f"💼 *Portfolio Details* \\| _Server: {escape_markdown_v2(server_name)} ⏳_\n\n"
+            f"💼 *Portfolio Details*\n_Server: {escape_markdown_v2(server_name)} ⏳_\n\n"
             f"_Loading\\.\\.\\._",
             parse_mode="MarkdownV2",
         )

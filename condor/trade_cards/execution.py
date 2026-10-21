@@ -39,14 +39,19 @@ def authorize_target(owner_id: int, server_name: str):
     if manager.get_server(server_name) is None or not manager.has_server_access(
         owner_id, server_name, ServerPermission.TRADER
     ):
-        raise ExecutionError("无权交易卡片所属服务器，或该服务器已被删除。", status=403)
+        raise ExecutionError(
+            "You cannot trade on this card's server, or the server was deleted.",
+            status=403,
+        )
     return manager
 
 
 def server_fingerprint(manager, server_name: str) -> str:
     server = manager.get_server(server_name)
     if not server or not server.get("host") or not server.get("port"):
-        raise ExecutionError("卡片所属服务器配置不完整，已暂停操作。")
+        raise ExecutionError(
+            "This card's server configuration is incomplete; actions are paused."
+        )
     return hashlib.sha256(
         json.dumps([server["host"], int(server["port"])]).encode()
     ).hexdigest()
@@ -56,7 +61,7 @@ async def _client(card: Card):
     manager = authorize_target(card.owner_id, card.server_name)
     if card.server_fingerprint != server_fingerprint(manager, card.server_name):
         raise ExecutionError(
-            "卡片所属服务器地址已变更或无法核实，已暂停操作，请核对原服务器。",
+            "This card's server address changed or cannot be verified; actions are paused. Check the original server.",
             status=403,
         )
 
@@ -66,15 +71,20 @@ async def _client(card: Card):
         logger.warning(
             "Trade card server connection unavailable: %s", type(exc).__name__
         )
-        raise ExecutionError("卡片所属交易服务器暂时不可用，请稍后重试。") from exc
+        raise ExecutionError(
+            "This card's trading server is unavailable. Try again shortly."
+        ) from exc
     if client is None:
-        raise ExecutionError("卡片所属交易服务器暂时不可用，请稍后重试。")
+        raise ExecutionError(
+            "This card's trading server is unavailable. Try again shortly."
+        )
     # Client initialization awaits I/O; configuration and access may change
     # while it is suspended. Recheck before any card-specific request.
     authorize_target(card.owner_id, card.server_name)
     if card.server_fingerprint != server_fingerprint(manager, card.server_name):
         raise ExecutionError(
-            "卡片所属服务器地址已变更，已暂停操作，请核对原服务器。", status=403
+            "This card's server address changed; actions are paused. Check the original server.",
+            status=403,
         )
     return client
 
@@ -91,15 +101,15 @@ def user_error(reason) -> str:
                 "minimum amount",
                 "min_order",
             ),
-            "每笔止盈分仓低于交易所最小订单数量或金额，请增加保证金。",
+            "Each take-profit part is below the exchange's minimum order size. Increase the margin.",
         ),
         (
             ("insufficient", "available balance", "balance is"),
-            "可用保证金不足，请减少金额或检查账户余额。",
+            "Not enough available margin. Lower the amount or check the account balance.",
         ),
         (
             ("autoaddmargin", "auto-add", "auto add", "auto_add"),
-            "账户开启了自动追加保证金，无法按限定风险下单。",
+            "The account has auto-add margin on, so the order cannot keep its risk limit.",
         ),
         (
             (
@@ -109,39 +119,44 @@ def user_error(reason) -> str:
                 "position already",
                 "symbol_busy",
             ),
-            "该交易对已有持仓或其他托管计划，请先核对账户。",
+            "This pair already has a position or another managed plan. Check the account first.",
         ),
         (
             ("open order", "active order", "existing order"),
-            "该交易对已有挂单，请先核对账户。",
+            "This pair already has open orders. Check the account first.",
         ),
-        (("liquidation",), "预计强平价未能确定位于止损之外，无法下单。"),
+        (
+            ("liquidation",),
+            "The estimated liquidation price could not be confirmed beyond the stop; no order was placed.",
+        ),
         (
             ("isolated", "margin mode", "margin_type", "margintype"),
-            "未能确认账户采用逐仓保证金模式，无法下单。",
+            "Could not confirm isolated margin mode; no order was placed.",
         ),
-        (("leverage",), "未能确认账户杠杆为 10x，无法下单。"),
+        (("leverage",), "Could not confirm 10x leverage; no order was placed."),
         (
             ("operation", "conflict", "different request"),
-            "执行端有其他操作进行中或请求冲突，请刷新核对后重试。",
+            "The executor is busy with another action or the request conflicts. Refresh and try again.",
         ),
         (
             ("price", "market data", "snapshot", "unavailable"),
-            "执行端行情或账户数据暂不可用，请稍后重试。",
+            "The executor's market or account data is unavailable. Try again shortly.",
         ),
         (
             ("expire", "entry zone", "stop", "target"),
-            "计划已过期或当前价格不符合入场条件，请重新核对。",
+            "The plan expired or the price no longer meets the entry conditions.",
         ),
         (
             ("support", "connector", "capabilit"),
-            "执行端暂不支持该卡片模式或交易所，请检查执行端版本。",
+            "The executor does not support this card mode or exchange. Check the executor version.",
         ),
     )
     for terms, message in mappings:
         if any(term in text for term in terms):
             return message
-    return "执行端未能完成请求，请检查执行端状态后重试。"
+    return (
+        "The executor could not complete the request. Check its status and try again."
+    )
 
 
 async def _request(card: Card, method: str, suffix: str, body: dict | None = None):
@@ -161,7 +176,7 @@ async def _request(card: Card, method: str, suffix: str, body: dict | None = Non
         )
         reason = user_error(exc.message)
         if exc.status in {404, 405, 501}:
-            reason = "执行端尚未支持交易卡片接口，请先更新执行端。"
+            reason = "The executor does not support trade cards yet. Update the executor first."
         code = str(exc.message).partition(":")[0]
         raise ExecutionError(
             reason,
@@ -174,12 +189,17 @@ async def _request(card: Card, method: str, suffix: str, body: dict | None = Non
         ) from exc
     except ApiRouteUnsupported as exc:
         raise ExecutionError(
-            "执行端尚未支持交易卡片接口，请先更新执行端。", status=501
+            "The executor does not support trade cards yet. Update the executor first.",
+            status=501,
         ) from exc
     except (aiohttp.ClientError, TimeoutError, AttributeError) as exc:
-        raise ExecutionError("执行端响应未确认，正在安全核对，请勿重复下单。") from exc
+        raise ExecutionError(
+            "The executor's response is unconfirmed; it is being checked. Do not repeat the order."
+        ) from exc
     if not isinstance(result, dict):
-        raise ExecutionError("执行端响应格式无效，正在安全核对。")
+        raise ExecutionError(
+            "The executor's response is malformed; it is being checked."
+        )
     return result
 
 
@@ -210,14 +230,17 @@ async def preview(card: Card) -> dict:
         or card.connector_name not in capabilities.get("connectors", [])
     ):
         raise ExecutionError(
-            "执行端不支持此卡片模式或交易所，请先更新执行端。", status=501
+            "The executor does not support this card mode or exchange. Update the executor first.",
+            status=501,
         )
     result = validate_quote(await _request(card, "POST", "/preview", payload(card)))
     liquidation = Decimal(str(result["liquidation_price"]))
     if (card.plan.side == "long" and liquidation >= card.plan.stop_price) or (
         card.plan.side == "short" and liquidation <= card.plan.stop_price
     ):
-        raise ValueError("预计强平价没有位于止损之外，无法按此保证金方案下单。")
+        raise ValueError(
+            "The estimated liquidation price is not beyond the stop, so this margin cannot be used."
+        )
     return result
 
 
@@ -247,7 +270,11 @@ async def current_price(card: Card) -> Decimal:
     try:
         value = Decimal(str(result.get("prices", result)[card.plan.trading_pair]))
     except (KeyError, TypeError, InvalidOperation, AttributeError):
-        raise ExecutionError("当前价格不可用，卡片状态暂未更新。") from None
+        raise ExecutionError(
+            "The current price is unavailable; the card was not updated."
+        ) from None
     if not value.is_finite() or value <= 0:
-        raise ExecutionError("当前价格不可用，卡片状态暂未更新。")
+        raise ExecutionError(
+            "The current price is unavailable; the card was not updated."
+        )
     return value

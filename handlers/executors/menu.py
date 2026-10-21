@@ -94,7 +94,7 @@ async def show_executors_menu(update: Update, context: Context) -> None:
 
         # Build message
         lines = [
-            f"⚡ *Executors* \\| _{escape_markdown_v2(server_name)}_",
+            f"⚡ *Executors*\n_Server: {escape_markdown_v2(server_name)}_",
         ]
 
         if executors:
@@ -210,7 +210,7 @@ async def show_executors_menu(update: Update, context: Context) -> None:
                     text="📜 History", callback_data="executors:history"
                 ),
                 InlineKeyboardButton(text="🔄 Refresh", callback_data="executors:menu"),
-                InlineKeyboardButton(text="❌ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="✕ Close", callback_data="executors:close"),
             ]
         )
 
@@ -244,8 +244,8 @@ async def show_executors_menu(update: Update, context: Context) -> None:
 
         keyboard = [
             [
-                InlineKeyboardButton(text="🔄 Retry", callback_data="executors:menu"),
-                InlineKeyboardButton(text="❌ Close", callback_data="executors:close"),
+                InlineKeyboardButton(text="🔁 Retry", callback_data="executors:menu"),
+                InlineKeyboardButton(text="✕ Close", callback_data="executors:close"),
             ]
         ]
 
@@ -298,7 +298,7 @@ async def show_history(update: Update, context: Context, page: int = 0) -> None:
         page_items = history[start : start + per_page]
 
         lines = [
-            f"📜 *Executor History* \\| _{escape_markdown_v2(server_name)}_",
+            f"📜 *Executor History*\n_Server: {escape_markdown_v2(server_name)}_",
         ]
 
         if page_items:
@@ -377,13 +377,13 @@ async def show_history(update: Update, context: Context, page: int = 0) -> None:
             if page > 0:
                 nav_row.append(
                     InlineKeyboardButton(
-                        text="◀️ Prev", callback_data=f"executors:history:{page - 1}"
+                        text="‹ Prev", callback_data=f"executors:history:{page - 1}"
                     )
                 )
             if start + per_page < total:
                 nav_row.append(
                     InlineKeyboardButton(
-                        text="Next ▶️", callback_data=f"executors:history:{page + 1}"
+                        text="Next ›", callback_data=f"executors:history:{page + 1}"
                     )
                 )
             if nav_row:
@@ -394,7 +394,7 @@ async def show_history(update: Update, context: Context, page: int = 0) -> None:
                 InlineKeyboardButton(
                     text="🔄 Refresh", callback_data="executors:history"
                 ),
-                InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu"),
+                InlineKeyboardButton(text="« Back", callback_data="executors:menu"),
             ]
         )
 
@@ -421,9 +421,9 @@ async def show_history(update: Update, context: Context, page: int = 0) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="🔄 Retry", callback_data="executors:history"
+                    text="🔁 Retry", callback_data="executors:history"
                 ),
-                InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu"),
+                InlineKeyboardButton(text="« Back", callback_data="executors:menu"),
             ]
         ]
         if query:
@@ -537,7 +537,9 @@ async def show_executor_detail(
 
     except Exception as e:
         logger.error(f"Error showing executor detail: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton(text="Back", callback_data="executors:menu")]]
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="executors:menu")]
+        ]
         try:
             await query.message.edit_text(
                 format_error_message(f"Error: {str(e)[:100]}"),
@@ -593,7 +595,6 @@ async def _render_executor_detail(
 
     lines = [
         f"⚡ *Executor Detail*",
-        "─────────────────────────",
         "",
         f"{side_emoji} *{escape_markdown_v2(pair)}* \\| {escape_markdown_v2(side_str)} {leverage}x",
         f"🏦 `{escape_markdown_v2(connector)}`",
@@ -772,7 +773,7 @@ async def _render_executor_detail(
     keyboard.append(
         [
             InlineKeyboardButton(text="🔄 Refresh", callback_data=refresh_callback),
-            InlineKeyboardButton(text="⬅️ Back", callback_data=back_callback),
+            InlineKeyboardButton(text="« Back", callback_data=back_callback),
         ]
     )
 
@@ -832,14 +833,14 @@ async def handle_stop_executor(
                 callback_data=f"executors:confirm_stop:{executor_id}",
             ),
             InlineKeyboardButton(
-                text="⬅️ Cancel", callback_data=f"executors:detail:{executor_id}"
+                text="✕ Cancel", callback_data=f"executors:detail:{executor_id}"
             ),
         ],
     ]
 
     message_text = (
         f"⚠️ *Stop Executor?*\n"
-        f"─────────────────────────\n\n"
+        "\n"
         f"{side_emoji} *{escape_markdown_v2(pair)}*\n"
         f"🆔 `{escape_markdown_v2(executor_id[:30])}`\n\n"
         f"_This will close the executor and any open orders\\._"
@@ -913,7 +914,7 @@ async def handle_confirm_stop_executor(
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="📋 Back to List", callback_data="executors:menu"
+                    text="« Back to List", callback_data="executors:menu"
                 )
             ]
         ]
@@ -949,10 +950,10 @@ async def handle_confirm_stop_executor(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="🔄 Refresh List", callback_data="executors:menu"
+                        text="🔄 Refresh", callback_data="executors:menu"
                     ),
                     InlineKeyboardButton(
-                        text="⬅️ Back", callback_data=f"executors:detail:{executor_id}"
+                        text="« Back", callback_data=f"executors:detail:{executor_id}"
                     ),
                 ]
             ]
@@ -960,7 +961,7 @@ async def handle_confirm_stop_executor(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="⬅️ Back", callback_data=f"executors:detail:{executor_id}"
+                        text="« Back", callback_data=f"executors:detail:{executor_id}"
                     )
                 ]
             ]
@@ -988,7 +989,6 @@ async def show_create_menu(update: Update, context: Context) -> None:
 
     lines = [
         "➕ *Create Executor*",
-        "─────────────────────────",
         "",
         "Select executor type:",
     ]
@@ -1004,7 +1004,7 @@ async def show_create_menu(update: Update, context: Context) -> None:
                 text="🎯 Position Executor", callback_data="executors:create_position"
             )
         ],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="executors:menu")],
+        [InlineKeyboardButton(text="« Back", callback_data="executors:menu")],
     ]
 
     await query.message.edit_text(

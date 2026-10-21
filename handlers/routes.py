@@ -38,7 +38,7 @@ def register_handlers() -> None:
     from handlers.dex import dex_callback_handler, lp_command
     from handlers.executors import executors_callback_handler, executors_command
     from handlers.memory import memory_callback_handler, memory_command
-    from handlers.messages import message_handler
+    from handlers.messages import message_handler, track_input_chat
     from handlers.portfolio import portfolio_callback_handler, portfolio_command
     from handlers.routines import routines_callback_handler, routines_command
     from handlers.start import start_callback_handler, start_command
@@ -93,6 +93,14 @@ def register_handlers() -> None:
     routes.callback(CONFIG_CALLBACK_PATTERN, config_callback_handler)
 
     # One content router owns form priority and multimodal agent input.
+    # Bind any input a command or button arms to the chat it was armed in.
+    routes.commands = {
+        name: track_input_chat(handler) for name, handler in routes.commands.items()
+    }
+    routes.callbacks = [
+        (pattern, track_input_chat(handler)) for pattern, handler in routes.callbacks
+    ]
+
     routes.message = message_handler
     register_wake()
 

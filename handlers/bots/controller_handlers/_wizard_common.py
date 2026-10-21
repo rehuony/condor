@@ -109,7 +109,7 @@ async def show_connector_step(
         if row:
             keyboard.append(row)
         keyboard.append(
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu")]
+            [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu")]
         )
 
         await query.message.edit_text(
@@ -121,7 +121,9 @@ async def show_connector_step(
 
     except Exception as e:
         logger.error(f"Error in {spec.log_name} connector step: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton(text="Back", callback_data="bots:main_menu")]]
+        keyboard = [
+            [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
+        ]
         await query.message.edit_text(
             format_error_message(f"Error: {str(e)}"),
             parse_mode="MarkdownV2",
@@ -173,8 +175,8 @@ async def show_pair_step(
             keyboard.append(row)
     keyboard.append(
         [
-            InlineKeyboardButton(text="⬅️ Back", callback_data=spec.back_to_connector),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="« Back", callback_data=spec.back_to_connector),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
         ]
     )
 
@@ -214,8 +216,8 @@ async def show_pair_suggestions(
         )
     keyboard.append(
         [
-            InlineKeyboardButton(text="⬅️ Back", callback_data=spec.back_to_connector),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="bots:main_menu"),
+            InlineKeyboardButton(text="« Back", callback_data=spec.back_to_connector),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:main_menu"),
         ]
     )
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -251,7 +253,7 @@ async def save_config(
     is_valid, error = validate(config)
     if not is_valid:
         keyboard = [
-            [InlineKeyboardButton(text="⬅️ Back", callback_data=spec.review_back)]
+            [InlineKeyboardButton(text="« Back", callback_data=spec.review_back)]
         ]
         await query.message.edit_text(
             f"*Validation Error*\n\n{escape_markdown_v2(error or 'Unknown error')}",
@@ -271,17 +273,17 @@ async def save_config(
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        text="Create Another", callback_data=spec.create_another
+                        text="➕ Create Another", callback_data=spec.create_another
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text="Deploy Now", callback_data="bots:deploy_menu"
+                        text="🚀 Deploy Now", callback_data="bots:deploy_menu"
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text="Back to Menu", callback_data="bots:controller_configs"
+                        text="« Back to Menu", callback_data="bots:controller_configs"
                     )
                 ],
             ]
@@ -295,7 +297,7 @@ async def save_config(
         else:
             error_msg = result.get("message", str(result))
             keyboard = [
-                [InlineKeyboardButton(text="⬅️ Back", callback_data=spec.review_back)]
+                [InlineKeyboardButton(text="« Back", callback_data=spec.review_back)]
             ]
             await query.message.edit_text(
                 f"*Save Failed*\n\n{escape_markdown_v2(error_msg[:200])}",
@@ -306,7 +308,7 @@ async def save_config(
     except Exception as e:
         logger.error(f"Error saving {spec.log_name} config: {e}", exc_info=True)
         keyboard = [
-            [InlineKeyboardButton(text="⬅️ Back", callback_data=spec.review_back)]
+            [InlineKeyboardButton(text="« Back", callback_data=spec.review_back)]
         ]
         await query.message.edit_text(
             f"*Error*\n\n{escape_markdown_v2(str(e)[:200])}",

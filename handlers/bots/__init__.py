@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 from condor.telegram.errors import is_not_modified
 from condor.telegram.types import Context, Update
 from handlers import clear_all_input_states
+from utils import telegram_ui as ui
 from utils.auth import hummingbot_api_required, restricted
 
 # Archived bots handlers
@@ -504,7 +505,7 @@ async def bots_callback_handler(update: Update, context: Context) -> None:
             return
 
         logger.warning(f"Unknown bots action: {action}")
-        await query.message.answer(f"Unknown action: {action}")
+        await query.message.answer(ui.STALE_BUTTON, parse_mode="MarkdownV2")
 
     except Exception as e:
         # Ignore "message is not modified" errors

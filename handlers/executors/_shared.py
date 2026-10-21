@@ -355,7 +355,7 @@ async def _show_pair_suggestions(
     msg_id = context.user_data.get("executor_wizard_msg_id")
 
     help_text = f"{title}\n"
-    help_text += "─────────────────────────\n\n"
+    help_text += "\n"
     help_text += f"❌ *{escape_markdown_v2(error_msg)}*\n\n"
 
     if suggestions:
@@ -375,8 +375,8 @@ async def _show_pair_suggestions(
 
     keyboard.append(
         [
-            InlineKeyboardButton(text="⬅️ Back", callback_data=back_callback),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="executors:menu"),
+            InlineKeyboardButton(text="« Back", callback_data=back_callback),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="executors:menu"),
         ]
     )
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)

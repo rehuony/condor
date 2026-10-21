@@ -12,7 +12,8 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
-from utils.telegram_formatters import escape_markdown_v2
+from utils import telegram_ui as ui
+from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 from ._format import (
     NETWORK_NAMES,
@@ -213,7 +214,7 @@ async def handle_gecko_token_info(
     except Exception as e:
         logger.error(f"Error fetching token info: {e}", exc_info=True)
         await query.message.edit_text(
-            f"❌ Error: {escape_markdown_v2(str(e))}",
+            format_error_message(str(e)),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -316,7 +317,7 @@ async def handle_gecko_token_search(update: Update, context: Context) -> None:
     except Exception as e:
         logger.error(f"Error searching token pools: {e}", exc_info=True)
         await query.message.edit_text(
-            f"❌ Error: {escape_markdown_v2(str(e))}",
+            format_error_message(str(e)),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -406,7 +407,7 @@ async def handle_gecko_token_add(update: Update, context: Context) -> None:
         if "already exists" in error_msg.lower():
             error_text = f"⚠️ *Token Already Exists*\n\n{escape_markdown_v2(symbol)} is already in Gateway\\."
         else:
-            error_text = f"❌ Error adding token: {escape_markdown_v2(error_msg)}"
+            error_text = ui.notice("error", "Could not add the token", error_msg)
 
         await query.message.edit_text(
             error_text,

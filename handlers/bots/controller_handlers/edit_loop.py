@@ -9,6 +9,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2
 
 from .._shared import (
@@ -171,14 +172,14 @@ async def show_cfg_edit_form(
     nav_row = []
     if current_idx > 0:
         nav_row.append(
-            InlineKeyboardButton(text="◀️ Prev", callback_data="bots:cfg_edit_prev")
+            InlineKeyboardButton(text="‹ Prev", callback_data="bots:cfg_edit_prev")
         )
     nav_row.append(
         InlineKeyboardButton(text=f"💾 Save", callback_data="bots:cfg_edit_save")
     )
     if current_idx < total - 1:
         nav_row.append(
-            InlineKeyboardButton(text="Next ▶️", callback_data="bots:cfg_edit_next")
+            InlineKeyboardButton(text="Next ›", callback_data="bots:cfg_edit_next")
         )
     keyboard.append(nav_row)
 
@@ -195,9 +196,7 @@ async def show_cfg_edit_form(
             InlineKeyboardButton(
                 text="💾 Save All & Exit", callback_data="bots:cfg_edit_save_all"
             ),
-            InlineKeyboardButton(
-                text="❌ Cancel", callback_data="bots:cfg_edit_cancel"
-            ),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:cfg_edit_cancel"),
         ]
     )
 
@@ -273,7 +272,7 @@ async def handle_cfg_edit_field(
     ]
 
     keyboard = [
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="bots:cfg_edit_form")]
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:cfg_edit_form")]
     ]
 
     await query.message.edit_text(
@@ -292,7 +291,10 @@ async def process_cfg_edit_input(
     editable_fields = context.user_data.get("cfg_editable_fields", {})
 
     if not config:
-        await update.message.answer("Context lost. Please start over.")
+        await update.message.answer(
+            ui.notice("stale", "Context lost", "Start over from the menu."),
+            parse_mode="MarkdownV2",
+        )
         return
 
     # Delete user's input message for clean chat
@@ -335,12 +337,18 @@ async def process_cfg_edit_input(
             errors.append(f"Invalid: {key}={value}")
 
     if errors:
-        error_msg = "⚠️ " + ", ".join(errors)
-        await context.bot.send_message(chat_id=chat_id, text=error_msg)
+        error_msg = ui.notice(
+            "warning", "Some values were not applied", ", ".join(errors)
+        )
+        await context.bot.send_message(
+            chat_id=chat_id, text=error_msg, parse_mode="MarkdownV2"
+        )
 
     if not updates:
         await context.bot.send_message(
-            chat_id=chat_id, text="❌ No valid updates found. Use format: key=value"
+            chat_id=chat_id,
+            text=ui.notice("error", "No valid updates", "Use the format key=value."),
+            parse_mode="MarkdownV2",
         )
         return
 
@@ -434,14 +442,14 @@ async def process_cfg_edit_input(
     nav_row = []
     if current_idx > 0:
         nav_row.append(
-            InlineKeyboardButton(text="◀️ Prev", callback_data="bots:cfg_edit_prev")
+            InlineKeyboardButton(text="‹ Prev", callback_data="bots:cfg_edit_prev")
         )
     nav_row.append(
         InlineKeyboardButton(text=f"💾 Save", callback_data="bots:cfg_edit_save")
     )
     if current_idx < total - 1:
         nav_row.append(
-            InlineKeyboardButton(text="Next ▶️", callback_data="bots:cfg_edit_next")
+            InlineKeyboardButton(text="Next ›", callback_data="bots:cfg_edit_next")
         )
     keyboard.append(nav_row)
     keyboard.append(
@@ -452,9 +460,7 @@ async def process_cfg_edit_input(
             InlineKeyboardButton(
                 text="💾 Save All & Exit", callback_data="bots:cfg_edit_save_all"
             ),
-            InlineKeyboardButton(
-                text="❌ Cancel", callback_data="bots:cfg_edit_cancel"
-            ),
+            InlineKeyboardButton(text="✕ Cancel", callback_data="bots:cfg_edit_cancel"),
         ]
     )
 
@@ -581,7 +587,7 @@ async def handle_cfg_edit_save_all(update: Update, context: Context) -> None:
             lines.append(f"  • `{escape_markdown_v2(cfg_id)}`")
 
     keyboard = [
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:controller_configs")]
+        [InlineKeyboardButton(text="« Back", callback_data="bots:controller_configs")]
     ]
 
     await query.message.edit_text(

@@ -72,7 +72,7 @@ async def get_server_context_header(user_data: dict = None) -> Tuple[str, bool]:
         server_escaped = escape_markdown_v2(default_server)
         status_escaped = escape_markdown_v2(status_text)
 
-        header = f"*Server:* `{server_escaped}` {status_icon} {status_escaped}\n"
+        header = f"• Server: `{server_escaped}` {status_icon} {status_escaped}\n"
 
         return header, is_online
 
@@ -126,13 +126,13 @@ async def get_gateway_status_info(
             is_running = False
 
         status_escaped = escape_markdown_v2(status_text)
-        gateway_info = f"*Gateway:* {status_icon} {status_escaped}\n"
+        gateway_info = f"• Gateway: {status_icon} {status_escaped}\n"
 
         return gateway_info, is_running
 
     except Exception as e:
         logger.error(f"Error getting gateway status: {e}", exc_info=True)
-        return f"*Gateway:* ⚠️ {escape_markdown_v2('Error')}\n", False
+        return f"• Gateway: ⚠️ {escape_markdown_v2('Error')}\n", False
 
 
 async def build_config_message_header(
@@ -155,7 +155,7 @@ async def build_config_message_header(
         )
         header += gateway_info
     elif include_gateway:
-        header += f"*Gateway:* ⚪️ {escape_markdown_v2('N/A')}\n"
+        header += f"• Gateway: ⚪️ {escape_markdown_v2('N/A')}\n"
 
     header += "\n"
     return header, server_online, gateway_running

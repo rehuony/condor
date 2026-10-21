@@ -17,6 +17,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils.telegram_formatters import format_error_message
 
 from ..server_context import build_config_message_header
 from ._shared import escape_markdown_v2, logger
@@ -428,7 +429,7 @@ async def show_wallet_details(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        text="🗑️ Delete Wallet",
+                        text="🗑 Delete Wallet",
                         callback_data=f"gateway_wallet_delete_{wallet_idx}",
                     )
                 ]
@@ -451,7 +452,7 @@ async def show_wallet_details(
 
     except Exception as e:
         logger.error(f"Error showing wallet details: {e}", exc_info=True)
-        error_text = f"❌ Error: {escape_markdown_v2(str(e))}"
+        error_text = format_error_message(str(e))
         keyboard = [
             [InlineKeyboardButton(text="« Back", callback_data="gateway_wallets")]
         ]
@@ -521,7 +522,8 @@ async def show_wallet_network_edit(
         keyboard = network_buttons + [
             [
                 InlineKeyboardButton(
-                    text="✓ Done", callback_data=f"gateway_wallet_net_done_{wallet_idx}"
+                    text="✅ Done",
+                    callback_data=f"gateway_wallet_net_done_{wallet_idx}",
                 )
             ]
         ]
@@ -604,7 +606,7 @@ async def prompt_add_wallet_private_key(query, context: Context, chain: str) -> 
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="« Cancel", callback_data="gateway_wallet_cancel_add"
+                    text="✕ Cancel", callback_data="gateway_wallet_cancel_add"
                 )
             ]
         ]
@@ -907,7 +909,9 @@ async def handle_wallet_input(update: Update, context: Context) -> None:
 
             if not chain or not private_key:
                 await context.bot.send_message(
-                    chat_id=chat_id, text="❌ Missing chain or private key"
+                    chat_id=chat_id,
+                    text=format_error_message("Missing chain or private key"),
+                    parse_mode="MarkdownV2",
                 )
                 return
 
@@ -986,7 +990,7 @@ async def handle_wallet_input(update: Update, context: Context) -> None:
                 keyboard = network_buttons + [
                     [
                         InlineKeyboardButton(
-                            text="✓ Done", callback_data="gateway_wallet_new_net_done"
+                            text="✅ Done", callback_data="gateway_wallet_new_net_done"
                         )
                     ]
                 ]
@@ -1073,7 +1077,7 @@ async def show_new_wallet_network_selection(query, context: Context) -> None:
         keyboard = network_buttons + [
             [
                 InlineKeyboardButton(
-                    text="✓ Done", callback_data="gateway_wallet_new_net_done"
+                    text="✅ Done", callback_data="gateway_wallet_new_net_done"
                 )
             ]
         ]

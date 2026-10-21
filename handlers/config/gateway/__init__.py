@@ -124,7 +124,7 @@ async def handle_gateway_input(update: Update, context: Context) -> None:
         await handle_pool_input(update, context)
     elif context.user_data.get("awaiting_network_input"):
         await handle_network_config_input(update, context)
-    elif context.user_data.get("awaiting_connector_config"):
+    elif context.user_data.get("awaiting_connector_input"):
         await handle_connector_config_input(update, context)
     elif context.user_data.get("awaiting_rpc_input"):
         await handle_rpc_input(update, context)

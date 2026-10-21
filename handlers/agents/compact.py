@@ -7,6 +7,7 @@ from condor.telegram.types import (
     Context,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     COMPACT_CONTEXT_TEMPLATE,
@@ -23,6 +24,10 @@ from .session import (
 
 log = logging.getLogger(__name__)
 
+_NOTHING_TO_COMPACT = ui.notice(
+    "info", "Nothing to compact", "There is no active session."
+)
+
 
 async def _handle_compact_menu(update: Update, context: Context) -> None:
     """Show compact options sub-menu."""
@@ -33,13 +38,19 @@ async def _handle_compact_menu(update: Update, context: Context) -> None:
     session = await get_session(chat_id)
 
     if not session or not session.alive:
-        await query.message.edit_text("No active session to compact.")
+        await query.message.edit_text(_NOTHING_TO_COMPACT, parse_mode="MarkdownV2")
         return
 
     await query.message.edit_text(
-        "How would you like to compact context?\n\n"
-        "Auto - summarize everything\n"
-        "Custom - specify what to keep",
+        ui.screen(
+            ui.title("🗜", "Compact Context"),
+            [
+                ui.bullet("Auto", "summarize everything"),
+                ui.bullet("Custom", "specify what to keep"),
+            ],
+            ui.hint("The summary replaces the transcript in a new session."),
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=_compact_menu_keyboard(),
     )
 
@@ -48,7 +59,7 @@ def _edit_render(message):
     """Render every step by editing one message in place (callback surface)."""
 
     async def render(text: str) -> None:
-        await message.edit_text(text)
+        await message.edit_text(text, parse_mode="MarkdownV2")
 
     return render
 
@@ -60,9 +71,9 @@ def _reply_render(message):
     async def render(text: str) -> None:
         nonlocal placeholder
         if placeholder is None:
-            placeholder = await message.answer(text)
+            placeholder = await message.answer(text, parse_mode="MarkdownV2")
         else:
-            await placeholder.edit_text(text)
+            await placeholder.edit_text(text, parse_mode="MarkdownV2")
 
     return render
 
@@ -87,17 +98,19 @@ async def _compact(
     session = await get_session(chat_id)
 
     if not session or not session.alive:
-        await render("No active session to compact.")
+        await render(_NOTHING_TO_COMPACT)
         return
 
     if session.is_busy:
-        await render("Agent is busy. Wait for it to finish first.")
+        await render(
+            ui.notice("warning", "Agent is busy", "Wait for it to finish first.")
+        )
         if keep_custom_flag_on_busy:
             # Stay armed so the user can resend the same instructions.
             context.user_data["agent_compact_custom"] = True
         return
 
-    await render("Compacting context...")
+    await render("⏳ " + ui.esc("Compacting context…"))
 
     if instructions:
         prompt = COMPACT_PROMPT_CUSTOM_TEMPLATE.format(instructions=instructions)
@@ -108,11 +121,15 @@ async def _compact(
         summary = await runtime.prompt_once(_tg_key(chat_id), prompt)
     except Exception as e:
         log.exception("Failed to get compact summary")
-        await render(f"Compact failed: {e}")
+        await render(ui.notice("error", "Compact failed", str(e)))
         return
 
     if not summary or not summary.strip():
-        await render("Agent returned empty summary. Compact aborted.")
+        await render(
+            ui.notice(
+                "warning", "Compact aborted", "The agent returned an empty summary."
+            )
+        )
         return
 
     agent_key = session.agent_key
@@ -146,13 +163,16 @@ async def _compact(
 
     except Exception as e:
         log.exception("Failed to recreate session after compact")
-        await render(f"Compact failed during session reset: {e}")
+        await render(ui.notice("error", "Compact failed during session reset", str(e)))
         return
 
     word_count = len(summary.split())
     await render(
-        f"Context compacted ({word_count} words carried over).\n\n"
-        "Send a message to continue chatting."
+        ui.notice(
+            "success",
+            "Context compacted",
+            f"{word_count} words carried over. Send a message to continue chatting.",
+        )
     )
 
 
@@ -177,13 +197,17 @@ async def _handle_compact_custom_prompt(update: Update, context: Context) -> Non
     session = await get_session(chat_id)
 
     if not session or not session.alive:
-        await query.message.edit_text("No active session to compact.")
+        await query.message.edit_text(_NOTHING_TO_COMPACT, parse_mode="MarkdownV2")
         return
 
     context.user_data["agent_compact_custom"] = True
     await query.message.edit_text(
-        "What should I keep in the summary?\n\n"
-        'Type your instructions (e.g. "keep the portfolio analysis and SOL trade setup"):'
+        ui.prompt(
+            "What should the summary keep?",
+            "Type your instructions as a message.",
+            "keep the portfolio analysis and SOL trade setup",
+        ),
+        parse_mode="MarkdownV2",
     )
 
 

@@ -26,6 +26,7 @@ from condor.telegram.types import (
 )
 from utils.auth import restricted
 from utils.telegram_formatters import escape_markdown_v2
+from utils.telegram_ui import is_current_menu, remember_menu
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ def _build_view(user_id: int, context: Context) -> tuple[str, InlineKeyboardMark
     """
     stores = iter_user_stores(user_id)
 
-    lines = ["🧠 *Memory by assistant*", ""]
+    lines = ["🧠 *Memory*\n_Grouped by assistant_", ""]
     keyboard: list[list[InlineKeyboardButton]] = []
     del_map: dict[int, tuple[str | None, str]] = {}
     next_idx = 0
@@ -64,7 +65,7 @@ def _build_view(user_id: int, context: Context) -> tuple[str, InlineKeyboardMark
         shown += 1
 
         label_e = escape_markdown_v2(label)
-        lines.append(f"━━━ *{label_e}* ━━━")
+        lines.append(f"*{label_e}*")
 
         lines.append(f"_Remembers \\({len(memories)}\\):_")
         for m in memories:
@@ -129,7 +130,10 @@ async def memory_command(update: Update, context: Context) -> None:
 
     user_id = update.effective_user.id
     text, keyboard = _build_view(user_id, context)
-    await update.message.answer(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+    sent = await update.message.answer(
+        text, parse_mode="MarkdownV2", reply_markup=keyboard
+    )
+    remember_menu(context.user_data, "memory", sent.message_id)
 
 
 @restricted
@@ -140,7 +144,13 @@ async def memory_callback_handler(update: Update, context: Context) -> None:
 
     action = query.data.split(":", 1)[1] if ":" in query.data else query.data
 
-    if action.startswith("del:"):
+    if action.startswith("del:") and not is_current_menu(
+        context.user_data, "memory", query.message
+    ):
+        # Indexes belong to the newest view; an older copy could delete the
+        # wrong memory. Rebuild this copy instead.
+        await query.answer("This list was out of date. It is refreshed now.")
+    elif action.startswith("del:"):
         # del:{idx} — idx is a key into the map built by the last _build_view.
         del_map = context.user_data.get(_DEL_MAP_KEY) or {}
         try:
@@ -156,6 +166,7 @@ async def memory_callback_handler(update: Update, context: Context) -> None:
         await query.answer()
 
     text, keyboard = _build_view(user_id, context)
+    remember_menu(context.user_data, "memory", query.message.message_id)
     try:
         await query.message.edit_text(
             text, parse_mode="MarkdownV2", reply_markup=keyboard

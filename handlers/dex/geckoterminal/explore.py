@@ -11,6 +11,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2
 
 from .._shared import cached_call
@@ -162,7 +163,9 @@ def _build_pool_list_keyboard(pools: list, user_data: dict) -> InlineKeyboardMar
     # Back button
     keyboard.append(
         [
-            InlineKeyboardButton(text="« LP Menu", callback_data="dex:liquidity"),
+            InlineKeyboardButton(
+                text="« Back to LP Menu", callback_data="dex:liquidity"
+            ),
         ]
     )
 
@@ -288,18 +291,18 @@ async def show_trending_pools(
         logger.error(f"Error fetching trending pools: {e}", exc_info=True)
         try:
             await loading_msg.edit_text(
-                f"❌ Error fetching trending pools: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not fetch trending pools", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="🔄 Retry", callback_data="dex:gecko_refresh"
+                                text="🔁 Retry", callback_data="dex:gecko_refresh"
                             )
                         ],
                         [
                             InlineKeyboardButton(
-                                text="« LP Menu", callback_data="dex:liquidity"
+                                text="« Back to LP Menu", callback_data="dex:liquidity"
                             )
                         ],
                     ]
@@ -307,18 +310,18 @@ async def show_trending_pools(
             )
         except Exception:
             await chat.send_message(
-                f"❌ Error fetching trending pools: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not fetch trending pools", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="🔄 Retry", callback_data="dex:gecko_refresh"
+                                text="🔁 Retry", callback_data="dex:gecko_refresh"
                             )
                         ],
                         [
                             InlineKeyboardButton(
-                                text="« LP Menu", callback_data="dex:liquidity"
+                                text="« Back to LP Menu", callback_data="dex:liquidity"
                             )
                         ],
                     ]
@@ -413,18 +416,18 @@ async def show_top_pools(update: Update, context: Context, network: str) -> None
         logger.error(f"Error fetching top pools: {e}", exc_info=True)
         try:
             await loading_msg.edit_text(
-                f"❌ Error fetching top pools: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not fetch top pools", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="🔄 Retry", callback_data="dex:gecko_refresh"
+                                text="🔁 Retry", callback_data="dex:gecko_refresh"
                             )
                         ],
                         [
                             InlineKeyboardButton(
-                                text="« LP Menu", callback_data="dex:liquidity"
+                                text="« Back to LP Menu", callback_data="dex:liquidity"
                             )
                         ],
                     ]
@@ -432,18 +435,18 @@ async def show_top_pools(update: Update, context: Context, network: str) -> None
             )
         except Exception:
             await chat.send_message(
-                f"❌ Error fetching top pools: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not fetch top pools", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="🔄 Retry", callback_data="dex:gecko_refresh"
+                                text="🔁 Retry", callback_data="dex:gecko_refresh"
                             )
                         ],
                         [
                             InlineKeyboardButton(
-                                text="« LP Menu", callback_data="dex:liquidity"
+                                text="« Back to LP Menu", callback_data="dex:liquidity"
                             )
                         ],
                     ]
@@ -552,18 +555,18 @@ async def show_new_pools(update: Update, context: Context, network: str = None) 
         logger.error(f"Error fetching new pools: {e}", exc_info=True)
         try:
             await loading_msg.edit_text(
-                f"❌ Error fetching new pools: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not fetch new pools", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="🔄 Retry", callback_data="dex:gecko_refresh"
+                                text="🔁 Retry", callback_data="dex:gecko_refresh"
                             )
                         ],
                         [
                             InlineKeyboardButton(
-                                text="« LP Menu", callback_data="dex:liquidity"
+                                text="« Back to LP Menu", callback_data="dex:liquidity"
                             )
                         ],
                     ]
@@ -571,18 +574,18 @@ async def show_new_pools(update: Update, context: Context, network: str = None) 
             )
         except Exception:
             await chat.send_message(
-                f"❌ Error fetching new pools: {escape_markdown_v2(str(e))}",
+                ui.notice("error", "Could not fetch new pools", str(e)),
                 parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="🔄 Retry", callback_data="dex:gecko_refresh"
+                                text="🔁 Retry", callback_data="dex:gecko_refresh"
                             )
                         ],
                         [
                             InlineKeyboardButton(
-                                text="« LP Menu", callback_data="dex:liquidity"
+                                text="« Back to LP Menu", callback_data="dex:liquidity"
                             )
                         ],
                     ]

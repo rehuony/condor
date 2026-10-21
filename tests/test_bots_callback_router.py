@@ -11,6 +11,7 @@ from handlers.bots import (
     SIMPLE_ACTIONS,
     bots_callback_handler,
 )
+from utils import telegram_ui as ui
 
 # Current routes and their argument parsers.
 EXPECTED_ROUTES: dict[str, tuple[str | None, tuple[str, ...]]] = {
@@ -303,7 +304,7 @@ def test_a_missing_parameter_is_ignored_in_silence(monkeypatch):
 def test_a_malformed_number_gets_the_unknown_action_reply():
     # Not the generic "Operation failed" the outer except used to produce.
     replies = fire("bots:cfg_page:abc")
-    assert replies == ["Unknown action: cfg_page:abc"]
+    assert replies == [ui.STALE_BUTTON]
 
 
 @pytest.mark.parametrize(
@@ -311,4 +312,4 @@ def test_a_malformed_number_gets_the_unknown_action_reply():
     ["not_a_real_action", "configs_page:1", "list_configs", "gs_accept_prices"],
 )
 def test_an_unknown_or_retired_action_says_so(action):
-    assert fire(f"bots:{action}") == [f"Unknown action: {action}"]
+    assert fire(f"bots:{action}") == [ui.STALE_BUTTON]

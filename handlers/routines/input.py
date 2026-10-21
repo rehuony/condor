@@ -10,6 +10,7 @@ from condor.telegram.types import (
 from routines.base import (
     get_routine,
 )
+from utils import telegram_ui as ui
 
 from .jobs import _create_scheduled_instance
 from .storage import _get_draft, _set_draft, _starter_id
@@ -71,11 +72,20 @@ async def _process_config(update: Update, context: Context, text: str) -> None:
         updates[key] = value
 
     if errors:
-        msg = await update.message.answer(f"⚠️ {', '.join(errors)}")
+        msg = await update.message.answer(
+            ui.notice("warning", "Some values were not applied", ", ".join(errors)),
+            parse_mode="MarkdownV2",
+        )
         asyncio.create_task(_delete_after(msg, 3))
 
     if not updates:
-        msg = await update.message.answer("❌ Use: `key=value`", parse_mode="Markdown")
+        msg = await update.message.answer(
+            ui.notice("error", "Nothing to update", raw=True)
+            + "\n\nSend values as "
+            + ui.code("key=value")
+            + "\\.",
+            parse_mode="MarkdownV2",
+        )
         asyncio.create_task(_delete_after(msg, 3))
         return
 
@@ -83,8 +93,8 @@ async def _process_config(update: Update, context: Context, text: str) -> None:
     _set_draft(context, routine_name, draft)
 
     msg = await update.message.answer(
-        f"✅ {', '.join(f'`{k}={v}`' for k, v in updates.items())}",
-        parse_mode="Markdown",
+        "✅ " + ", ".join(ui.code(f"{k}={v}") for k, v in updates.items()),
+        parse_mode="MarkdownV2",
     )
     asyncio.create_task(_delete_after(msg, 2))
 
@@ -120,7 +130,11 @@ async def _process_daily_time(update: Update, context: Context, text: str) -> No
         time_str = f"{hour:02d}:{minute:02d}"
     except (ValueError, AttributeError):
         msg = await update.message.answer(
-            f"❌ Invalid time. Use `HH:MM` format.", parse_mode="Markdown"
+            ui.notice("error", "Invalid time")
+            + "\n\nUse the "
+            + ui.code("HH:MM")
+            + " format\\.",
+            parse_mode="MarkdownV2",
         )
         asyncio.create_task(_delete_after(msg, 3))
         return
@@ -136,7 +150,9 @@ async def _process_daily_time(update: Update, context: Context, text: str) -> No
     try:
         routine.config_class(**draft)
     except Exception as e:
-        msg = await update.message.answer(f"❌ Config error: {e}")
+        msg = await update.message.answer(
+            ui.notice("error", "Config error", str(e)), parse_mode="MarkdownV2"
+        )
         asyncio.create_task(_delete_after(msg, 3))
         return
 
@@ -145,7 +161,10 @@ async def _process_daily_time(update: Update, context: Context, text: str) -> No
         context, chat_id, routine_name, draft, schedule, user_id=_starter_id(update)
     )
 
-    msg = await update.message.answer(f"📅 Scheduled daily at {time_str}")
+    msg = await update.message.answer(
+        ui.notice("success", f"Scheduled daily at {time_str}"),
+        parse_mode="MarkdownV2",
+    )
     asyncio.create_task(_delete_after(msg, 2))
 
     context.user_data["routines_state"] = "editing"

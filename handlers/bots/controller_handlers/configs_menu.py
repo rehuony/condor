@@ -153,10 +153,7 @@ async def show_controller_configs_menu(
 
         # Build message
         type_name, emoji = _get_controller_type_display(current_type)
-        lines = [r"*Controller Configs*", ""]
-
-        # Add separator to maintain consistent width
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines = [r"⚙️ *Controller Configs*", ""]
 
         # Show selected summary (always visible)
         if selected_ids:
@@ -231,7 +228,7 @@ async def show_controller_configs_menu(
             if page > 0:
                 nav.append(
                     InlineKeyboardButton(
-                        text="◀️", callback_data=f"bots:cfg_page:{page - 1}"
+                        text="‹ Prev", callback_data=f"bots:cfg_page:{page - 1}"
                     )
                 )
             nav.append(
@@ -242,7 +239,7 @@ async def show_controller_configs_menu(
             if page < total_pages - 1:
                 nav.append(
                     InlineKeyboardButton(
-                        text="▶️", callback_data=f"bots:cfg_page:{page + 1}"
+                        text="Next ›", callback_data=f"bots:cfg_page:{page + 1}"
                     )
                 )
             keyboard.append(nav)
@@ -264,7 +261,7 @@ async def show_controller_configs_menu(
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        text=f"🗑️ Delete ({len(selected_ids)})",
+                        text=f"🗑 Delete ({len(selected_ids)})",
                         callback_data="bots:cfg_delete_confirm",
                     ),
                     InlineKeyboardButton(
@@ -278,7 +275,7 @@ async def show_controller_configs_menu(
                 InlineKeyboardButton(
                     text="📤 Upload", callback_data="bots:upload_config"
                 ),
-                InlineKeyboardButton(text="⬅️ Back", callback_data="bots:main_menu"),
+                InlineKeyboardButton(text="« Back", callback_data="bots:main_menu"),
             ]
         )
 
@@ -325,7 +322,7 @@ async def show_controller_configs_menu(
                 ]
             )
         keyboard.append(
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:main_menu")]
+            [InlineKeyboardButton(text="« Back", callback_data="bots:main_menu")]
         )
         error_msg = format_error_message(f"Failed to load configs: {str(e)}")
         try:
@@ -384,7 +381,7 @@ async def show_type_selector(update: Update, context: Context) -> None:
     keyboard.append(
         [
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data="bots:controller_configs"
+                text="✕ Cancel", callback_data="bots:controller_configs"
             ),
         ]
     )
@@ -464,7 +461,7 @@ async def handle_cfg_delete_confirm(update: Update, context: Context) -> None:
                 text="✅ Yes, Delete", callback_data="bots:cfg_delete_execute"
             ),
             InlineKeyboardButton(
-                text="❌ Cancel", callback_data="bots:controller_configs"
+                text="✕ Cancel", callback_data="bots:controller_configs"
             ),
         ]
     ]
@@ -553,7 +550,7 @@ async def handle_cfg_delete_execute(update: Update, context: Context) -> None:
             lines.append(f"    _{escape_markdown_v2(error[:40])}_")
 
     keyboard = [
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="bots:controller_configs")]
+        [InlineKeyboardButton(text="« Back", callback_data="bots:controller_configs")]
     ]
 
     await query.message.edit_text(

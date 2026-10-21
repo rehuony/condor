@@ -20,6 +20,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.auth import admin_required
 from utils.telegram_formatters import escape_markdown_v2, escape_markdown_v2_code
 
@@ -60,11 +61,11 @@ def _facet_line(label: str, facet) -> str:
     """One version, and where it could go. Never a bare "up to date" on an error."""
     current = f"`{escape_markdown_v2_code(facet.current)}`"
     if facet.error:
-        return f"{label}: {current}\n" f"  {escape_markdown_v2('⚠ ' + facet.error)}"
+        return f"• {label}: {current}\n" f"  {escape_markdown_v2('⚠️ ' + facet.error)}"
     if facet.up_to_date:
-        return f"{label}: {current} — up to date"
+        return f"• {label}: {current} — up to date"
 
-    line = f"{label}: {current}"
+    line = f"• {label}: {current}"
     if facet.available:
         line += f" → `{escape_markdown_v2_code(facet.available)}`"
     if facet.behind > 1:
@@ -92,14 +93,15 @@ def _status_text(statuses) -> str:
     # screen should say: every version line above it is about the checkout, not
     # about what this process is actually running.
     pending = updates.relaunch_pending()
+    notice = None
     if pending is not None:
-        notice = escape_markdown_v2(
-            f"⚠ Updated to {pending['target_commit'][:7]}. Condor is still "
-            f"running {pending['from_commit'][:7]} — relaunch to apply."
+        notice = ui.notice(
+            "warning",
+            "Relaunch to apply",
+            f"Updated to {pending['target_commit'][:7]}. Condor is still "
+            f"running {pending['from_commit'][:7]}.",
         )
-        return f"{notice}\n\n{body}"
-
-    return body
+    return ui.screen(ui.title("⬇️", "Updates"), notice, body)
 
 
 def _status_keyboard(statuses) -> InlineKeyboardMarkup:
@@ -110,7 +112,7 @@ def _status_keyboard(statuses) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="Update All", callback_data=f"admin:update_go:{ALL}"
+                    text="⬇️ Update All", callback_data=f"admin:update_go:{ALL}"
                 )
             ]
         )
@@ -118,23 +120,23 @@ def _status_keyboard(statuses) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"Update {status.name}",
+                    text=f"⬇️ Update {status.name}",
                     callback_data=f"admin:update_go:{status.key}",
                 )
             ]
         )
 
     rows.append(
-        [InlineKeyboardButton(text="Refresh", callback_data="admin:update_refresh")]
+        [InlineKeyboardButton(text="🔄 Refresh", callback_data="admin:update_refresh")]
     )
     rows.append(
         [
             InlineKeyboardButton(
-                text="Force Restart", callback_data="admin:update_restart"
+                text="🔁 Force Restart", callback_data="admin:update_restart"
             )
         ]
     )
-    rows.append([InlineKeyboardButton(text="Back", callback_data="admin:back")])
+    rows.append([InlineKeyboardButton(text="« Back", callback_data="admin:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -142,10 +144,10 @@ async def _show_status(target, context, *, force: bool = False) -> None:
     """Render the per-component card. ``target`` is a message or a callback query."""
     is_callback = hasattr(target, "data")
     if is_callback:
-        await target.message.edit_text("Checking for updates...")
+        await target.message.edit_text("⏳ Checking for updates…")
         editor = target.message.edit_text
     else:
-        message = await target.answer("Checking for updates...")
+        message = await target.answer("⏳ Checking for updates…")
         editor = message.edit_text
 
     statuses = await updates.check(force=force)
@@ -166,10 +168,10 @@ def _selection(key: str) -> list[str]:
 
 
 def _preflight_text(preflight) -> str:
-    parts = []
+    parts = [ui.title("📋", "Update Plan")]
 
     if preflight.blocks:
-        parts.append(f"*{escape_markdown_v2('Blocked')}*")
+        parts.append("⛔ *Blocked*")
         for block in preflight.blocks:
             body = escape_markdown_v2(block.message)
             if block.paths:
@@ -181,7 +183,7 @@ def _preflight_text(preflight) -> str:
             parts.append(body)
 
     for warning in preflight.warnings:
-        parts.append(escape_markdown_v2(f"⚠ {warning.message}"))
+        parts.append(escape_markdown_v2(f"⚠️ {warning.message}"))
 
     if preflight.steps:
         plan = "\n".join(
@@ -190,7 +192,7 @@ def _preflight_text(preflight) -> str:
         )
         parts.append(f"*Plan*\n```\n{plan}\n```")
 
-    return "\n\n".join(parts)
+    return "\n\n".join(parts) if len(parts) > 1 else ""
 
 
 def _preflight_keyboard(key: str, preflight) -> InlineKeyboardMarkup:
@@ -211,7 +213,7 @@ def _preflight_keyboard(key: str, preflight) -> InlineKeyboardMarkup:
     # and spelling a component key out twice was already within 3 of it.
     scope = "a" if key == ALL else "s"
     for component, action in offered:
-        label = f"{action.title()} Conflicts in {component}"
+        label = f"🛠 {action.title()} Conflicts in {component}"
         # Discarding destroys work, so it gets its own confirm screen.
         prefix = "update_cfix" if action == "discard" else "update_fix"
         rows.append(
@@ -227,19 +229,19 @@ def _preflight_keyboard(key: str, preflight) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="Confirm", callback_data=f"admin:update_run:{key}"
+                    text="✅ Confirm", callback_data=f"admin:update_run:{key}"
                 )
             ]
         )
 
     rows.append(
-        [InlineKeyboardButton(text="Cancel", callback_data="admin:update_refresh")]
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="admin:update_refresh")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _show_preflight(query, key: str) -> None:
-    await query.message.edit_text("Checking what this would do...")
+    await query.message.edit_text("⏳ Checking what this would do…")
     preflight = await updates.preflight(_selection(key))
     await query.message.edit_text(
         _preflight_text(preflight) or escape_markdown_v2("Nothing to do."),
@@ -261,7 +263,8 @@ async def _confirm_fix(query, component: str, action: str, key: str) -> None:
     )
     listing = "\n".join(escape_markdown_v2_code(p) for p in paths[:20]) or "(none)"
     text = (
-        f"*{escape_markdown_v2('Discard local changes?')}*\n\n"
+        ui.title("🗑", "Discard local changes?")
+        + "\n\n"
         + escape_markdown_v2(
             f"This permanently throws away local work on {len(paths)} "
             f"file{'s' if len(paths) != 1 else ''} in {component}. It cannot be undone."
@@ -271,7 +274,7 @@ async def _confirm_fix(query, component: str, action: str, key: str) -> None:
     keyboard = [
         [
             InlineKeyboardButton(
-                text="Yes, Discard",
+                text="✅ Yes, Discard",
                 callback_data=(
                     f"admin:update_fix:{component}:{action}:"
                     f"{'a' if key == ALL else 's'}"
@@ -280,7 +283,7 @@ async def _confirm_fix(query, component: str, action: str, key: str) -> None:
         ],
         [
             InlineKeyboardButton(
-                text="Keep Them", callback_data=f"admin:update_go:{key}"
+                text="❌ Keep Them", callback_data=f"admin:update_go:{key}"
             )
         ],
     ]
@@ -292,16 +295,17 @@ async def _confirm_fix(query, component: str, action: str, key: str) -> None:
 
 
 async def _apply_fix(query, component: str, action: str, key: str) -> None:
-    await query.message.edit_text(f"Resolving conflicts in {component}...")
+    await query.message.edit_text(f"⏳ Resolving conflicts in {component}…")
     ok, message = await updates.resolve(component, action)
     if not ok:
         await query.message.edit_text(
-            f"Could not {action}:\n\n{message}",
+            ui.notice("error", f"Could not {action}", message),
+            parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="Back", callback_data="admin:update_refresh"
+                            text="« Back", callback_data="admin:update_refresh"
                         )
                     ]
                 ]
@@ -320,17 +324,17 @@ async def _apply_fix(query, component: str, action: str, key: str) -> None:
 
 
 def _run_text(run) -> str:
-    """The plan with its progress. Plain text: no escaping to get wrong mid-flow."""
+    """The plan with its progress, every dynamic part escaped (MarkdownV2)."""
     header = {
-        "running": "Updating...",
-        "restarting": "Restarting Condor...",
-        "succeeded": "Update complete.",
-        "failed": "Update failed.",
-    }.get(run.state, "Updating...")
+        "running": ("⏳", "Updating…"),
+        "restarting": ("🔁", "Restarting Condor…"),
+        "succeeded": ("✅", "Update complete"),
+        "failed": ("❌", "Update failed"),
+    }.get(run.state, ("⏳", "Updating…"))
 
-    lines = [header, ""]
+    lines = [ui.title(*header), ""]
     for step in run.steps:
-        lines.append(f"{_STEP_GLYPH.get(step.state, '·')} {step.label}")
+        lines.append(ui.esc(f"{_STEP_GLYPH.get(step.state, '·')} {step.label}"))
 
     # The last step of a Condor update belongs to a human: the new code is on
     # disk, this process is still the old one, and nothing applies until it is
@@ -339,16 +343,18 @@ def _run_text(run) -> str:
     if pending is not None and not run.live:
         lines += [
             "",
-            f"Relaunch Condor to apply {pending['target_commit'][:7]} — "
-            "it is still running the old code until you do.",
+            ui.hint(
+                f"Relaunch Condor to apply {pending['target_commit'][:7]} — "
+                "it is still running the old code until you do."
+            ),
         ]
 
     if run.error:
-        lines += ["", run.error]
+        lines += ["", ui.esc(run.error)]
 
     failed = next((s for s in run.steps if s.state == "failed"), None)
     if failed is not None and failed.output_tail:
-        lines += ["", failed.output_tail]
+        lines += ["", f"```\n{escape_markdown_v2_code(failed.output_tail)}\n```"]
 
     return "\n".join(lines)
 
@@ -369,12 +375,12 @@ def _run_keyboard(run) -> InlineKeyboardMarkup | None:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="Restart Now", callback_data="admin:update_restart"
+                    text="🔁 Restart Now", callback_data="admin:update_restart"
                 )
             ]
         )
     rows.append(
-        [InlineKeyboardButton(text="Back", callback_data="admin:update_refresh")]
+        [InlineKeyboardButton(text="« Back", callback_data="admin:update_refresh")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -390,7 +396,7 @@ async def _start_run(query, context: Context, key: str) -> None:
     async def render(run) -> None:
         try:
             await query.message.edit_text(
-                _run_text(run), reply_markup=_run_keyboard(run)
+                _run_text(run), parse_mode="MarkdownV2", reply_markup=_run_keyboard(run)
             )
         except Exception as e:  # noqa: BLE001
             # A failed progress edit (unchanged text, message too old) must
@@ -439,7 +445,7 @@ async def _do_restart(query) -> None:
     """Force a restart without updating anything. Reachable from every screen."""
     from utils.updater import request_restart
 
-    await query.message.edit_text("Restarting Condor...")
+    await query.message.edit_text("🔁 Restarting Condor…")
     # Let Telegram flush the edit before the shutdown starts.
     await asyncio.sleep(1)
     request_restart()
@@ -497,7 +503,7 @@ async def _periodic_update_check(job: ScheduledJob) -> None:
         return
     _last_notice = signature
 
-    body = "Updates available\n\n" + "\n".join(lines)
+    body = "⬇️ Updates available\n\n" + "\n".join(lines)
 
     # announce() reaches Telegram *and* the dashboard bell in one call, which is
     # what makes the update panel discoverable without any new badge plumbing.

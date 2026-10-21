@@ -17,7 +17,7 @@ async def trade_cards_callback_handler(update: Update, context: Context) -> None
     query = update.callback_query
     parts = (query.data or "").split(":")
     if len(parts) != 3 or not query.message:
-        await query.answer("卡片按钮无效。", show_alert=True)
+        await query.answer("This card button is invalid.", show_alert=True)
         return
     _, action, card_id = parts
     owner_id, chat_id = update.effective_user.id, update.effective_chat.id
@@ -27,7 +27,7 @@ async def trade_cards_callback_handler(update: Update, context: Context) -> None
         or card.chat_id != chat_id
         or card.message_id != query.message.message_id
     ):
-        await query.answer("只有卡片接收者可以操作。", show_alert=True)
+        await query.answer("Only the card's recipient can use it.", show_alert=True)
         return
     await query.answer()
     margin = None

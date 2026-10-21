@@ -17,6 +17,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_compact_number,
@@ -208,7 +209,7 @@ def _build_trade_keyboard(
                     text=f"⚡ {lev_display}", callback_data="cex:trade_set_leverage"
                 ),
                 InlineKeyboardButton(
-                    text=f"🔄 {mode_display}", callback_data="cex:trade_toggle_pos_mode"
+                    text=f"🔀 {mode_display}", callback_data="cex:trade_toggle_pos_mode"
                 ),
             ]
         )
@@ -235,12 +236,14 @@ def _build_trade_keyboard(
             ]
         )
 
+    keyboard.append([ui.action_button("quick", "Quick Trade", "cex:trade_quick")])
+
     # Row 6: Navigation
     keyboard.append(
         [
             InlineKeyboardButton(text="📋 Orders", callback_data="cex:search_orders"),
             InlineKeyboardButton(text="📊 Positions", callback_data="cex:positions"),
-            InlineKeyboardButton(text="❌ Close", callback_data="cex:close"),
+            InlineKeyboardButton(text="✕ Close", callback_data="cex:close"),
         ]
     )
 
@@ -277,12 +280,12 @@ def _build_trade_menu_text(
             "auth_error": "🟠",
             "error": "⚠️",
         }.get(server_status, "🟢")
-        help_text = f"📝 *Trade* \\| _Server: {escape_markdown_v2(server_name)} {status_emoji}_\n\n"
+        help_text = f"📝 *Trade*\n_Server: {escape_markdown_v2(server_name)} {status_emoji}_\n\n"
     else:
         help_text = r"📝 *Trade*" + "\n\n"
 
     # Show balances section (with loading placeholder)
-    help_text += r"━━━ Balance ━━━" + "\n"
+    help_text += r"*Balance*" + "\n"
     if balances is not None:
         connector_balances = balances.get(connector, [])
         balances_found = {}
@@ -325,7 +328,7 @@ def _build_trade_menu_text(
     help_text += "\n"
 
     # Show market data section (quote + trading rules combined)
-    help_text += f"━━━ {escape_markdown_v2(trading_pair)} ━━━\n"
+    help_text += f"*{escape_markdown_v2(trading_pair)}*\n"
 
     # Calculate spread for first line
     spread_str = ""
@@ -393,7 +396,7 @@ def _build_trade_menu_text(
     if positions and _is_perpetual_connector(connector):
         conn_positions = [p for p in positions if p.get("connector_name") == connector]
         if conn_positions:
-            help_text += r"━━━ Positions ━━━" + "\n"
+            help_text += r"*Positions*" + "\n"
             for pos in conn_positions[:3]:
                 line = _format_compact_position_line(pos)
                 help_text += line + "\n"
@@ -401,23 +404,11 @@ def _build_trade_menu_text(
                 help_text += f"_\\+{len(conn_positions) - 3} more_\n"
             help_text += "\n"
 
-    # Quick trade hint
-    is_perp = _is_perpetual_connector(connector)
-    help_text += r"━━━ Quick Trade ━━━" + "\n"
-    if is_perp:
-        help_text += r"⌨️ `pair side amt [type] [price] [pos]`" + "\n"
-        help_text += f"Market: `{escape_markdown_v2(trading_pair)} BUY 0\\.5`\n"
-        help_text += f"Limit: `{escape_markdown_v2(trading_pair)} SELL 0\\.5 LIMIT 150 CLOSE`\n\n"
-    else:
-        help_text += r"⌨️ `pair side amt [type] [price]`" + "\n"
-        help_text += f"Market: `{escape_markdown_v2(trading_pair)} BUY 0\\.5`\n"
-        help_text += (
-            f"Limit: `{escape_markdown_v2(trading_pair)} SELL 0\\.5 LIMIT 150`\n\n"
-        )
+    help_text += ui.hint("Tap ⌨️ Quick Trade to type an order in one line.") + "\n\n"
 
     # Show recent orders (swap.py style)
     if orders:
-        help_text += r"━━━ Recent ━━━" + "\n"
+        help_text += r"*Recent*" + "\n"
         for order in orders[:5]:
             line = _format_compact_order_line(order)
             help_text += line + "\n"
@@ -547,6 +538,7 @@ async def show_trade_menu(
     if message:
         context.user_data["trade_menu_message_id"] = message.message_id
         context.user_data["trade_menu_chat_id"] = message.chat.id
+        ui.remember_menu(context.user_data, "cex_trade", message.message_id)
 
     # Launch background data fetch if needed (when any key data is missing)
     needs_fetch = balances is None or quote_data is None or current_price is None

@@ -276,7 +276,7 @@ class RichReplyStreamer:
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Stop and Clear Queue",
+                        text="🛑 Stop and Clear Queue",
                         callback_data=f"agent:stop_run:{self.target.token}",
                     )
                 ]

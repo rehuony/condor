@@ -15,6 +15,7 @@ from condor.telegram.types import (
     Update,
 )
 from handlers._routing import PrefixRoute, dispatch_action, none_if_all, noop
+from utils import telegram_ui as ui
 from utils.auth import restricted
 from utils.telegram_formatters import format_error_message
 
@@ -91,6 +92,7 @@ from .pools import (
     handle_pool_list,
     handle_pool_list_back,
     handle_pool_list_orca,
+    handle_pool_list_search,
     handle_pool_ohlcv,
     handle_pool_select,
     handle_pos_add_confirm,
@@ -98,6 +100,8 @@ from .pools import (
     handle_pos_close_execute,
     handle_pos_collect_fees,
     handle_pos_help,
+    handle_pos_quick_cancel,
+    handle_pos_quick_edit,
     handle_pos_refresh,
     handle_pos_set_base,
     handle_pos_set_connector,
@@ -139,6 +143,7 @@ from .swap import (
     handle_swap_hist_set_filter,
     handle_swap_history,
     handle_swap_network_select,
+    handle_swap_quick,
     handle_swap_refresh,
     handle_swap_set_amount,
     handle_swap_set_connector,
@@ -236,7 +241,7 @@ async def _copy_pool_address(update: Update, context: Context, _rest: str) -> No
         "pool_address", selected_pool.get("address", "N/A")
     )
     await query.answer("Address sent below ⬇️")
-    await query.message.answer(f"`{pool_address}`", parse_mode="Markdown")
+    await query.message.answer(ui.code(pool_address), parse_mode="MarkdownV2")
 
 
 async def _add_position_from_pool(update: Update, context: Context) -> None:
@@ -280,6 +285,7 @@ SIMPLE_ACTIONS: dict[str, Callable[[Update, Context], Awaitable[None]]] = {
     # Swap
     "swap": handle_swap,
     "swap_refresh": handle_swap_refresh,
+    "swap_quick": handle_swap_quick,
     "swap_toggle_side": handle_swap_toggle_side,
     "swap_set_connector": handle_swap_set_connector,
     "swap_set_network": handle_swap_set_network,
@@ -308,6 +314,7 @@ SIMPLE_ACTIONS: dict[str, Callable[[Update, Context], Awaitable[None]]] = {
     "pool_list": handle_pool_list,
     "pool_list_orca": handle_pool_list_orca,
     "pool_list_back": handle_pool_list_back,
+    "pool_list_search": handle_pool_list_search,
     "pool_detail_refresh": handle_pool_detail_refresh,
     "add_to_gateway": handle_add_to_gateway,
     # Position management
@@ -322,6 +329,8 @@ SIMPLE_ACTIONS: dict[str, Callable[[Update, Context], Awaitable[None]]] = {
     "pos_set_base": handle_pos_set_base,
     "pos_set_quote": handle_pos_set_quote,
     "pos_add_confirm": handle_pos_add_confirm,
+    "pos_quick_edit": handle_pos_quick_edit,
+    "pos_quick_cancel": handle_pos_quick_cancel,
     "pos_use_max_range": handle_pos_use_max_range,
     "pos_help": handle_pos_help,
     "pos_toggle_strategy": handle_pos_toggle_strategy,
@@ -506,7 +515,7 @@ PREFIX_ACTIONS: tuple[PrefixRoute, ...] = (
 # State -> processor function mapping
 MESSAGE_STATE_HANDLERS: dict[str, Callable] = {
     # Swap states
-    "swap": process_swap,
+    "swap_quick": process_swap,
     "swap_set_pair": process_swap_set_pair,
     "swap_set_amount": process_swap_set_amount,
     "swap_set_slippage": process_swap_set_slippage,
@@ -516,7 +525,7 @@ MESSAGE_STATE_HANDLERS: dict[str, Callable] = {
     "pool_list": process_pool_list,
     "position_list": process_position_list,
     # Add position states
-    "add_position": process_add_position,
+    "add_position_quick": process_add_position,
     "pos_set_connector": process_pos_set_connector,
     "pos_set_network": process_pos_set_network,
     "pos_set_pool": process_pos_set_pool,
@@ -528,9 +537,11 @@ MESSAGE_STATE_HANDLERS: dict[str, Callable] = {
     "gecko_search": process_gecko_search,
 }
 
-# States that should be cleared after processing
+# States that should be cleared after processing. Menu states (``swap``,
+# ``add_position``, ``pool_list_results``) never capture text; their quick
+# inputs are armed by buttons and stay armed until answered or cancelled.
 CLEAR_STATE_AFTER = frozenset(
-    {"swap", "swap_status", "pool_info", "pool_list", "position_list", "add_position"}
+    {"swap_status", "pool_info", "pool_list", "position_list"}
 )
 
 
@@ -565,8 +576,8 @@ async def dex_callback_handler(update: Update, context: Context) -> None:
         ):
             return
 
-        # Unknown action
-        await query.message.answer(f"Unknown action: {action}")
+        logger.warning(f"Unknown DEX action: {action}")
+        await query.message.answer(ui.STALE_BUTTON, parse_mode="MarkdownV2")
 
     except Exception as e:
         # Ignore "message is not modified" errors - they're harmless
@@ -608,7 +619,8 @@ async def dex_message_handler(update: Update, context: Context) -> None:
         if handler:
             await handler(update, context, user_input)
         else:
-            await update.message.answer(f"Unknown state: {dex_state}")
+            logger.warning(f"Unknown DEX input state: {dex_state}")
+            await update.message.answer(ui.STALE_INPUT, parse_mode="MarkdownV2")
 
     except Exception as e:
         logger.error(f"Error processing DEX input: {e}", exc_info=True)

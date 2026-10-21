@@ -33,10 +33,10 @@ def _get_admin_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 Stats", callback_data="admin:stats"),
         ],
         [
-            InlineKeyboardButton(text="Update", callback_data="admin:update_check"),
+            InlineKeyboardButton(text="⬇️ Update", callback_data="admin:update_check"),
         ],
         [
-            InlineKeyboardButton(text="« Close", callback_data="config_close"),
+            InlineKeyboardButton(text="✕ Close", callback_data="config_close"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -163,7 +163,7 @@ async def _show_pending_users(query, context: Context) -> None:
 
     if not pending:
         message = "👥 *Pending Requests*\n\n" "No pending access requests\\."
-        keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+        keyboard = [[InlineKeyboardButton(text="« Back", callback_data="admin:back")]]
         await query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
@@ -189,12 +189,12 @@ async def _show_pending_users(query, context: Context) -> None:
                     callback_data=f"admin:approve_{user_id}",
                 ),
                 InlineKeyboardButton(
-                    text=f"✕ Reject", callback_data=f"admin:reject_{user_id}"
+                    text=f"❌ Reject", callback_data=f"admin:reject_{user_id}"
                 ),
             ]
         )
 
-    keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")])
+    keyboard.append([InlineKeyboardButton(text="« Back", callback_data="admin:back")])
 
     await query.message.edit_text(
         message,
@@ -210,7 +210,7 @@ async def _show_all_users(query, context: Context) -> None:
 
     if not users:
         message = "📋 *All Users*\n\nNo users registered\\."
-        keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+        keyboard = [[InlineKeyboardButton(text="« Back", callback_data="admin:back")]]
         await query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
@@ -262,7 +262,7 @@ async def _show_all_users(query, context: Context) -> None:
 
         message += "\n"
 
-    keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")])
+    keyboard.append([InlineKeyboardButton(text="« Back", callback_data="admin:back")])
 
     await query.message.edit_text(
         message,
@@ -328,10 +328,10 @@ async def _show_user_details(query, context: Context, user_id: int) -> None:
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="✓ Approve", callback_data=f"admin:approve_{user_id}"
+                    text="✅ Approve", callback_data=f"admin:approve_{user_id}"
                 ),
                 InlineKeyboardButton(
-                    text="✕ Reject", callback_data=f"admin:reject_{user_id}"
+                    text="❌ Reject", callback_data=f"admin:reject_{user_id}"
                 ),
             ]
         )
@@ -353,7 +353,7 @@ async def _show_user_details(query, context: Context, user_id: int) -> None:
         )
 
     keyboard.append(
-        [InlineKeyboardButton(text="🔙 Back to Users", callback_data="admin:users")]
+        [InlineKeyboardButton(text="« Back to Users", callback_data="admin:users")]
     )
 
     await query.message.edit_text(
@@ -542,7 +542,7 @@ async def _show_audit_log(query, context: Context) -> None:
 
     if not entries:
         message = "📜 *Audit Log*\n\nNo entries yet\\."
-        keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+        keyboard = [[InlineKeyboardButton(text="« Back", callback_data="admin:back")]]
         await query.message.edit_text(
             message,
             parse_mode="MarkdownV2",
@@ -566,7 +566,7 @@ async def _show_audit_log(query, context: Context) -> None:
         message += f"  {escape_markdown_v2(action_display)}\n"
         message += f"  By: `{actor}` \\| {escape_markdown_v2(target_type)}: `{escape_markdown_v2(str(target_id))}`\n\n"
 
-    keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+    keyboard = [[InlineKeyboardButton(text="« Back", callback_data="admin:back")]]
 
     await query.message.edit_text(
         message,
@@ -609,7 +609,7 @@ async def _show_stats(query, context: Context) -> None:
         f"  Entries: {len(cm.cm.get('audit_log', []))}\n"
     )
 
-    keyboard = [[InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]]
+    keyboard = [[InlineKeyboardButton(text="« Back", callback_data="admin:back")]]
 
     await query.message.edit_text(
         message,

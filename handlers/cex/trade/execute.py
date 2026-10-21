@@ -15,6 +15,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_error_message,
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 async def handle_trade_execute(update: Update, context: Context) -> None:
     """Execute the trade with current parameters"""
+    query = update.callback_query
+    if query and not ui.is_current_menu(context.user_data, "cex_trade", query.message):
+        await ui.refuse_stale_menu(query, "cex:trade")
+        return
     try:
         params = context.user_data.get("trade_params", {})
         account = get_clob_account(context.user_data)

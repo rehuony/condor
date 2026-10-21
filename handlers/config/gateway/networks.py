@@ -9,6 +9,8 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
+from utils.telegram_formatters import format_error_message
 from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import (
@@ -305,13 +307,18 @@ async def handle_network_config_input(update: Update, context: Context) -> None:
             # Show errors but don't cancel
             error_msg = "⚠️ " + ", ".join(errors)
             await context.bot.send_message(
-                chat_id=update.effective_chat.id, text=error_msg
+                chat_id=update.effective_chat.id,
+                text=error_msg,
+                parse_mode="MarkdownV2",
             )
 
         if not updates:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="❌ No valid updates found. Use format: key=value",
+                text=ui.notice(
+                    "error", "No valid updates", "Use the format key=value."
+                ),
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -342,7 +349,9 @@ async def submit_network_config(context: Context, bot, chat_id: int) -> None:
 
         if not network_id or not new_values:
             await bot.send_message(
-                chat_id=chat_id, text="❌ Missing configuration data"
+                chat_id=chat_id,
+                text=format_error_message("Missing configuration data"),
+                parse_mode="MarkdownV2",
             )
             return
 

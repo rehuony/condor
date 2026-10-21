@@ -9,7 +9,8 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
-from utils.telegram_formatters import escape_markdown_v2
+from utils import telegram_ui as ui
+from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 from .._shared import (
     GRID_STRIKE_DEFAULTS,
@@ -114,7 +115,7 @@ async def show_config_form(update: Update, context: Context) -> None:
                 text="Amount", callback_data="bots:set_field:total_amount_quote"
             ),
             InlineKeyboardButton(
-                text="Start", callback_data="bots:set_field:start_price"
+                text="▶️ Start", callback_data="bots:set_field:start_price"
             ),
             InlineKeyboardButton(text="End", callback_data="bots:set_field:end_price"),
         ]
@@ -154,9 +155,11 @@ async def show_config_form(update: Update, context: Context) -> None:
     # Row 6: Actions
     keyboard.append(
         [
-            InlineKeyboardButton(text="Save Config", callback_data="bots:save_config"),
             InlineKeyboardButton(
-                text="Cancel", callback_data="bots:controller_configs"
+                text="💾 Save Config", callback_data="bots:save_config"
+            ),
+            InlineKeyboardButton(
+                text="✕ Cancel", callback_data="bots:controller_configs"
             ),
         ]
     )
@@ -212,7 +215,7 @@ async def handle_set_field(update: Update, context: Context, field_name: str) ->
     message += r"Type the new value or tap Cancel\."
 
     keyboard = [
-        [InlineKeyboardButton(text="Cancel", callback_data="bots:edit_config_back")]
+        [InlineKeyboardButton(text="✕ Cancel", callback_data="bots:edit_config_back")]
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -256,7 +259,11 @@ async def show_connector_selector(update: Update, context: Context) -> None:
             keyboard.append(row)
 
         keyboard.append(
-            [InlineKeyboardButton(text="Cancel", callback_data="bots:edit_config_back")]
+            [
+                InlineKeyboardButton(
+                    text="✕ Cancel", callback_data="bots:edit_config_back"
+                )
+            ]
         )
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -370,24 +377,33 @@ async def fetch_and_apply_market_data(update: Update, context: Context) -> None:
             else:
                 # No candles, just show price info
                 await query.message.answer(
-                    f"*{escape_markdown_v2(pair)}* Market Data\n\n"
-                    f"Current Price: `{current_price:,.4f}`\n"
-                    f"Auto\\-calculated grid:\n"
-                    f"  Start: `{start:,.4f}`\n"
-                    f"  End: `{end:,.4f}`\n"
-                    f"  Limit: `{limit:,.4f}`",
+                    ui.screen(
+                        ui.title("📊", f"{pair} Market Data"),
+                        [ui.bullet("Price", f"{current_price:,.4f}", code_value=True)],
+                        [
+                            ui.section("Auto-calculated grid"),
+                            ui.bullet("Start", f"{start:,.4f}", code_value=True),
+                            ui.bullet("End", f"{end:,.4f}", code_value=True),
+                            ui.bullet("Limit", f"{limit:,.4f}", code_value=True),
+                        ],
+                    ),
                     parse_mode="MarkdownV2",
                 )
         else:
             await query.message.answer(
-                f"Could not fetch price for {pair}. Please set prices manually.",
-                parse_mode="HTML",
+                ui.notice(
+                    "warning",
+                    f"Could not fetch the price for {pair}",
+                    "Set prices manually.",
+                ),
+                parse_mode="MarkdownV2",
             )
 
     except Exception as e:
         logger.error(f"Error fetching market data: {e}", exc_info=True)
         await query.message.answer(
-            f"Error fetching market data: {str(e)[:100]}", parse_mode="HTML"
+            format_error_message(f"Could not fetch market data: {str(e)[:100]}"),
+            parse_mode="MarkdownV2",
         )
 
     # Show the config form
@@ -511,7 +527,10 @@ async def process_field_input(
     field_name = context.user_data.get("editing_controller_field")
 
     if not field_name:
-        await update.message.answer("No field selected. Please try again.")
+        await update.message.answer(
+            ui.notice("warning", "No field selected", "Pick a field and try again."),
+            parse_mode="MarkdownV2",
+        )
         return
 
     field_info = GRID_STRIKE_FIELDS.get(field_name, {})
@@ -546,7 +565,9 @@ async def process_field_input(
         context.user_data["bots_state"] = "editing_config"
 
         # Show success
-        await update.message.answer(f"{label} set to: {value}", parse_mode="HTML")
+        await update.message.answer(
+            ui.notice("success", f"{label} set to {value}"), parse_mode="MarkdownV2"
+        )
 
         # If trading_pair was set and we have a connector, fetch market data
         if field_name == "trading_pair" and config.get("connector_name"):
@@ -621,13 +642,19 @@ async def process_field_input(
                         )
                 else:
                     await update.message.answer(
-                        f"Could not fetch price for {pair}. Set prices manually."
+                        ui.notice(
+                            "warning",
+                            f"Could not fetch the price for {pair}",
+                            "Set prices manually.",
+                        ),
+                        parse_mode="MarkdownV2",
                     )
 
             except Exception as e:
                 logger.error(f"Error fetching market data: {e}", exc_info=True)
                 await update.message.answer(
-                    f"Error fetching market data: {str(e)[:50]}"
+                    format_error_message(f"Could not fetch market data: {str(e)[:50]}"),
+                    parse_mode="MarkdownV2",
                 )
 
         # Show the form again
@@ -646,7 +673,12 @@ async def process_field_input(
 
     except ValueError as e:
         await update.message.answer(
-            f"Invalid value for {label}. Expected {field_type}. Please try again."
+            ui.notice(
+                "error",
+                f"Invalid value for {label}",
+                f"Expected {field_type}. Try again.",
+            ),
+            parse_mode="MarkdownV2",
         )
 
 
@@ -689,12 +721,12 @@ async def handle_save_config(update: Update, context: Context) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="Create Another", callback_data="bots:new_grid_strike"
+                    text="➕ Create Another", callback_data="bots:new_grid_strike"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Back to Configs", callback_data="bots:controller_configs"
+                    text="« Back to Configs", callback_data="bots:controller_configs"
                 )
             ],
         ]

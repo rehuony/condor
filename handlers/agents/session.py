@@ -16,9 +16,11 @@ from condor.telegram.types import (
     Context,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     AGENT_OPTIONS,
+    NO_SESSION,
     forget_chat_conversation,
     remember_chat_conversation,
     resolve_chat_binding,
@@ -130,17 +132,17 @@ async def _handle_start(
     agent, stale_slug = resolve_chat_binding(context.user_data)
     label = (agent.name or agent.slug) if agent else "Condor"
 
-    status_text = (
-        f"Starting {label} session..."
+    status_text = "⏳ " + ui.esc(
+        f"Starting {label} session…"
         if agent
-        else f"Starting Condor session ({llm_label})..."
+        else f"Starting Condor session ({llm_label})…"
     )
     if stale_slug:
-        status_text = f"{stale_binding_notice(stale_slug)}\n\n{status_text}"
+        status_text = ui.screen(stale_binding_notice(stale_slug), status_text)
     if query:
-        await message.edit_text(status_text)
+        await message.edit_text(status_text, parse_mode="MarkdownV2")
     else:
-        message = await message.answer(status_text)
+        message = await message.answer(status_text, parse_mode="MarkdownV2")
 
     # Destroy existing session
     await destroy_session(chat_id)
@@ -166,12 +168,20 @@ async def _handle_start(
         )
 
         await message.edit_text(
-            f"{label} is ready. Send a message to start chatting.\n\n"
-            "Use /agent to see options or any other command to exit."
+            ui.notice(
+                "success",
+                f"{label} is ready",
+                "Send a message to start chatting. Use /agent for options, "
+                "or any other command to leave.",
+            ),
+            parse_mode="MarkdownV2",
         )
     except Exception as e:
         log.exception("Failed to start agent session")
-        await message.edit_text(f"Failed to start agent: {e}")
+        await message.edit_text(
+            ui.notice("error", "Could not start the agent", str(e)),
+            parse_mode="MarkdownV2",
+        )
 
 
 async def _handle_new_session(update: Update, context: Context) -> None:
@@ -181,7 +191,7 @@ async def _handle_new_session(update: Update, context: Context) -> None:
     session = await get_session(chat_id)
 
     if not session or not session.alive:
-        await query.message.edit_text("No active session.")
+        await query.message.edit_text(NO_SESSION, parse_mode="MarkdownV2")
         return
 
     await _handle_start(update, context)
@@ -205,7 +215,9 @@ async def _ensure_chat_session(update, context, *, on_error=None) -> SessionInfo
         agent, stale_slug = resolve_chat_binding(context.user_data)
         if stale_slug:
             try:
-                await update.message.answer(stale_binding_notice(stale_slug))
+                await update.message.answer(
+                    stale_binding_notice(stale_slug), parse_mode="MarkdownV2"
+                )
             except NetworkFailure as exc:
                 log.warning(
                     "Telegram delivery failed stage=binding_notice update_id=%s error_type=%s",

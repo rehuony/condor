@@ -10,11 +10,13 @@ def margin_amount(value: str | Decimal) -> str:
             raise ValueError()
         amount = Decimal(text)
     except (InvalidOperation, ValueError):
-        raise ValueError("请输入有效的 USDT 保证金金额。") from None
+        raise ValueError("Enter a valid USDT margin amount.") from None
     if not amount.is_finite() or amount <= 0:
-        raise ValueError("保证金必须是大于 0 的有限数值。")
+        raise ValueError("Margin must be a finite number above 0.")
     if abs(amount.adjusted()) > 18:
-        raise ValueError("保证金金额超出可支持的精度或范围。")
+        raise ValueError(
+            "The margin amount is outside the supported precision or range."
+        )
     return format(amount.normalize(), "f")
 
 
@@ -33,7 +35,9 @@ def validate_quote(quote: dict) -> dict:
         try:
             value = Decimal(str(quote[name]))
         except (KeyError, InvalidOperation, TypeError):
-            raise ValueError("执行端未返回完整的风险报价，请稍后重试。") from None
+            raise ValueError(
+                "The executor did not return a complete risk quote. Try again shortly."
+            ) from None
         if (
             not value.is_finite()
             or (value < 0 and name not in {"profit_tp1", "profit_tp2"})
@@ -42,7 +46,9 @@ def validate_quote(quote: dict) -> dict:
                 and value == 0
             )
         ):
-            raise ValueError("执行端风险报价无效，未提交订单。")
+            raise ValueError(
+                "The executor's risk quote is invalid; no order was submitted."
+            )
     if quote.get("entry_method") not in {"MARKET", "LIMIT"}:
-        raise ValueError("执行端未返回有效的入场方式。")
+        raise ValueError("The executor did not return a valid entry method.")
     return quote

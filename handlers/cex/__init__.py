@@ -19,6 +19,7 @@ from condor.telegram.types import (
 )
 from handlers import clear_all_input_states
 from handlers._routing import HandlerFunc, PrefixRoute, dispatch_action, noop
+from utils import telegram_ui as ui
 from utils.auth import hummingbot_api_required, restricted
 from utils.telegram_formatters import format_error_message
 
@@ -41,6 +42,7 @@ from .trade import (
     handle_trade_execute,
     handle_trade_get_quote,
     handle_trade_pair_select,
+    handle_trade_quick,
     handle_trade_refresh,
     handle_trade_set_amount,
     handle_trade_set_connector,
@@ -95,6 +97,7 @@ SIMPLE_ACTIONS: dict[str, HandlerFunc] = {
     "main_menu": handle_trade,
     "trade": handle_trade,
     "trade_refresh": handle_trade_refresh,
+    "trade_quick": handle_trade_quick,
     # Trade parameters
     "trade_toggle_side": handle_trade_toggle_side,
     "trade_toggle_type": handle_trade_toggle_type,
@@ -132,17 +135,16 @@ PREFIX_ACTIONS: tuple[PrefixRoute, ...] = (
     ("switch_dex_", _handle_switch_to_dex, str),
 )
 
-#: ``cex_state`` values and the processor that consumes the typed text.
+#: ``cex_state`` values and the processor that consumes the typed text. The
+#: menu state ``trade`` is navigation only; ``trade_quick`` is armed by the
+#: Quick Trade button.
 TEXT_INPUT_HANDLERS: dict[str, Callable[[Update, Context, str], Awaitable[None]]] = {
-    "trade": process_trade,
+    "trade_quick": process_trade,
     "trade_set_pair": process_trade_set_pair,
     "trade_set_amount": process_trade_set_amount,
     "trade_set_price": process_trade_set_price,
     "trade_set_leverage": process_trade_set_leverage,
 }
-
-#: States that are removed before processing because the input completes them.
-_COMPLETING_STATES = frozenset({"trade"})
 
 
 @restricted
@@ -193,7 +195,8 @@ async def cex_callback_handler(update: Update, context: Context) -> None:
         if not await dispatch_action(
             update, context, action, SIMPLE_ACTIONS, PREFIX_ACTIONS
         ):
-            await query.message.answer(f"Unknown action: {action}")
+            logger.warning(f"Unknown CEX action: {action}")
+            await query.message.answer(ui.STALE_BUTTON, parse_mode="MarkdownV2")
 
     except Exception as e:
         logger.error(f"Error in CEX callback handler: {e}", exc_info=True)
@@ -218,14 +221,10 @@ async def cex_message_handler(update: Update, context: Context) -> None:
     logger.info(f"Processing input for state: {cex_state}, input: {user_input}")
 
     try:
-        # Only remove state for completing operations
-        if cex_state in _COMPLETING_STATES:
-            context.user_data.pop("cex_state", None)
-            logger.info(f"Removed cex_state for completing operation: {cex_state}")
-
         processor = TEXT_INPUT_HANDLERS.get(cex_state)
         if processor is None:
-            await update.message.answer(f"Unknown state: {cex_state}")
+            logger.warning(f"Unknown CEX input state: {cex_state}")
+            await update.message.answer(ui.STALE_INPUT, parse_mode="MarkdownV2")
             return
         await processor(update, context, user_input)
 

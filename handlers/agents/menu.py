@@ -12,6 +12,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import AGENT_OPTIONS, resolve_chat_binding
 
@@ -22,20 +23,24 @@ def _active_session_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for active session."""
     rows = [
         [
-            InlineKeyboardButton(text="New", callback_data="agent:new"),
-            InlineKeyboardButton(text="Compact", callback_data="agent:compact"),
+            InlineKeyboardButton(text="➕ New", callback_data="agent:new"),
+            InlineKeyboardButton(text="🗜 Compact", callback_data="agent:compact"),
         ],
         [
-            InlineKeyboardButton(text="Change LLM", callback_data="agent:settings"),
-            InlineKeyboardButton(text="Talk To", callback_data="agent:talk_to"),
+            InlineKeyboardButton(text="⚙️ Change LLM", callback_data="agent:settings"),
+            InlineKeyboardButton(text="👤 Talk To", callback_data="agent:talk_to"),
         ],
-        [InlineKeyboardButton(text="Conversations", callback_data="agent:conv_list")],
+        [
+            InlineKeyboardButton(
+                text="💬 Conversations", callback_data="agent:conv_list"
+            )
+        ],
         [
             # Kills the subprocess and the conversation with it. Labelled
             # "End Session" so it is not read as "stop generating" — that is
             # /stop, which clears current requests and keeps the context.
-            InlineKeyboardButton(text="End Session", callback_data="agent:stop"),
-            InlineKeyboardButton(text="Close", callback_data="agent:close"),
+            InlineKeyboardButton(text="🛑 End Session", callback_data="agent:stop"),
+            ui.close_button("agent:close"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -63,7 +68,7 @@ def _talk_to_keyboard(
     ]
 
     if not agents:
-        keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+        keyboard.append([ui.back_button("agent:menu")])
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     total_pages = (len(agents) + TALK_PAGE_SIZE - 1) // TALK_PAGE_SIZE
@@ -101,7 +106,7 @@ def _talk_to_keyboard(
             )
         keyboard.append(nav)
 
-    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+    keyboard.append([ui.back_button("agent:menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -163,7 +168,7 @@ def _conversations_keyboard(
     keyboard: list[list[InlineKeyboardButton]] = []
 
     if not metas:
-        keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+        keyboard.append([ui.back_button("agent:menu")])
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     total_pages = (len(metas) + CONVERSATIONS_PAGE_SIZE - 1) // CONVERSATIONS_PAGE_SIZE
@@ -203,7 +208,7 @@ def _conversations_keyboard(
             )
         keyboard.append(nav)
 
-    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+    keyboard.append([ui.back_button("agent:menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -221,11 +226,11 @@ def _conversation_delete_keyboard(meta) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Delete for Good",
+                    text="🗑 Delete for Good",
                     callback_data=f"agent:conv_delok:{conversation_token(meta.id)}",
                 )
             ],
-            [InlineKeyboardButton(text="Keep It", callback_data="agent:conv_list")],
+            [InlineKeyboardButton(text="❌ Keep It", callback_data="agent:conv_list")],
         ]
     )
 
@@ -300,12 +305,12 @@ def _settings_keyboard(
     keyboard.append(
         [
             InlineKeyboardButton(
-                text=f"Key-Shape Warnings: {'On' if secret_notices else 'Off'}",
+                text=f"🔐 Key-Shape Warnings: {'On' if secret_notices else 'Off'}",
                 callback_data="agent:secret_notices_toggle",
             )
         ]
     )
-    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:menu")])
+    keyboard.append([ui.back_button("agent:menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -326,9 +331,7 @@ def _openrouter_picker_keyboard(
 
     if not models:
         return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Back", callback_data="agent:settings")]
-            ]
+            inline_keyboard=[[ui.back_button("agent:settings")]]
         )
 
     total_pages = (len(models) + OPENROUTER_PAGE_SIZE - 1) // OPENROUTER_PAGE_SIZE
@@ -339,7 +342,7 @@ def _openrouter_picker_keyboard(
     keyboard: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
-                text="Enter Model Manually", callback_data="agent:or_type"
+                text="⌨️ Enter Model Manually", callback_data="agent:or_type"
             )
         ],
     ]
@@ -371,7 +374,7 @@ def _openrouter_picker_keyboard(
             )
         )
     keyboard.append(nav_row)
-    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:settings")])
+    keyboard.append([ui.back_button("agent:settings")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -385,10 +388,10 @@ def _openrouter_input_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Back to Model List", callback_data="agent:or_page:0"
+                    text="« Back to Model List", callback_data="agent:or_page:0"
                 )
             ],
-            [InlineKeyboardButton(text="Cancel", callback_data="agent:or_type_cancel")],
+            [ui.cancel_button("agent:or_type_cancel")],
         ]
     )
 
@@ -418,17 +421,17 @@ def _custom_endpoints_keyboard(
         )
 
     keyboard.append(
-        [InlineKeyboardButton(text="+ Add Endpoint", callback_data="agent:cu_add")]
+        [InlineKeyboardButton(text="➕ Add Endpoint", callback_data="agent:cu_add")]
     )
     if providers:
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Manage Endpoints", callback_data="agent:cu_manage"
+                    text="⚙️ Manage Endpoints", callback_data="agent:cu_manage"
                 )
             ]
         )
-    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:settings")])
+    keyboard.append([ui.back_button("agent:settings")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -446,14 +449,14 @@ def _custom_manage_keyboard(providers: list[dict]) -> InlineKeyboardMarkup:
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Change API Key", callback_data=f"agent:cu_key:{key}"
+                    text="✏️ Change API Key", callback_data=f"agent:cu_key:{key}"
                 ),
                 InlineKeyboardButton(
-                    text="Forget", callback_data=f"agent:cu_del:{key}"
+                    text="🗑 Forget", callback_data=f"agent:cu_del:{key}"
                 ),
             ]
         )
-    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:cu_list")])
+    keyboard.append([ui.back_button("agent:cu_list")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -470,22 +473,18 @@ def _custom_delete_keyboard(name: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=f"Forget {name}",
+                    text=f"🗑 Forget {name}",
                     callback_data=f"agent:cu_delok:{sanitize_provider_name(name)}",
                 )
             ],
-            [InlineKeyboardButton(text="Keep It", callback_data="agent:cu_manage")],
+            [InlineKeyboardButton(text="❌ Keep It", callback_data="agent:cu_manage")],
         ]
     )
 
 
 def _custom_input_keyboard() -> InlineKeyboardMarkup:
     """Keyboard shown while waiting for typed input (URL, key, search)."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Cancel", callback_data="agent:cu_cancel")]
-        ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[[ui.cancel_button("agent:cu_cancel")]])
 
 
 def _custom_key_prompt_keyboard() -> InlineKeyboardMarkup:
@@ -494,10 +493,10 @@ def _custom_key_prompt_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="No API Key Needed", callback_data="agent:cu_nokey"
+                    text="⏭ No API Key Needed", callback_data="agent:cu_nokey"
                 )
             ],
-            [InlineKeyboardButton(text="Cancel", callback_data="agent:cu_cancel")],
+            [ui.cancel_button("agent:cu_cancel")],
         ]
     )
 
@@ -512,14 +511,14 @@ def _custom_error_keyboard(
     the (label, callback) for the sideways fix, which differs by context:
     a new endpoint needs its URL corrected, a saved one usually needs its key.
     """
-    label, action = secondary or ("Edit URL", "agent:cu_add")
+    label, action = secondary or ("✏️ Edit URL", "agent:cu_add")
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Try Again", callback_data=retry_action),
+                InlineKeyboardButton(text="🔁 Try Again", callback_data=retry_action),
                 InlineKeyboardButton(text=label, callback_data=action),
             ],
-            [InlineKeyboardButton(text="Back", callback_data="agent:cu_list")],
+            [ui.back_button("agent:cu_list")],
         ]
     )
 
@@ -559,7 +558,7 @@ def _custom_picker_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="No Models Match", callback_data="agent:cu_noop"
+                    text="ℹ️ No Models Match", callback_data="agent:cu_noop"
                 )
             ]
         )
@@ -608,7 +607,7 @@ def _custom_picker_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"Clear Filter '{query}'", callback_data="agent:cu_clear"
+                    text=f"🧹 Clear Filter '{query}'", callback_data="agent:cu_clear"
                 )
             ]
         )
@@ -616,12 +615,12 @@ def _custom_picker_keyboard(
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text="Search Models", callback_data="agent:cu_search"
+                    text="🔍 Search Models", callback_data="agent:cu_search"
                 )
             ]
         )
 
-    keyboard.append([InlineKeyboardButton(text="Back", callback_data="agent:cu_list")])
+    keyboard.append([ui.back_button("agent:cu_list")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -629,18 +628,22 @@ def _no_session_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard when no session is active."""
     rows = [
         [
-            InlineKeyboardButton(text="Start", callback_data="agent:start"),
-            InlineKeyboardButton(text="Change LLM", callback_data="agent:settings"),
+            InlineKeyboardButton(text="▶️ Start", callback_data="agent:start"),
+            InlineKeyboardButton(text="⚙️ Change LLM", callback_data="agent:settings"),
         ],
         # Here too, not only beside a live session: picking the specialist is
         # how you say which one to *raise*, and hanging it off a running
         # subprocess made the coordinator the only thing a chat could start as.
-        [InlineKeyboardButton(text="Talk To", callback_data="agent:talk_to")],
+        [InlineKeyboardButton(text="👤 Talk To", callback_data="agent:talk_to")],
         # Reachable with no session precisely because this is when it is wanted:
         # the chat whose subprocess is gone is the one whose owner is looking for
         # what they were saying yesterday.
-        [InlineKeyboardButton(text="Conversations", callback_data="agent:conv_list")],
-        [InlineKeyboardButton(text="Close", callback_data="agent:close")],
+        [
+            InlineKeyboardButton(
+                text="💬 Conversations", callback_data="agent:conv_list"
+            )
+        ],
+        [ui.close_button("agent:close")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -650,12 +653,14 @@ def _compact_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Auto", callback_data="agent:compact_auto"),
                 InlineKeyboardButton(
-                    text="Custom", callback_data="agent:compact_custom"
+                    text="🤖 Auto", callback_data="agent:compact_auto"
+                ),
+                InlineKeyboardButton(
+                    text="✏️ Custom", callback_data="agent:compact_custom"
                 ),
             ],
-            [InlineKeyboardButton(text="Back", callback_data="agent:menu")],
+            [ui.back_button("agent:menu")],
         ]
     )
 
@@ -672,20 +677,19 @@ async def show_agent_menu(
         agent_label = AGENT_OPTIONS.get(session.agent_key, {}).get(
             "label", session.agent_key
         )
-        status = "busy" if session.is_busy else "ready"
-        lines = [
-            f"Talking to: {session.label}",
-            f"LLM: {agent_label}",
-            f"Status: {status}",
-            "\nSend a message to chat, or use the buttons below.",
-        ]
+        status = "Busy" if session.is_busy else "Ready"
+        hints = ["Send a message to chat, or use the buttons below."]
         # Advertised where the user can see it is answering — a menu opened
         # mid-answer is exactly when someone wants to interrupt.
         if session.is_busy:
-            lines.append(
+            hints.append(
                 "/stop stops the answer and clears queued requests; the session is kept."
             )
-        text = "\n".join(lines)
+        text = ui.screen(
+            ui.title("🤖", "AI Agent", f"Session: {status}"),
+            [ui.bullet("Talking to", session.label), ui.bullet("LLM", agent_label)],
+            [ui.hint(line) for line in hints],
+        )
         keyboard = _active_session_keyboard()
     else:
         # No session — show options to start or change settings
@@ -697,15 +701,20 @@ async def show_agent_menu(
         # only place the chat's real interlocutor shows: reporting the LLM alone
         # would read as "you are back on Condor" when the next message is not.
         bound, _ = resolve_chat_binding(context.user_data)
-        lines = ["No active session"]
+        rows = []
         if bound:
-            lines.append(f"Talking to: {bound.name or bound.slug}")
-        lines.append(f"LLM: {llm_label}")
-        lines.append("\nStart a session or adjust settings below.")
+            rows.append(ui.bullet("Talking to", bound.name or bound.slug))
+        rows.append(ui.bullet("LLM", llm_label))
         # Said where the choice is made: "Start" boots whoever the chat is bound
         # to, so the way to start it as somebody else has to be visible here.
-        lines.append('"Talk To" starts it as a specialist — or /agent <name>.')
-        text = "\n".join(lines)
+        text = ui.screen(
+            ui.title("🤖", "AI Agent", "No active session"),
+            rows,
+            [
+                ui.hint("Start a session or adjust settings below."),
+                ui.hint('"Talk To" starts it as a specialist, or send /agent <name>.'),
+            ],
+        )
         keyboard = _no_session_keyboard()
 
     message = update.message or (
@@ -713,12 +722,8 @@ async def show_agent_menu(
     )
     if message:
         if update.callback_query:
-            if keyboard:
-                await message.edit_text(text, reply_markup=keyboard)
-            else:
-                await message.edit_text(text)
+            await message.edit_text(
+                text, parse_mode="MarkdownV2", reply_markup=keyboard
+            )
         else:
-            if keyboard:
-                await message.answer(text, reply_markup=keyboard)
-            else:
-                await message.answer(text)
+            await message.answer(text, parse_mode="MarkdownV2", reply_markup=keyboard)

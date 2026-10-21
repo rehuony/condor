@@ -16,7 +16,8 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
-from utils.telegram_formatters import escape_markdown_v2
+from utils import telegram_ui as ui
+from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 from .._shared import format_timeframe_label
 from ..visualizations import (
@@ -308,7 +309,7 @@ async def show_ohlcv_chart(update: Update, context: Context, timeframe: str) -> 
     except Exception as e:
         logger.error(f"Error generating OHLCV chart: {e}", exc_info=True)
         await loading_msg.edit_text(
-            f"❌ Error loading chart: {escape_markdown_v2(str(e))}",
+            ui.notice("error", "Could not load the chart", str(e)),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -442,7 +443,7 @@ async def show_gecko_liquidity(update: Update, context: Context) -> None:
     except Exception as e:
         logger.error(f"Error generating liquidity chart: {e}", exc_info=True)
         await loading_msg.edit_text(
-            f"❌ Error: {escape_markdown_v2(str(e))}",
+            format_error_message(str(e)),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -644,7 +645,7 @@ async def show_gecko_combined(update: Update, context: Context, timeframe: str) 
     except Exception as e:
         logger.error(f"Error generating combined chart: {e}", exc_info=True)
         await loading_msg.edit_text(
-            f"❌ Error: {escape_markdown_v2(str(e))}",
+            format_error_message(str(e)),
             parse_mode="MarkdownV2",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[

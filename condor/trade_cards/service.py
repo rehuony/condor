@@ -149,7 +149,7 @@ async def publish(
                 photo=as_input_file(png, filename=f"trade-{card.id}.png"),
                 caption=render.caption(card),
                 reply_markup=render.keyboard(card),
-                parse_mode="HTML",
+                parse_mode="MarkdownV2",
             )
             if not getattr(message, "message_id", None):
                 raise RuntimeError("Telegram did not confirm the photo message id")
@@ -159,14 +159,14 @@ async def publish(
             )
             card.delivery_status = "failed" if definite else "unknown"
             card.note = (
-                "发送未成功。"
+                "Sending failed."
                 if definite
-                else "卡片送达结果未确认，已保留记录以避免重复发送。"
+                else "Delivery is unconfirmed; the card is kept to avoid sending it twice."
             )
             if definite:
                 card.transition(CardStatus.FAILED)
             store.save(card)
-            raise RuntimeError(f"{card.note}（{card.id}）") from exc
+            raise RuntimeError(f"{card.note} ({card.id})") from exc
         card.message_id = message.message_id
         card.delivery_status = "sent"
         card.last_render = _render_key(card)
@@ -184,9 +184,9 @@ def _authorize(
         or card.chat_id != chat_id
         or (message_id is not None and card.message_id != message_id)
     ):
-        raise ValueError("这张卡片不存在，或不属于当前用户。")
+        raise ValueError("This card does not exist or belongs to someone else.")
     if card.message_deleted:
-        raise ValueError("这张卡片已经结束。")
+        raise ValueError("This card has ended.")
     return card
 
 
@@ -194,13 +194,13 @@ def invalid_reason(
     card: Card, price: Decimal | None = None, *, now: float | None = None
 ) -> str | None:
     if (time.time() if now is None else now) >= card.expires_at:
-        return "卡片已超过 4 小时有效期。"
+        return "The card passed its 4-hour validity."
     if price is not None:
         p = card.plan
         if (p.side == "long" and (price <= p.stop_price or price >= p.tp1_price)) or (
             p.side == "short" and (price >= p.stop_price or price <= p.tp1_price)
         ):
-            return "当前价格已越过止损或止盈1，卡片失效。"
+            return "The price already crossed the stop or TP1, so the card expired."
     return None
 
 
@@ -244,7 +244,7 @@ async def update_message(card: Card, bot) -> None:
             message_id=card.message_id,
             caption=render.caption(card),
             reply_markup=render.keyboard(card),
-            parse_mode="HTML",
+            parse_mode="MarkdownV2",
         )
     except BadRequest as exc:
         if not is_not_modified(exc):
@@ -258,7 +258,9 @@ def _apply_group(card: Card, group: dict) -> None:
         s.value
         for s in EXECUTING | {CardStatus.CLOSED, CardStatus.DETACHED, CardStatus.FAILED}
     }:
-        raise execution.ExecutionError("执行端返回的交易记录无法确认，正在安全核对。")
+        raise execution.ExecutionError(
+            "The executor's trade record cannot be confirmed; it is being checked."
+        )
     card.execution = group
     status = CardStatus(group["status"])
     if (
@@ -276,7 +278,7 @@ def _apply_group(card: Card, group: dict) -> None:
             card.pending_action = None
             card.operation_id = None
             card.note = (
-                "操作未完成，请核对持仓后重试。"
+                "The action did not complete. Check the position and try again."
                 if operation.get("status") == "FAILED"
                 else ""
             )
@@ -324,7 +326,9 @@ async def _reconcile(card: Card) -> None:
             card.pending_action = None
             card.operation_id = None
         card.note = (
-            "执行记录尚未确认，暂停操作并等待核对。" if exc.status == 404 else str(exc)
+            "The execution record is unconfirmed; actions are paused until it is checked."
+            if exc.status == 404
+            else str(exc)
         )
         # A GET failure is no evidence of order absence. Keep the intent and
         # operation id across both network failures and process restarts.
@@ -367,12 +371,14 @@ async def _settle_closed(card: Card) -> None:
             or group.get("status") != CardStatus.CLOSED
             or Decimal(str(group.get("remaining_amount"))) != 0
         ):
-            raise execution.ExecutionError("已平仓记录的结算结果尚未确认，将继续核对。")
+            raise execution.ExecutionError(
+                "The closed trade's settlement is unconfirmed; checking continues."
+            )
     except (execution.ExecutionError, ValueError, ArithmeticError) as exc:
         logger.warning(
             "Trade card settlement unavailable: %s (%s)", card.id, type(exc).__name__
         )
-        card.note = "已平仓，结算数据暂不可用，将继续核对。"
+        card.note = "Closed; settlement data is unavailable and checking continues."
     else:
         card.execution = group
         card.note = execution.user_error(group["error"]) if group.get("error") else ""
@@ -463,7 +469,7 @@ async def act(
                             card.transition(CardStatus.REVIEW)
                             card.create_payload = None
             else:
-                raise ValueError("卡片状态已更新，请使用当前显示的按钮。")
+                raise ValueError("The card changed. Use the buttons it shows now.")
         elif action == "cancel_entry" and action in management_actions(card):
             await _command(card, action)
         elif allowed := management_actions(card):
@@ -480,9 +486,11 @@ async def act(
             ):
                 await _command(card, action[4:])
             else:
-                raise ValueError("操作确认已过期，请重新选择。")
+                raise ValueError("The confirmation expired. Choose again.")
         else:
-            raise ValueError("卡片正在处理或已结束，请刷新核对状态。")
+            raise ValueError(
+                "The card is busy or has ended. Refresh to check its status."
+            )
         store.save(card)
         await update_message(card, bot)
         return card

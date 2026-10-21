@@ -16,6 +16,7 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import get_client
+from utils import telegram_ui as ui
 from utils.telegram_formatters import (
     escape_markdown_v2,
     format_compact_number,
@@ -88,7 +89,7 @@ async def show_add_position_menu(
     """
     from io import BytesIO
 
-    # Ensure state is set for multi-field input handling
+    # The menu is navigation; Quick Edit arms typed input explicitly
     context.user_data["dex_state"] = "add_position"
 
     params = context.user_data.get("add_position_params", {})
@@ -241,9 +242,7 @@ async def show_add_position_menu(
         # ========== HELP VIEW ==========
         help_text = r"📖 *Add Position \- Help*" + "\n\n"
 
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n"
         help_text += r"*🎮 Button Guide*" + "\n"
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n\n"
 
         help_text += r"• *Row 1:* Lower \\& Upper Price Bounds" + "\n"
         help_text += r"  _Define your position's price range_" + "\n\n"
@@ -254,25 +253,19 @@ async def show_add_position_menu(
         help_text += r"• *Row 3:* Strategy Type" + "\n"
         help_text += r"  _Meteora liquidity distribution_" + "\n\n"
 
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n"
         help_text += r"*💰 Amount Formats*" + "\n"
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n\n"
 
         help_text += r"• `10%` \- 10% of your wallet balance" + "\n"
         help_text += r"• `100` \- Exact 100 tokens" + "\n"
         help_text += r"• `0\.5` \- Exact 0\.5 tokens" + "\n\n"
 
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n"
         help_text += r"*🎯 Strategy Types*" + "\n"
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n\n"
 
         help_text += r"• `0` \- *Spot*: Uniform distribution" + "\n"
         help_text += r"• `1` \- *Curve*: Bell curve around price" + "\n"
         help_text += r"• `2` \- *Bid Ask*: Split at current price" + "\n\n"
 
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n"
         help_text += r"*⚡ Quick Edit*" + "\n"
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n\n"
 
         help_text += r"Type multiple values at once:" + "\n"
         help_text += r"• `l:0\.89 \- u:1\.47`" + "\n"
@@ -285,9 +278,7 @@ async def show_add_position_menu(
 
         help_text += r"Keys: `l`=lower, `u`=upper, `b`=base, `q`=quote" + "\n\n"
 
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n"
         help_text += r"*📊 Chart Legend*" + "\n"
-        help_text += r"━━━━━━━━━━━━━━━━━━━━" + "\n\n"
 
         help_text += r"• `█` \- Bins in your selected range" + "\n"
         help_text += r"• `░` \- Bins outside your range" + "\n"
@@ -329,7 +320,7 @@ async def show_add_position_menu(
                 set_cached(context.user_data, balance_cache_key, balances)
 
             # Always show wallet balances section
-            help_text += "\n" + r"━━━ Wallet Balances ━━━" + "\n"
+            help_text += "\n" + r"*Wallet Balances*" + "\n"
 
             # Format base token balance - always show, even if 0
             base_bal_str = format_compact_number(balances["base_balance"])
@@ -360,7 +351,7 @@ async def show_add_position_menu(
 
         # ========== POSITION SUMMARY ==========
         # Show the position that will be created with current parameters
-        help_text += "\n" + r"━━━ Position Preview ━━━" + "\n"
+        help_text += "\n" + r"*Position Preview*" + "\n"
 
         # Calculate actual amounts from percentages
         base_amount_str = params.get("amount_base", "10%")
@@ -463,7 +454,7 @@ async def show_add_position_menu(
         l_pct_edit = f"{lower_pct:.1f}%" if lower_pct is not None else "-5%"
         # For upper, don't show + prefix (parser treats unsigned as positive)
         u_pct_edit = f"{upper_pct:.1f}%" if upper_pct is not None else "5%"
-        help_text += f"\n_To edit, send:_\n"
+        help_text += "\n" + ui.hint("Tap ⌨️ Quick Edit, then send:") + "\n"
         help_text += f"`L:{escape_markdown_v2(l_pct_edit)}`\n"
         help_text += f"`U:{escape_markdown_v2(u_pct_edit)}`\n"
         help_text += f"`B:{escape_markdown_v2(base_amount_str)}`\n"
@@ -497,6 +488,7 @@ async def show_add_position_menu(
             InlineKeyboardButton(
                 text=f"🎯 {strategy_name}", callback_data="dex:pos_toggle_strategy"
             ),
+            ui.action_button("quick", "Quick Edit", "dex:pos_quick_edit"),
             InlineKeyboardButton(
                 text="➕ Add Position", callback_data="dex:pos_add_confirm"
             ),
@@ -760,7 +752,7 @@ async def handle_pos_refresh(
         loading_msg += r"_Fetching OHLCV data\.\.\._"
 
         loading_keyboard = [
-            [InlineKeyboardButton(text="⏳ Loading...", callback_data="noop")]
+            [InlineKeyboardButton(text="⏳ Loading…", callback_data="dex:noop")]
         ]
 
         try:

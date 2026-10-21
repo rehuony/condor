@@ -8,8 +8,11 @@ from condor.telegram.types import (
     Update,
 )
 from config_manager import UserRole, get_config_manager
+from utils import telegram_ui as ui
 
 logger = logging.getLogger(__name__)
+
+ACCESS_DENIED = ui.notice("error", "Access denied")
 
 
 async def _notify_admin_new_user(context: Context, user_id: int, username: str) -> None:
@@ -24,11 +27,13 @@ async def _notify_admin_new_user(context: Context, user_id: int, username: str) 
         from utils.telegram_formatters import escape_markdown_v2
 
         username_display = escape_markdown_v2(f"@{username}" if username else "N/A")
-        message = (
-            f"👤 *New Access Request*\n\n"
-            f"User ID: `{user_id}`\n"
-            f"Username: {username_display}\n\n"
-            f"Use /start \\> Admin Panel to approve or reject\\."
+        message = ui.screen(
+            ui.title("👤", "New Access Request"),
+            [
+                ui.bullet("User ID", str(user_id), code_value=True),
+                ui.bullet("Username", username_display, raw=True),
+            ],
+            ui.hint("Use /admin to approve or reject."),
         )
         await context.bot.send_message(
             chat_id=admin_id, text=message, parse_mode="MarkdownV2"
@@ -107,7 +112,7 @@ def restricted(func):
         if role == UserRole.BLOCKED:
             logger.info(f"Blocked user {user_id} attempted access")
             if update.message:
-                await update.message.answer("🚫 Access denied.")
+                await update.message.answer(ACCESS_DENIED, parse_mode="MarkdownV2")
             elif update.callback_query:
                 await update.callback_query.answer("Access denied", show_alert=True)
             return
@@ -116,8 +121,13 @@ def restricted(func):
         if role == UserRole.PENDING:
             if update.message:
                 await update.message.answer(
-                    "⏳ Your access request is pending admin approval.\n"
-                    "You will be notified when approved."
+                    ui.notice(
+                        "info",
+                        "Access pending",
+                        "Your request is awaiting admin approval. You will be "
+                        "notified when approved.",
+                    ),
+                    parse_mode="MarkdownV2",
                 )
             elif update.callback_query:
                 await update.callback_query.answer(
@@ -139,10 +149,14 @@ def restricted(func):
 
             if update.message:
                 await update.message.answer(
-                    "🔒 *Access Request Submitted*\n\n"
-                    f"Your User ID: `{user_id}`\n\n"
-                    "An admin will review your request\\. "
-                    "You will be notified when approved\\.",
+                    ui.screen(
+                        ui.title("🔒", "Access Request Submitted"),
+                        [ui.bullet("User ID", str(user_id), code_value=True)],
+                        ui.hint(
+                            "An admin will review your request. You will be "
+                            "notified when approved."
+                        ),
+                    ),
                     parse_mode="MarkdownV2",
                 )
             elif update.callback_query:
@@ -171,7 +185,12 @@ def admin_required(func):
 
         if not cm.is_admin(user_id):
             if update.message:
-                await update.message.answer("🔐 Admin access required.")
+                await update.message.answer(
+                    ui.notice(
+                        "error", "Admin access required", "Only the admin can do this."
+                    ),
+                    parse_mode="MarkdownV2",
+                )
             elif update.callback_query:
                 await update.callback_query.answer(
                     "Admin access required", show_alert=True
@@ -191,12 +210,8 @@ async def _send_service_unavailable_message(
     close_callback: str = "dex:close",
 ) -> None:
     """Send a standardized service unavailable message."""
-    message = f"⚠️ *{title}*\n\n"
-    message += f"{status_line}\n\n"
-    message += instruction
-
-    keyboard = [[InlineKeyboardButton(text="✕ Close", callback_data=close_callback)]]
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    message = ui.screen(f"⚠️ {ui.bold(title, raw=True)}", status_line, instruction)
+    reply_markup = ui.keyboard([ui.close_button(close_callback)])
 
     if update.message:
         await update.message.answer(

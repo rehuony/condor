@@ -79,7 +79,7 @@ def test_pair_step_keeps_each_wizards_state_and_callbacks(
         ("BTC-USDT", f"{pair_prefix}BTC-USDT"),
         ("ETH-USDT", f"{pair_prefix}ETH-USDT"),
     ]
-    assert buttons[-2:] == [("⬅️ Back", back), ("❌ Cancel", "bots:main_menu")]
+    assert buttons[-2:] == [("« Back", back), ("✕ Cancel", "bots:main_menu")]
     assert "binance\\_perpetual" in text
 
 
@@ -114,6 +114,6 @@ def test_pair_suggestions_edit_the_wizard_message_with_wizard_callbacks():
     assert edits[0]["chat_id"] == 7 and edits[0]["message_id"] == 11
     assert _buttons(edits[0]["reply_markup"]) == [
         ("📈 BTC-USDT", "bots:pmm_pair_select:BTC-USDT"),
-        ("⬅️ Back", "bots:pmm_back:connector"),
-        ("❌ Cancel", "bots:main_menu"),
+        ("« Back", "bots:pmm_back:connector"),
+        ("✕ Cancel", "bots:main_menu"),
     ]

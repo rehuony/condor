@@ -173,7 +173,7 @@ async def handle_gecko_add_tokens(update: Update, context: Context) -> None:
     keyboard = [
         [
             InlineKeyboardButton(
-                text="🔄 Restart Gateway", callback_data="dex:gecko_restart_gateway"
+                text="🔁 Restart Gateway", callback_data="dex:gecko_restart_gateway"
             )
         ],
         [

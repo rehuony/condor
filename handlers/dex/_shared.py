@@ -741,38 +741,19 @@ def build_pagination_buttons(
     Returns:
         List of buttons for a single row
     """
-    from condor.telegram.types import InlineKeyboardButton
-
-    buttons = []
-
-    # Previous button
-    if filters.has_prev:
-        buttons.append(
-            InlineKeyboardButton(
-                text="« Prev", callback_data=f"{callback_prefix}_page_prev"
-            )
-        )
-    else:
-        buttons.append(InlineKeyboardButton(text=" ", callback_data="dex:noop"))
+    from utils.telegram_ui import pager_row
 
     # Page indicator — the total is unknown until the last page
     if filters.total_count is None:
         page_text = f"Page {filters.current_page}"
     else:
         page_text = f"{filters.current_page}/{filters.total_pages}"
-    buttons.append(InlineKeyboardButton(text=page_text, callback_data="dex:noop"))
-
-    # Next button
-    if filters.has_next:
-        buttons.append(
-            InlineKeyboardButton(
-                text="Next »", callback_data=f"{callback_prefix}_page_next"
-            )
-        )
-    else:
-        buttons.append(InlineKeyboardButton(text=" ", callback_data="dex:noop"))
-
-    return buttons
+    return pager_row(
+        page_text,
+        "dex:noop",
+        prev_callback=f"{callback_prefix}_page_prev" if filters.has_prev else None,
+        next_callback=f"{callback_prefix}_page_next" if filters.has_next else None,
+    )
 
 
 def build_filter_selection_keyboard(

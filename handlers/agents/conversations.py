@@ -6,6 +6,7 @@ from condor.telegram.types import (
     Context,
     Update,
 )
+from utils import telegram_ui as ui
 
 from ._shared import (
     bind_chat_to_agent,
@@ -23,6 +24,8 @@ from .session import (
 )
 
 log = logging.getLogger(__name__)
+
+_GONE = ui.notice("info", "That conversation is no longer there")
 
 
 async def _handle_conversations(
@@ -47,7 +50,14 @@ async def _handle_conversations(
     metas = conversations.list_conversations(user_id)
     if not metas:
         await query.message.edit_text(
-            f"{notice}No conversations yet. Send a message and this chat becomes one.",
+            ui.screen(
+                notice,
+                ui.title("💬", "Conversations"),
+                ui.esc(
+                    "No conversations yet. Send a message and this chat becomes one."
+                ),
+            ),
+            parse_mode="MarkdownV2",
             reply_markup=_conversations_keyboard([], 0, ""),
         )
         return
@@ -56,8 +66,12 @@ async def _handle_conversations(
     # list cannot answer on its own — every other surface's session is in here.
     current = await _chat_conversation_id(chat_id, context.user_data)
     await query.message.edit_text(
-        f"{notice}Your conversations, newest first — including the ones you held "
-        "on the dashboard.\n\nPick one to continue it here, or 🗑 to forget it.",
+        ui.screen(
+            notice,
+            ui.title("💬", "Conversations", "Newest first, dashboard chats included"),
+            ui.hint("Pick one to continue it here, or 🗑 to forget it."),
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=_conversations_keyboard(metas, page, current),
     )
 
@@ -83,15 +97,18 @@ async def _handle_conversation_pick(
 
     meta = find_conversation(conversations.list_conversations(user_id), token)
     if meta is None:
-        await _handle_conversations(
-            update, context, notice="That conversation is no longer there.\n\n"
-        )
+        await _handle_conversations(update, context, notice=_GONE)
         return
 
     session = await get_session(chat_id)
     if session and session.alive and session.conversation_id == meta.id:
         await query.message.edit_text(
-            "This chat is already in that conversation.\n\nSend a message to continue."
+            ui.notice(
+                "info",
+                "Already in that conversation",
+                "Send a message to continue.",
+            ),
+            parse_mode="MarkdownV2",
         )
         return
 
@@ -100,14 +117,17 @@ async def _handle_conversation_pick(
     if meta.agent_slug and agent is None:
         # The transcript outlived the agent that wrote half of it. Condor can
         # still read it, but saying so beats resuming under a silent stand-in.
-        notice = f"{stale_binding_notice(meta.agent_slug)}\n\n"
+        notice = stale_binding_notice(meta.agent_slug)
     agent_slug = agent.slug if agent else ""
     label = (agent.name or agent.slug) if agent else "Condor"
 
     agent_key = _reclaim_default_agent(context)
     _perm_cb = _tg_permission_callback(context.bot, chat_id, user_id)
 
-    await query.message.edit_text(f"{notice}Resuming with {label}...")
+    await query.message.edit_text(
+        ui.screen(notice, "⏳ " + ui.esc(f"Resuming with {label}…")),
+        parse_mode="MarkdownV2",
+    )
     await destroy_session(chat_id)
 
     try:
@@ -124,7 +144,10 @@ async def _handle_conversation_pick(
         )
     except Exception as e:
         log.exception("Failed to resume conversation %r", meta.id)
-        await query.message.edit_text(f"Could not resume that conversation: {e}")
+        await query.message.edit_text(
+            ui.notice("error", "Could not resume that conversation", str(e)),
+            parse_mode="MarkdownV2",
+        )
         return
 
     # Only once the session stands up — a chat must never be left pointing at an
@@ -132,18 +155,24 @@ async def _handle_conversation_pick(
     bind_chat_to_agent(context.user_data, agent_slug)
 
     if info.conversation_id == meta.id:
-        headline = f"Resumed with {label}: {meta.title or 'untitled'}"
-        body = f"{label} has read the conversation so far."
+        text = ui.notice(
+            "success",
+            f"Resumed with {label}",
+            f"{meta.title or 'Untitled'}\n\n{label} has read the conversation so far. "
+            "Send a message to continue.",
+        )
     else:
         # Deleted between the listing and the spawn: the runtime falls through
         # to a new conversation rather than stranding the chat, so say which one
         # the user actually got.
-        headline = f"That conversation is gone. Started a fresh one with {label}."
-        body = "Nothing was carried over."
+        text = ui.notice(
+            "warning",
+            f"Started a fresh conversation with {label}",
+            "That conversation is gone, so nothing was carried over. "
+            "Send a message to continue.",
+        )
 
-    await query.message.edit_text(
-        f"{headline}\n\n{body}\n\nSend a message to continue."
-    )
+    await query.message.edit_text(text, parse_mode="MarkdownV2")
 
 
 async def _handle_conversation_delete_confirm(
@@ -159,18 +188,26 @@ async def _handle_conversation_delete_confirm(
 
     meta = find_conversation(conversations.list_conversations(user_id), token)
     if meta is None:
-        await _handle_conversations(
-            update, context, notice="That conversation is no longer there.\n\n"
-        )
+        await _handle_conversations(update, context, notice=_GONE)
         return
 
     await query.message.edit_text(
-        f"Delete this conversation?\n\n" f"{meta.title or 'Untitled'}\n"
-        # Same three facts in the same order as the row that was tapped, so the
-        # confirmation is recognisably about *that* one.
-        f"{_ago(meta.updated_at)} · {meta.agent_slug or 'Condor'} · "
-        f"{meta.turn_count} turns\n\n"
-        "The transcript goes for the dashboard too, and cannot be recovered.",
+        ui.screen(
+            ui.title("🗑", "Delete this conversation?"),
+            [
+                ui.bold(meta.title or "Untitled"),
+                # Same three facts in the same order as the row that was
+                # tapped, so the confirmation is recognisably about *that* one.
+                ui.esc(
+                    f"{_ago(meta.updated_at)} · {meta.agent_slug or 'Condor'} · "
+                    f"{meta.turn_count} turns"
+                ),
+            ],
+            ui.hint(
+                "The transcript goes for the dashboard too, and cannot be recovered."
+            ),
+        ),
+        parse_mode="MarkdownV2",
         reply_markup=_conversation_delete_keyboard(meta),
     )
 
@@ -193,21 +230,31 @@ async def _handle_conversation_delete(
     meta = find_conversation(conversations.list_conversations(user_id), token)
     if meta is None:
         await _handle_conversations(
-            update, context, notice="That conversation was already gone.\n\n"
+            update,
+            context,
+            notice=ui.notice("info", "That conversation was already gone"),
         )
         return
 
     was_current = await _chat_conversation_id(chat_id, context.user_data) == meta.id
     deleted = conversations.delete_conversation(user_id, meta.id)
     if not deleted:
-        await query.message.edit_text("Could not delete that conversation.")
+        await query.message.edit_text(
+            ui.notice("error", "Could not delete that conversation"),
+            parse_mode="MarkdownV2",
+        )
         return
 
     if was_current:
         await destroy_session(chat_id)
         forget_chat_conversation(context.user_data)
 
-    notice = f"Deleted: {meta.title or 'untitled'}"
-    if was_current:
-        notice += ". This chat starts fresh on your next message"
-    await _handle_conversations(update, context, notice=f"{notice}.\n\n")
+    await _handle_conversations(
+        update,
+        context,
+        notice=ui.notice(
+            "success",
+            f"Deleted: {meta.title or 'untitled'}",
+            "This chat starts fresh on your next message." if was_current else None,
+        ),
+    )

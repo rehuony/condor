@@ -19,6 +19,7 @@ from utils.telegram_formatters import (
     escape_markdown_v2,
     format_error_message,
 )
+from utils.telegram_ui import CANCEL_HINT
 
 from .._shared import (
     get_cached,
@@ -294,8 +295,11 @@ async def process_trade(update: Update, context: Context, user_input: str) -> No
 
     except Exception as e:
         logger.error(f"Error processing quick trade: {e}", exc_info=True)
+        # The Quick Trade prompt stays armed so a corrected line can follow.
         error_message = format_error_message(f"Trade failed: {str(e)}")
-        await update.message.answer(error_message, parse_mode="MarkdownV2")
+        await update.message.answer(
+            error_message + "\n\n" + CANCEL_HINT, parse_mode="MarkdownV2"
+        )
 
 
 async def process_trade_set_pair(

@@ -11,6 +11,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils import telegram_ui as ui
 from utils.telegram_formatters import escape_markdown_v2, format_error_message
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,9 @@ async def handle_search_orders(
         await update.callback_query.message.edit_text(
             message, parse_mode="MarkdownV2", reply_markup=reply_markup
         )
+        ui.remember_menu(
+            context.user_data, "cex_orders", update.callback_query.message.message_id
+        )
 
     except Exception as e:
         logger.error(f"Error searching orders: {e}", exc_info=True)
@@ -164,6 +168,11 @@ async def handle_cancel_order(
     update: Update, context: Context, order_index: int
 ) -> None:
     """Handle cancel order confirmation"""
+    if not ui.is_current_menu(
+        context.user_data, "cex_orders", update.callback_query.message
+    ):
+        await ui.refuse_stale_menu(update.callback_query, "cex:search_orders")
+        return
     try:
         orders = context.user_data.get("current_orders", [])
 
@@ -205,7 +214,7 @@ async def handle_cancel_order(
                     text="✅ Confirm Cancel",
                     callback_data=f"cex:confirm_cancel:{order_index}",
                 ),
-                InlineKeyboardButton(text="❌ Back", callback_data="cex:search_orders"),
+                InlineKeyboardButton(text="« Back", callback_data="cex:search_orders"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -226,6 +235,11 @@ async def handle_confirm_cancel_order(
     update: Update, context: Context, order_index: int
 ) -> None:
     """Confirm and execute order cancellation"""
+    if not ui.is_current_menu(
+        context.user_data, "cex_orders", update.callback_query.message
+    ):
+        await ui.refuse_stale_menu(update.callback_query, "cex:search_orders")
+        return
     from ._shared import invalidate_cache
 
     try:

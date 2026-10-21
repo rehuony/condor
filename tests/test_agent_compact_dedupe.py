@@ -14,6 +14,7 @@ import pytest
 
 from handlers import agents as agents_mod
 from tests.conftest import patch_agents
+from tests.support.markdown_v2 import plain
 
 
 class _FakeSession:
@@ -33,7 +34,7 @@ class _CallbackMessage:
         self._rendered = rendered
 
     async def edit_text(self, text, **kw):
-        self._rendered.append(text)
+        self._rendered.append(plain(text))
         return self
 
 
@@ -42,7 +43,7 @@ class _Placeholder:
         self._rendered = rendered
 
     async def edit_text(self, text, **kw):
-        self._rendered.append(text)
+        self._rendered.append(plain(text))
         return self
 
 
@@ -53,7 +54,7 @@ class _UserMessage:
         self._rendered = rendered
 
     async def answer(self, text, **kw):
-        self._rendered.append(text)
+        self._rendered.append(plain(text))
         return _Placeholder(self._rendered)
 
 
@@ -164,8 +165,9 @@ def test_compact_carries_the_summary_over_on_both_surfaces():
             _patch_runtime(mp, session=_FakeSession(), summary="one two three four")
             rendered, _ = runner()
 
-        assert rendered[0] == "Compacting context..."
-        assert rendered[-1].startswith("Context compacted (4 words carried over).")
+        assert rendered[0] == "⏳ Compacting context…"
+        assert "Context compacted" in rendered[-1]
+        assert "4 words carried over." in rendered[-1]
 
 
 def test_compact_sequence_is_summarize_destroy_recreate_reinject(monkeypatch):

@@ -10,6 +10,7 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
+from utils.telegram_formatters import format_error_message
 from utils.telegram_helpers import MockQuery, message_handle
 
 from ._shared import (
@@ -326,13 +327,13 @@ async def show_network_pools(
                 if page > 0:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            text="« Prev", callback_data=f"gateway_pool_page_{page - 1}"
+                            text="‹ Prev", callback_data=f"gateway_pool_page_{page - 1}"
                         )
                     )
                 if page < total_pages - 1:
                     nav_buttons.append(
                         InlineKeyboardButton(
-                            text="Next »", callback_data=f"gateway_pool_page_{page + 1}"
+                            text="Next ›", callback_data=f"gateway_pool_page_{page + 1}"
                         )
                     )
                 if nav_buttons:
@@ -471,7 +472,7 @@ async def prompt_add_pool(query, context: Context, network_id: str) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text="« Cancel", callback_data=f"gateway_pool_view_{network_id}"
+                    text="✕ Cancel", callback_data=f"gateway_pool_view_{network_id}"
                 )
             ]
         ]
@@ -624,7 +625,7 @@ async def show_delete_pool_confirmation(
             ],
             [
                 InlineKeyboardButton(
-                    text="❌ Cancel", callback_data=f"gateway_pool_view_{network_id}"
+                    text="✕ Cancel", callback_data=f"gateway_pool_view_{network_id}"
                 )
             ],
         ]
@@ -745,7 +746,10 @@ async def handle_pool_input(update: Update, context: Context) -> None:
             if len(parts) != 3:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="❌ Invalid format. Use: connector,pool_type,address\n\nExample: raydium,clmm,8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
+                    text=format_error_message(
+                        "Invalid format. Use: connector,pool_type,address\n\nExample: raydium,clmm,8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj"
+                    ),
+                    parse_mode="MarkdownV2",
                 )
                 return
 
