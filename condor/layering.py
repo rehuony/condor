@@ -131,9 +131,7 @@ def stock_delete_error(item: str, *, mute_kind: str = "") -> str:
 def stamp_fork(path: Path, digest: str) -> bool:
     """Write ``forked_from``/``forked_at`` into a markdown file's frontmatter.
 
-    Returns whether a stamp was written. Public because the boot migration
-    hoists an install's already-modified files out of the tracked tree and has
-    to record what they diverged from, without having a stock file to copy.
+    Returns whether a stamp was written; files without frontmatter stay unchanged.
     """
     if path.suffix != ".md":
         return False

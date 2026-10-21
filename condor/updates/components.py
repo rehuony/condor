@@ -500,23 +500,6 @@ def _incoming_warnings(incoming: list[str]) -> list[Warning]:
                 ),
             )
         )
-    if "condor/migrations.py" in incoming:
-        # startup() migrates this deployment's data on every boot and the moves
-        # are one-way, so restoring old *code* onto migrated *data* leaves
-        # Condor looking for directories that no longer exist. FEAT-115 widened
-        # that to the agent tree, so a rollback now also strands forked
-        # playbooks, skills and mutes.
-        out.append(
-            Warning(
-                component=CONDOR,
-                code="migration-incoming",
-                message=(
-                    "This update migrates stored data, and the moves are "
-                    "one-way. Rolling back to the current commit afterwards "
-                    "will not restore the old layout."
-                ),
-            )
-        )
     return out
 
 

@@ -67,9 +67,8 @@ def load_mutes(agent_slug: str | None = None) -> dict[str, set[str]]:
     parsed must not blank a library: the failure mode of "the operator loses a
     curation" is a nuisance, "the agent loses its playbooks" is an outage.
 
-    A tool or skill muted under a name it has since lost (FEAT-128) reads as the
-    one it became: boot migration v5 rewrites this install's files, and this
-    covers one copied in from elsewhere afterwards.
+    A tool or skill muted under a previous name (FEAT-128) reads as its current
+    name, including mute files copied from elsewhere.
     """
 
     empty: dict[str, set[str]] = {kind: set() for kind in KINDS}

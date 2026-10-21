@@ -110,7 +110,7 @@ configured path overrides. Use a consistent snapshot or an authorized
 maintenance stop for data that is actively being written. Git branches, tags,
 and bundles do not back up ignored configuration or runtime data.
 
-For a manual update, inspect the incoming commits and relevant data migrations
+For a manual update, inspect the incoming commits and any data format changes
 before applying them:
 
 ```sh

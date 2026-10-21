@@ -136,15 +136,6 @@ async def startup(application: TelegramApp) -> None:
     → this → ``start_polling``) so it can run uvicorn alongside the bot. Called
     explicitly from there, before the first update is served.
     """
-    # First, before anything reads a conversation or reconciles a delegation:
-    # settle where the runtime store lives (FEAT-051). Idempotent, so this is a
-    # no-op on every boot after the first; it is a named public function rather
-    # than inline code because a second entry point (a CLI, a worker) would have
-    # to call it too.
-    from condor.migrations import ensure_migrated
-
-    ensure_migrated()
-
     await application.store.start(interval=10)
 
     # Timed work (scheduled routines, update checks, reflection) runs on our
@@ -157,11 +148,10 @@ async def startup(application: TelegramApp) -> None:
     # Whisper is loaded lazily on the first audio message. Text/image-only
     # installations do not need an idle speech model or a startup download.
 
-    # Same reason, different work: bringing the backtest archive to its tiered
-    # v2 layout (FEAT-075) parses and re-compresses every saved payload, which
-    # is minutes on a store measured in gigabytes. It is deliberately NOT part
-    # of ``ensure_migrated`` above -- that one runs before the first update is
-    # served. The archive degrades honestly while this runs (summaries report
+    # Bringing the backtest archive to its tiered v2 layout (FEAT-075) parses
+    # and re-compresses every saved payload, which is minutes on a store measured
+    # in gigabytes. Run it in the background so startup can continue.
+    # The archive degrades honestly while this runs (summaries report
     # ``status: unknown`` and the dashboard says "indexing"), so the tab stays
     # usable throughout, and the work is per-file and idempotent so a crash
     # resumes rather than restarts.

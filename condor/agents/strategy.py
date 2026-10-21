@@ -61,7 +61,7 @@ log = logging.getLogger(__name__)
 
 # The playbook is a *loop* on disk and in every surface a person or a model reads
 # (FEAT-128); the Python names (``Strategy``, ``StrategyStore``) and the REST
-# paths kept "strategy". ``condor.migrations`` v5 renames an older install.
+# paths kept "strategy".
 LOOPS_DIRNAME = "loops"
 LOOP_MD = "loop.md"
 

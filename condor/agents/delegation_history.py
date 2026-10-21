@@ -32,15 +32,13 @@ Four shapes of record exist on disk, and all four are readable here:
   ``status.json`` (the whole record), ``events.json`` (the transcript, in the
   exact projection the wire uses) and ``transcript.md``.
 * **pre-FEAT-051** -- the same three files, flat and keyed by agent, at
-  ``agents/{slug}/delegations/{task_id}.{status.json,events.json,md}``. The boot
-  migration moves every one of these that names a ``user_id``.
+  ``agents/{slug}/delegations/{task_id}.{status.json,events.json,md}``.
 * **pre-FEAT-035** -- a ``.status.json`` that carries only state and provenance;
   the task text and result come from parsing the markdown header.
 * **legacy** -- a lone ``.md``, from before status files existed at all.
 
-The last two belong to nobody -- no ``user_id`` was ever written -- so there is
-no user directory to file them under and the migration leaves them where they
-are. They stay readable through the unscoped path, which is admin-only.
+The last two belong to nobody -- no ``user_id`` was ever written -- so they
+remain readable through the unscoped path, which is admin-only.
 
 Only those last two ever cost a transcript read (PERF-204). A current
 ``status.json`` *is* the whole record, and ``transcript.md`` beside it embeds
@@ -69,7 +67,7 @@ DELEGATION_STATUS_FILENAME = "status.json"
 DELEGATION_TRANSCRIPT_FILENAME = "transcript.md"
 DELEGATION_EVENTS_FILENAME = "events.json"
 
-# The flat, agent-keyed shape the migration reads and never writes.
+# The flat, agent-keyed shape retained for reading older records.
 STATUS_SUFFIX = ".status.json"
 EVENTS_SUFFIX = ".events.json"
 

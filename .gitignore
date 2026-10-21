@@ -194,17 +194,11 @@ node_modules/
 # (FEAT-051) — conversations, delegations, loop scratch state, and local runtime data.
 # Durable across restarts, but it is this deployment's data, not the codebase's.
 .condor/
-# Pre-FEAT-051 location; kept ignored so an install mid-migration stays clean.
+# Retired runtime location; keep any old local data out of version control.
 condor/.runtime/
 
-# Nothing under agents/ is ignored any more, and that is the point (FEAT-115).
-# It used to need six patterns because the product wrote its stores, learnings,
-# session journals, dry runs and proposals into the same tree git tracks. They
-# all live under .condor/agents/ now, along with everything else this install
-# writes, so agents/ is a library the repo ships and a dirty file in it means
-# somebody edited the library on purpose. The boot migration (.migrated-v2)
-# moves an existing install's copies across; a pattern kept here would only
-# hide it having failed.
+# agents/ is the tracked library; local definitions and runtime data live under
+# .condor/agents/. Keep library edits visible in git status.
 
 # Editor and AI-assistant workspace config: local to each developer's setup,
 # not repo policy. .claude/settings.local.json is already covered above.

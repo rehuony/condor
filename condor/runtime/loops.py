@@ -262,9 +262,8 @@ class LoopSupervisor:
         Never restarted: a delegation is one-shot, and re-running it could
         duplicate whatever side effects it already had.
 
-        Walks the delegation store, which is keyed by user (FEAT-051), plus the
-        pre-FEAT-051 agent directories: an unowned legacy record has no user
-        directory to have been migrated into, and it can be stale too.
+        Walks the user-keyed delegation store (FEAT-051) and the agent
+        directories that retain unowned legacy records, which can also be stale.
         """
         from condor import paths
 

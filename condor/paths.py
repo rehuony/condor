@@ -138,9 +138,6 @@ REPORTS_DIRNAME = "reports"
 # <repo>: condor/paths.py -> condor/ -> <repo>
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# The runtime store this one replaced. Only :mod:`condor.migrations` may read it.
-LEGACY_RUNTIME_ROOT = _PROJECT_ROOT / "condor" / ".runtime"
-
 USERS_DIRNAME = "users"
 CONVERSATIONS_DIRNAME = "conversations"
 DELEGATIONS_DIRNAME = "delegations"

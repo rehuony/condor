@@ -16,11 +16,9 @@ fallback.
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
-from condor import migrations, paths
+from condor import paths
 from condor.memory.paths import CHAT_SLUG
 from routines.base import assistant_routines_dir, assistant_routines_dirs
 
@@ -62,89 +60,6 @@ def test_the_shipped_library_is_still_read(slug):
 def test_local_shadows_shipped_not_the_other_way_round():
     dirs = assistant_routines_dirs(None)
     assert dirs.index(paths.local_agents_root() / CHAT_SLUG / "routines") == 0
-
-
-# ── existing chat-authored routines come along ──
-
-
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    """A checkout with one shipped routine committed and one authored by the chat."""
-    monkeypatch.setattr(paths, "_PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(migrations.paths, "_PROJECT_ROOT", tmp_path)
-    monkeypatch.setenv("CONDOR_RUNTIME_ROOT", str(tmp_path / ".condor"))
-
-    library = tmp_path / "routines"
-    library.mkdir()
-    (library / "shipped.py").write_text("# upstream maintains this\n")
-    env = {
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@t",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@t",
-        "PATH": "/usr/bin:/bin",
-    }
-    for args in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "v1"]):
-        subprocess.run(
-            ["git", *args], cwd=tmp_path, check=True, capture_output=True, env=env
-        )
-    # What the chat agent wrote before this change: untracked, in the tracked dir.
-    (library / "my_scanner.py").write_text("# written by the chat agent\n")
-    return tmp_path
-
-
-def test_a_chat_authored_routine_is_lifted_into_the_local_root(repo):
-    report = migrations.MigrationReport()
-    migrations._lift_chat_routines(report)
-
-    assert report.chat_routines == 1
-    lifted = paths.local_agents_root() / CHAT_SLUG / "routines" / "my_scanner.py"
-    assert lifted.read_text() == "# written by the chat agent\n"
-    assert not (repo / "routines" / "my_scanner.py").exists()
-
-
-def test_a_tracked_routine_is_never_moved(repo):
-    """Moving it would take the operator's edit out of the tree being updated.
-
-    A tracked file is either shipped or a modification of something shipped, and
-    ``keep-mine`` exists for exactly that case — it is the operator's choice,
-    not the migration's.
-    """
-    (repo / "routines" / "shipped.py").write_text("# upstream, plus my edit\n")
-
-    report = migrations.MigrationReport()
-    migrations._lift_chat_routines(report)
-
-    # The untracked one moved; the tracked one stayed exactly where it was.
-    assert report.chat_routines == 1
-    assert (
-        repo / "routines" / "shipped.py"
-    ).read_text() == "# upstream, plus my edit\n"
-    assert not (
-        paths.local_agents_root() / CHAT_SLUG / "routines" / "shipped.py"
-    ).exists()
-
-
-def test_the_lift_does_not_overwrite_something_already_there(repo):
-    destination = paths.local_agents_root() / CHAT_SLUG / "routines"
-    destination.mkdir(parents=True)
-    (destination / "my_scanner.py").write_text("# the newer local one\n")
-
-    report = migrations.MigrationReport()
-    migrations._lift_chat_routines(report)
-
-    assert report.chat_routines == 0
-    assert (destination / "my_scanner.py").read_text() == "# the newer local one\n"
-
-
-def test_the_lift_is_idempotent(repo):
-    first = migrations.MigrationReport()
-    migrations._lift_chat_routines(first)
-    second = migrations.MigrationReport()
-    migrations._lift_chat_routines(second)
-
-    assert first.chat_routines == 1
-    assert second.chat_routines == 0
 
 
 # ── The chat's local layer is reported when upstream moves under it ──
@@ -207,13 +122,10 @@ def test_a_routine_the_chat_invented_is_not_reported():
 
 
 def test_a_routine_the_chat_authors_is_discoverable(monkeypatch, tmp_path):
-    """FEAT-115 moved the chat's *write* target; discovery did not follow.
+    """The catalog includes routines authored in the chat's writable local layer.
 
-    `assistant_routines` sends the chat through `discover_routines`, which
-    reads the root library and the shared one — not `<local>/condor/routines`,
-    where the chat now writes. So a routine the agent authored never reached
-    the catalog, and the migration that lifts previously untracked ones out of
-    `routines/` made those vanish from it too.
+    `assistant_routines` must discover `<local>/condor/routines` alongside
+    the root library and the shared one.
     """
     monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path / "local"))
 
