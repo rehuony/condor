@@ -137,7 +137,7 @@ async def publish(
         store.save(card)
     async with store.lock(card.id):
         try:
-            png = await asyncio.to_thread(render_chart, candles, plan)
+            png = await asyncio.to_thread(render_chart, candles, plan, connector_name)
         except Exception:
             card.delivery_status = "failed"
             card.transition(CardStatus.FAILED)
@@ -149,7 +149,7 @@ async def publish(
                 photo=as_input_file(png, filename=f"trade-{card.id}.png"),
                 caption=render.caption(card),
                 reply_markup=render.keyboard(card),
-                parse_mode=None,
+                parse_mode="HTML",
             )
             if not getattr(message, "message_id", None):
                 raise RuntimeError("Telegram did not confirm the photo message id")
@@ -244,7 +244,7 @@ async def update_message(card: Card, bot) -> None:
             message_id=card.message_id,
             caption=render.caption(card),
             reply_markup=render.keyboard(card),
-            parse_mode=None,
+            parse_mode="HTML",
         )
     except BadRequest as exc:
         if not is_not_modified(exc):

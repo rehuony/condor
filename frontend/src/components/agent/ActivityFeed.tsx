@@ -60,35 +60,6 @@ function codeRunDuration(d: DelegationSummary): string {
   return secs > 0 ? formatDuration(secs, { ms: true }) : "";
 }
 
-/**
- * What the rows on screen add up to — computed from those rows and nothing else.
- *
- * No aggregate endpoint and no cache: this is the page the feed already
- * fetched, so the caption says which sample it measured rather than implying it
- * speaks for the whole history. A share and a median are only reported once
- * something finished; with nothing to measure they are left out instead of
- * printed as 0.
- */
-function summarize(rows: DelegationSummary[]) {
-  const finished = rows.filter((d) => d.status !== "running");
-  const durations = finished
-    .map((d) => (d.ended_at ?? 0) - (d.started_at ?? 0))
-    .filter((secs) => secs > 0)
-    .sort((a, b) => a - b);
-
-  return {
-    total: rows.length,
-    doneShare: finished.length
-      ? Math.round(
-          (finished.filter((d) => d.status === "done").length / finished.length) * 100,
-        )
-      : null,
-    median: durations.length
-      ? formatDuration(durations[Math.floor(durations.length / 2)])
-      : null,
-  };
-}
-
 /** What "nothing here" means, in the words of whatever is being asked for. */
 function emptyMessage(kind: DelegationKind | undefined, agent?: string): string {
   if (kind === "delegate")
@@ -146,12 +117,10 @@ export function ActivityFeed({
 
   const rows = data?.delegations ?? [];
   const open = rows.find((d) => d.task_id === openId);
-  const summary = summarize(rows);
 
   // Filtering server-side rather than over the fetched page is the honest
   // choice: narrowing a hundred mixed rows client-side would show three of a
-  // kind and imply that is all there ever were — the same dishonesty the
-  // summary caption exists to avoid.
+  // kind and imply that is all there ever were.
   const filters = kind ? null : (
     <div
       data-activity-filters
@@ -196,85 +165,69 @@ export function ActivityFeed({
     );
   } else {
     body = (
-      <>
-        <div
-          data-activity-summary
-          className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 pb-2 text-[10px] text-[var(--color-text-muted)]"
-        >
-          <span>
-            {summary.total} {summary.total === 1 ? "run" : "runs"}
-          </span>
-          {summary.doneShare !== null && <span>· {summary.doneShare}% done</span>}
-          {summary.median && <span>· median {summary.median}</span>}
-          {/* The number labels the window it actually measured, never the whole
-              history: this is the page that was fetched, and there may be more. */}
-          <span className="ml-auto">last {summary.total} shown</span>
-        </div>
-
-        <div className="divide-y divide-[var(--color-border)]/40">
-          {rows.map((d) => {
-            const s = DELEGATION_STATUS[d.status];
-            const k = kindOf(d);
-            const KindIcon = KIND[k].icon;
-            return (
-              <button
-                key={d.task_id}
-                type="button"
-                data-activity-row={k}
-                onClick={() => setOpenId(d.task_id)}
-                className="flex w-full items-start gap-3 px-1 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                title={d.task}
-              >
-                <span
-                  className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${s.dot} ${
-                    d.status === "running" ? "animate-pulse" : ""
-                  }`}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <KindIcon
-                      className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]"
-                      aria-label={KIND[k].label}
-                    />
-                    <span className="min-w-0 truncate text-xs text-[var(--color-text)]">
-                      {d.task.split("\n")[0] || "—"}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
-                    {!agent && (
-                      <span className="font-mono text-[var(--color-primary)]">
-                        {d.agent}
-                      </span>
-                    )}
-                    {/* Each kind says the one thing it actually knows: who asked
-                        for a consult, how much work a background task did, how
-                        long a snippet took. No column is invented for the kind
-                        that has no answer. */}
-                    <span>
-                      {k === "consult"
-                        ? d.caller
-                          ? `asked by ${d.caller}`
-                          : "asked by you"
-                        : KIND[k].label}
-                    </span>
-                    <span className={s.text}>{s.label.toLowerCase()}</span>
-                    {formatDelegationTime(d) && <span>{formatDelegationTime(d)}</span>}
-                    {k === "delegate" && !!d.tool_count && (
-                      <span data-tool-count className="flex items-center gap-1">
-                        <Wrench className="h-2.5 w-2.5" />
-                        {d.tool_count}
-                      </span>
-                    )}
-                    {k === "code" && codeRunDuration(d) && (
-                      <span data-code-duration>{codeRunDuration(d)}</span>
-                    )}
+      <div className="divide-y divide-[var(--color-border)]/40">
+        {rows.map((d) => {
+          const s = DELEGATION_STATUS[d.status];
+          const k = kindOf(d);
+          const KindIcon = KIND[k].icon;
+          return (
+            <button
+              key={d.task_id}
+              type="button"
+              data-activity-row={k}
+              onClick={() => setOpenId(d.task_id)}
+              className="flex w-full items-start gap-3 px-1 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+              title={d.task}
+            >
+              <span
+                className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${s.dot} ${
+                  d.status === "running" ? "animate-pulse" : ""
+                }`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  <KindIcon
+                    className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]"
+                    aria-label={KIND[k].label}
+                  />
+                  <span className="min-w-0 truncate text-xs text-[var(--color-text)]">
+                    {d.task.split("\n")[0] || "—"}
                   </span>
                 </span>
-              </button>
-            );
-          })}
-        </div>
-      </>
+                <span className="mt-0.5 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
+                  {!agent && (
+                    <span className="font-mono text-[var(--color-primary)]">
+                      {d.agent}
+                    </span>
+                  )}
+                  {/* Each kind says the one thing it actually knows: who asked
+                      for a consult, how much work a background task did, how
+                      long a snippet took. No column is invented for the kind
+                      that has no answer. */}
+                  <span>
+                    {k === "consult"
+                      ? d.caller
+                        ? `asked by ${d.caller}`
+                        : "asked by you"
+                      : KIND[k].label}
+                  </span>
+                  <span className={s.text}>{s.label.toLowerCase()}</span>
+                  {formatDelegationTime(d) && <span>{formatDelegationTime(d)}</span>}
+                  {k === "delegate" && !!d.tool_count && (
+                    <span data-tool-count className="flex items-center gap-1">
+                      <Wrench className="h-2.5 w-2.5" />
+                      {d.tool_count}
+                    </span>
+                  )}
+                  {k === "code" && codeRunDuration(d) && (
+                    <span data-code-duration>{codeRunDuration(d)}</span>
+                  )}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     );
   }
 

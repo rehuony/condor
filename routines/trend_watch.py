@@ -1,4 +1,4 @@
-"""Scan Binance perpetual trends and publish qualified plans through Trade Cards.
+"""Scan perpetual trends on one connector and publish qualified plans as Trade Cards.
 
 The scanner owns market selection, closed-candle signals, clarity scoring and
 reports. Trade Cards owns rendering, publication deduplication, interaction and
@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from condor import paths, trade_cards
 from condor.reports import ReportBuilder
 from condor.trade_cards.models import TradePlan
+from condor.trade_cards.render import venue_label
 from config_manager import get_client
 from routines.base import RoutineContext, RoutineResult, resolve_server_name
 
@@ -29,7 +30,7 @@ INTERVAL_SEC = {"4h": 14400, "1h": 3600, "15m": 900}
 SIG_NAME = {"pullback": "顺势回调", "breakout": "4H突破"}
 SIDE_NAME = {"long": "做多", "short": "做空"}
 
-# Tokenized stocks / ETFs / commodities on Binance perps (base asset names).
+# Tokenized stocks / ETFs / commodities listed as perps (base asset names).
 DEFAULT_EXCLUDE = [
     "SOXL",
     "SOXS",
@@ -573,7 +574,10 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         else:
             # A preview does not reserve a signal or mutate any trading state.
             png = await asyncio.to_thread(
-                trade_cards.render_chart, plan["df"], trade_plan
+                trade_cards.render_chart,
+                plan["df"],
+                trade_plan,
+                config.connector_name,
             )
             preview = (
                 paths.data_dir()
@@ -611,7 +615,7 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     muted_why = "同一根触发 K 线已发过卡"
 
     # ── report ──
-    builder = ReportBuilder("趋势扫描 · 币安永续")
+    builder = ReportBuilder(f"Trend Watch · {venue_label(config.connector_name)}")
     builder.source("routine", "trend_watch")
     builder.tags(["trend", "monitor", "scanner"])
     builder.kpi("扫描币数", str(len(results)))

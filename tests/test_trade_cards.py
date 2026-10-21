@@ -300,7 +300,7 @@ async def test_detach_delete_failure_removes_buttons_and_retries_without_trading
     assert not result.message_deleted
     edited = setup.edit_message_caption.await_args.kwargs
     assert edited["reply_markup"] is None
-    assert edited["parse_mode"] is None
+    assert edited["parse_mode"] == "HTML"
     assert "已停止托管" in edited["caption"]
     assert "暂未删除" in edited["caption"]
     setup.delete_message.side_effect = None
@@ -551,11 +551,11 @@ async def test_caption_reports_estimates_expiry_and_incomplete_results(setup):
     card = await published(setup)
     card.plan = plan(score=87)
     proposed = render.caption(card)
-    assert "清晰度 87/100" in proposed and "UTC+8" in proposed
+    assert "清晰度  <b>87/100</b>" in proposed and "UTC+8" in proposed
     await action(setup, card, "invest")
     card = await action(setup, card, "amount", margin="10")
     text = render.caption(card)
-    assert "按止损价估算亏损" in text and "预计强平价" in text and "手续费" in text
+    assert "止损亏损" in text and "预计强平价" in text and "手续费" in text
     card.execution = {"close_reason": "MANUAL_CLOSE", "pnl_complete": False, "pnl": "0"}
     assert render.result_row(card) == "手动平仓 · 盈亏待核对"
     card.execution = {
@@ -609,7 +609,7 @@ async def test_live_liquidation_and_negative_net_target_profit_are_not_fabricate
 
     card = await reviewed(setup)
     card.quote = validate_quote(quote(profit_tp1="-0.02"))
-    assert "止盈1预计 -0.02" in render.caption(card)
+    assert "<b>-0.02 / " in render.caption(card)
     card.status = CardStatus.OPEN
     card.mode = "live"
     card.execution = group(
@@ -618,7 +618,7 @@ async def test_live_liquidation_and_negative_net_target_profit_are_not_fabricate
         liquidation_price_kind="exchange",
         pnl_complete=False,
     )
-    assert "交易所强平价 93" in render.caption(card)
+    assert "交易所强平价  <b>93</b>" in render.caption(card)
     assert "盈亏数据尚未完整核对" in render.caption(card)
 
 

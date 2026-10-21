@@ -9,11 +9,11 @@ from .service import get_card, list_cards, publish
 from .tracker import start_tracker, stop_tracker
 
 
-def render_chart(candles, plan: TradePlan | dict) -> bytes:
+def render_chart(candles, plan: TradePlan | dict, connector_name: str) -> bytes:
     """Render a plan without publishing it or changing card state."""
     from .chart import render_chart as draw
 
-    return draw(candles, TradePlan.model_validate(plan))
+    return draw(candles, TradePlan.model_validate(plan), connector_name)
 
 
 __all__ = [

@@ -17,6 +17,7 @@ from matplotlib.font_manager import FontProperties
 from matplotlib.patches import Rectangle
 
 from .models import TradePlan
+from .render import venue_label
 
 TZ8 = timezone(timedelta(hours=8))
 _RENDER_LOCK = Lock()
@@ -52,7 +53,7 @@ BG, INK, MUTE = "#0F1113", "#EDE8DF", "#8A8D90"
 GRN, RED = "#6DB5A0", "#D98B7A"
 
 
-def _draw_card(df: pd.DataFrame, plan: TradePlan) -> bytes:
+def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
     pair, tf = plan.trading_pair, plan.timeframe
     serif = lambda s: _fp(_SERIF_FONT, s)  # noqa: E731
     sans = lambda s: _fp(_SANS_FONT, s)  # noqa: E731
@@ -209,7 +210,7 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan) -> bytes:
     T(
         962,
         1200,
-        f"数据截至 {now.strftime('%m-%d %H:%M')} · 币安永续",
+        f"数据截至 {now.strftime('%m-%d %H:%M')} · {venue_label(connector_name)}",
         sans(22),
         MUTE,
         ha="right",
@@ -221,8 +222,11 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan) -> bytes:
     return buf.getvalue()
 
 
-def render_chart(candles, plan: TradePlan | dict) -> bytes:
-    """Return a PNG using actual OHLC candles; this has no delivery side effects."""
+def render_chart(candles, plan: TradePlan | dict, connector_name: str) -> bytes:
+    """Return a PNG using actual OHLC candles; this has no delivery side effects.
+
+    ``connector_name`` is where the candles came from, named in the footer.
+    """
     plan = TradePlan.model_validate(plan)
     df = pd.DataFrame(candles).copy()
     required = ["timestamp", "open", "high", "low", "close"]
@@ -239,7 +243,7 @@ def render_chart(candles, plan: TradePlan | dict) -> bytes:
     with _RENDER_LOCK:
         previous = set(plt.get_fignums())
         try:
-            return _draw_card(df, plan)
+            return _draw_card(df, plan, connector_name)
         finally:
             for number in set(plt.get_fignums()) - previous:
                 plt.close(number)

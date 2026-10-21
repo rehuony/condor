@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from html import escape
 
 from condor.telegram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .models import HIDDEN, Card, CardStatus, management_actions, recovery_actions
+
+
+def venue_label(connector_name: str) -> str:
+    """``binance_perpetual`` → ``Binance Perp``, as the dashboard's
+    ``formatConnectorName`` names it."""
+    name = re.sub(r"_perpetual$", " perp", connector_name).replace("_", " ")
+    return re.sub(r"\b[a-z]", lambda m: m.group().upper(), name)
 
 
 def number(value, signed: bool = False) -> str:
@@ -55,89 +64,130 @@ def result_row(card: Card) -> str:
     return f"{icon} {label} · {number(pnl, True)} USDT{multiple}"
 
 
+def tree(title: str, rows: list[tuple[str, str]]) -> list[str]:
+    """A bold section header followed by indented ``label value`` rows."""
+    lines = [f"<b>{title}</b>"]
+    for i, (label, value) in enumerate(rows):
+        branch = "└" if i == len(rows) - 1 else "├"
+        lines.append(f"{branch} {label}  <b>{escape(value)}</b>")
+    return lines
+
+
 def caption(card: Card) -> str:
+    """Telegram HTML caption: title, plan, then the block for the card's status."""
     plan = card.plan
-    mode = "演练 · 不下真实订单" if card.mode == "dry_run" else "实盘"
+    side = "🟢 做多" if plan.side == "long" else "🔴 做空"
     lines = [
-        f"{plan.trading_pair} · {'做多' if plan.side == 'long' else '做空'} · {plan.timeframe}",
-        mode,
-        f"进场 {number(plan.entry_low)}–{number(plan.entry_high)}",
-        f"止损 {number(plan.stop_price)} · 止盈 {number(plan.tp1_price)} / {number(plan.tp2_price)}",
+        f"<b>{escape(plan.trading_pair)} · {side} · {escape(plan.timeframe)}</b>",
+        "<i>演练 · 不下真实订单</i>" if card.mode == "dry_run" else "<b>⚡ 实盘</b>",
+        "",
+        *tree(
+            "📍 交易计划",
+            [
+                ("进场", f"{number(plan.entry_low)} – {number(plan.entry_high)}"),
+                ("止损", number(plan.stop_price)),
+                ("止盈", f"{number(plan.tp1_price)} / {number(plan.tp2_price)}"),
+            ],
+        ),
+        "",
     ]
+    notes: list[str] = []
     if card.status == CardStatus.PROPOSED:
-        if plan.score is not None:
-            lines.append(f"清晰度 {number(plan.score)}/100")
         expires = datetime.fromtimestamp(card.expires_at, timezone(timedelta(hours=8)))
-        lines.append(f"有效至 {expires:%m-%d %H:%M}（UTC+8）· 4 小时")
-        lines.append("选择投资金额后查看风险，确认后才会下单。")
+        rows = [("有效至", f"{expires:%m-%d %H:%M}（UTC+8）")]
+        if plan.score is not None:
+            rows.insert(0, ("清晰度", f"{number(plan.score)}/100"))
+        lines += tree("⏳ 待确认", rows)
+        notes.append("选择投资金额后查看风险，确认后才会下单。")
     elif card.status == CardStatus.SIZING:
-        lines.append(f"选择保证金（USDT）· 10x · 上次 {number(card.margin)}")
+        lines += tree(
+            "💰 选择保证金",
+            [("杠杆", "10x 逐仓"), ("上次", f"{number(card.margin)} USDT")],
+        )
         if card.custom_input:
-            lines.append("请发送自定义保证金金额；/cancel 返回金额选择。")
+            notes.append("请发送自定义保证金金额；/cancel 返回金额选择。")
     elif card.status == CardStatus.REVIEW:
         q = card.quote
-        lines.extend(
+        entry = "市价" if q.get("entry_method") == "MARKET" else "限价"
+        lines += tree(
+            "🧮 下单确认",
             [
-                f"数量 {number(q.get('quantity'))} · 保证金 {number(q.get('margin'))} USDT · 10x",
-                f"仓位价值 {number(q.get('notional'))} USDT",
-                f"按止损价估算亏损 {number(q.get('max_loss'))} USDT · 预计强平价 {number(q.get('liquidation_price'))}",
-                f"止盈1预计 {number(q.get('profit_tp1'), True)} / 止盈2预计 {number(q.get('profit_tp2'), True)} USDT",
-                "盈亏估计含开平仓手续费；滑点和资金费会影响实际结果。",
-                f"入场：{'市价' if q.get('entry_method') == 'MARKET' else '限价'} · 参考价 {number(q.get('entry_price'))}",
-                "各一半止盈；余仓到止盈1后按 1R 保本跟随，不设持仓时限。",
-            ]
+                ("入场", f"{entry} · 参考价 {number(q.get('entry_price'))}"),
+                ("数量", number(q.get("quantity"))),
+                ("保证金", f"{number(q.get('margin'))} USDT · 10x"),
+                ("仓位价值", f"{number(q.get('notional'))} USDT"),
+                ("止损亏损", f"{number(q.get('max_loss'))} USDT"),
+                ("预计强平价", number(q.get("liquidation_price"))),
+                (
+                    "止盈预计",
+                    f"{number(q.get('profit_tp1'), True)} / "
+                    f"{number(q.get('profit_tp2'), True)} USDT",
+                ),
+            ],
         )
+        notes += [
+            "各一半止盈；余仓到止盈1后按 1R 保本跟随，不设持仓时限。",
+            "盈亏估计含开平仓手续费；滑点和资金费会影响实际结果。",
+        ]
     elif card.status == CardStatus.OPEN:
         e = card.execution
-        lines.extend(
-            [
-                f"已开仓 · 成交 {number(e.get('entry_price'))} · 剩余 {number(e.get('remaining_amount'))}",
-                f"盈亏 {number(e.get('pnl'), True)} USDT · 现价 {number(e.get('current_price'))}",
-            ]
-        )
-        if e.get("pnl_complete") is False:
-            lines.append("盈亏数据尚未完整核对。")
+        rows = [
+            ("成交价", number(e.get("entry_price"))),
+            ("剩余数量", number(e.get("remaining_amount"))),
+            ("现价", number(e.get("current_price"))),
+            ("盈亏", f"{number(e.get('pnl'), True)} USDT"),
+        ]
         liquidation = e.get("liquidation_price")
         if e.get("liquidation_price_kind") == "exchange" and liquidation is not None:
-            lines.append(f"交易所强平价 {number(liquidation)}")
+            rows.append(("交易所强平价", number(liquidation)))
         elif card.mode == "live":
-            lines.append("交易所强平价暂不可用。")
+            notes.append("交易所强平价暂不可用。")
         try:
             price = Decimal(str(e["current_price"]))
             distance = abs(price - plan.stop_price) / price * 100
-            lines.append(f"距计划止损 {number(distance)}%")
+            rows.append(("距计划止损", f"{distance:.2f}%"))
         except (KeyError, InvalidOperation, ZeroDivisionError):
             pass
-    elif card.status == CardStatus.PENDING:
-        lines.append("限价委托等待成交，到期自动撤销未成交部分。")
+        lines += tree("📈 持仓中", rows)
+        if e.get("pnl_complete") is False:
+            notes.insert(0, "盈亏数据尚未完整核对。")
     elif card.status == CardStatus.CLOSED:
-        lines.append(result_row(card))
+        lines.append(f"<b>{escape(result_row(card))}</b>")
+    elif card.status == CardStatus.PENDING:
+        lines.append("<b>🕒 限价委托等待成交</b>")
+        notes.append("到期自动撤销未成交部分。")
     elif card.status == CardStatus.FAILED:
-        lines.append("❌ 交易未完成，请检查执行端状态。")
+        lines.append("<b>❌ 交易未完成</b>")
+        notes.append("请检查执行端状态。")
     elif card.status == CardStatus.RECONCILING:
-        lines.append("正在核对执行结果，禁止新增仓位或重复提交操作。")
+        lines.append("<b>🔍 正在核对执行结果</b>")
+        notes.append("禁止新增仓位或重复提交操作。")
         if recovery_actions(card):
-            lines.append("已确认的持仓仍可全部平仓；已有入场挂单仍可撤销。")
+            notes.append("已确认的持仓仍可全部平仓；已有入场挂单仍可撤销。")
     elif card.status == CardStatus.CLOSING:
-        lines.append("正在处理持仓操作，请等待执行结果。")
+        lines.append("<b>⏳ 正在处理持仓操作</b>")
+        notes.append("请等待执行结果。")
     elif card.status == CardStatus.PLACING:
-        lines.append("正在提交订单，请勿重复操作。")
+        lines.append("<b>⏳ 正在提交订单</b>")
+        notes.append("请勿重复操作。")
     elif card.status == CardStatus.DETACHED:
-        lines.append("已停止托管，持仓保留；此卡片不再管理订单。")
+        lines.append("<b>⏹ 已停止托管</b>")
+        notes.append("持仓保留；此卡片不再管理订单。")
     elif card.status in HIDDEN:
-        lines.append("卡片已结束。")
+        lines.append("<b>卡片已结束</b>")
     if card.delete_failed:
-        lines.append("消息暂未删除，已停用所有按钮，将继续重试删除。")
+        notes.append("消息暂未删除，已停用所有按钮，将继续重试删除。")
+    if card.note:
+        notes.append(card.note[:240])
+    lines += [f"<i>{escape(note)}</i>" for note in notes]
     if card.confirm_action:
         label = {
             "reduce_half": "平掉一半剩余持仓",
             "close": "全部平仓",
             "detach": "停止托管、保留持仓并删除卡片",
         }[card.confirm_action]
-        lines.append(f"再次点击确认：{label}。")
-    if card.note:
-        lines.append(card.note[:240])
-    return "\n".join(lines)[:1024]
+        lines += ["", f"<b>⚠️ 再次点击确认：{label}</b>"]
+    return "\n".join(lines)
 
 
 def keyboard(card: Card) -> InlineKeyboardMarkup | None:

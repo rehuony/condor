@@ -118,6 +118,7 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
     assert result.silent
     get_client.assert_awaited_once_with(-100, user_data={}, server="pinned-server")
     report.save.assert_awaited_once()
+    scanner.ReportBuilder.assert_called_once_with("Trend Watch · Binance Perp")
     if send:
         assert publish.await_count == 3
         assert "出卡 2 张" in result.text

@@ -1,19 +1,18 @@
 /**
  * What the Activity feed promises (FEAT-058, FEAT-061).
  *
- * Four things are load-bearing and none of them are visual: every kind of run
+ * Three things are load-bearing and none of them are visual: every kind of run
  * appears in one timeline and they are told apart; each row says the one thing
  * its kind actually knows (who asked, for an archived consult; how much work it did, for
  * a background task; how long it took, for a code run) and invents nothing for
- * the others; the summary strip names the sample it measured rather than
- * implying it speaks for the whole history; and a record written before kinds
- * existed still reads as a delegation.
+ * the others; and a record written before kinds existed still reads as a
+ * delegation.
  *
- * The fifth is the filter's, and it is the reason the filter is server-side: a
+ * The fourth is the filter's, and it is the reason the filter is server-side: a
  * narrowed feed must *re-ask*, because filtering the page already fetched would
  * show three of a kind and imply that is all there ever were.
  *
- * The sixth is the dock's: it asks for background tasks only, which is the
+ * The fifth is the dock's: it asks for background tasks only, which is the
  * regression these features could most easily have introduced — filling the
  * chat dock with the conversation's older consult rows, or every snippet it ran.
  *
@@ -116,8 +115,6 @@ async function clickFilter(kind: DelegationKind | "all") {
 
 const rows = () => [...document.querySelectorAll<HTMLElement>("[data-activity-row]")];
 const kinds = () => rows().map((r) => r.dataset.activityRow);
-const summary = () =>
-  document.querySelector<HTMLElement>("[data-activity-summary]")!.textContent!;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -172,39 +169,6 @@ describe("one timeline, three kinds", () => {
 
     expect(kinds()).toEqual(["delegate"]);
     expect(rows()[0].textContent).toContain("background");
-  });
-});
-
-describe("the summary strip", () => {
-  it("names the sample it measured rather than the whole history", async () => {
-    ROWS = [run({ task_id: "a" }), run({ task_id: "b" })];
-    await render({ agent: "scout" });
-
-    expect(summary()).toContain("2 runs");
-    expect(summary()).toContain("last 2 shown");
-  });
-
-  it("measures the share and the median over what actually finished", async () => {
-    ROWS = [
-      run({ task_id: "a", status: "done", started_at: NOW - 20, ended_at: NOW - 10 }),
-      run({ task_id: "b", status: "error", started_at: NOW - 60, ended_at: NOW - 30 }),
-      // Still running: no outcome and no duration to fold in yet.
-      run({ task_id: "c", status: "running", ended_at: undefined }),
-    ];
-    await render({ agent: "scout" });
-
-    expect(summary()).toContain("3 runs");
-    expect(summary()).toContain("50% done"); // 1 of the 2 that finished
-    expect(summary()).toContain("median 30s");
-  });
-
-  it("omits a share and a median it has nothing to measure", async () => {
-    ROWS = [run({ task_id: "a", status: "running", ended_at: undefined })];
-    await render({ agent: "scout" });
-
-    expect(summary()).toContain("1 run");
-    expect(summary()).not.toContain("% done");
-    expect(summary()).not.toContain("median");
   });
 });
 
@@ -288,13 +252,6 @@ describe("code runs are work too", () => {
     expect(failed.textContent).toContain("error");
     expect(timedOut.textContent).not.toContain("error");
   });
-
-  it("folds a snippet's real duration into the median", async () => {
-    ROWS = [codeRun({ started_at: NOW - 30, ended_at: NOW - 20 })];
-    await render({ agent: "scout" });
-
-    expect(summary()).toContain("median 10s");
-  });
 });
 
 describe("the kind filter", () => {
@@ -332,15 +289,6 @@ describe("the kind filter", () => {
 
     expect(rows()).toHaveLength(0);
     expect(document.querySelector("[data-activity-filters]")).not.toBeNull();
-  });
-
-  it("still names the sample it measured after a filter", async () => {
-    ROWS = mixed();
-    await render({ agent: "scout" });
-    await clickFilter("consult");
-
-    expect(summary()).toContain("1 run");
-    expect(summary()).toContain("last 1 shown");
   });
 
   it("is absent when the dock has pinned the feed to one kind", async () => {
