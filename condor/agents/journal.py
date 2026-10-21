@@ -264,57 +264,41 @@ def render_snapshot(
     )
 
 
-# Session directory names, current first. A strategy that ran before the rename
-# can hold both, and the current name wins when both hold the same number.
-SESSION_DIRNAMES = ("sessions", "trading_sessions")
-
-
 def iter_session_dirs(strategy_dir: Path) -> list[tuple[int, Path]]:
-    """Every ``session_N`` directory of a strategy, as ``(N, dir)`` ascending by N.
+    """Every ``sessions/session_N`` directory, as ``(N, dir)`` ascending by N.
 
-    The one walk over the session layout: each dirname of ``SESSION_DIRNAMES``
-    in order, the first one holding a number keeps it, and anything that is not
-    a directory named ``session_<int>`` is skipped. Counting, listing, settling
-    and numbering the next session all read this, so they cannot disagree about
-    which sessions exist.
+    Counting, listing, settling and numbering the next session share this walk
+    so they agree about which sessions exist.
     """
     found: dict[int, Path] = {}
-    for dirname in SESSION_DIRNAMES:
-        try:
-            children = list((strategy_dir / dirname).iterdir())
-        except OSError:  # absent, or not a directory
+    try:
+        children = list((strategy_dir / "sessions").iterdir())
+    except OSError:  # absent, or not a directory
+        return []
+    for child in children:
+        if not child.name.startswith("session_") or not child.is_dir():
             continue
-        for child in children:
-            if not child.name.startswith("session_") or not child.is_dir():
-                continue
-            try:
-                num = int(child.name.split("_", 1)[1])
-            except ValueError:
-                continue
-            found.setdefault(num, child)
+        try:
+            num = int(child.name.split("_", 1)[1])
+        except ValueError:
+            continue
+        found.setdefault(num, child)
     return sorted(found.items())
 
 
 def next_session_number(agent_dir: Path) -> int:
-    """One past the highest session number in any session directory."""
+    """One past the highest session number in ``sessions/``."""
     return max((num for num, _ in iter_session_dirs(agent_dir)), default=0) + 1
 
 
 def next_experiment_number(agent_dir: Path) -> int:
-    """Determine the next experiment number by scanning experiment_*.md files.
-
-    Checks both dry_runs/ (new) and experiments/ (legacy) directories.
-    """
+    """One past the highest number in ``dry_runs/experiment_*.md``."""
     existing = []
-    for dir_name in ("dry_runs", "experiments"):
-        d = agent_dir / dir_name
-        if not d.exists():
-            continue
-        for f in d.iterdir():
-            if f.is_file() and f.suffix == ".md":
-                m = re.match(r"experiment_(\d+)\.md", f.name)
-                if m:
-                    existing.append(int(m.group(1)))
+    for path in (agent_dir / "dry_runs").glob("experiment_*.md"):
+        if path.is_file() and (
+            match := re.fullmatch(r"experiment_(\d+)\.md", path.name)
+        ):
+            existing.append(int(match.group(1)))
     return max(existing, default=0) + 1
 
 
@@ -427,9 +411,6 @@ class JournalManager:
         self._snapshots_dir = self._session_dir / "snapshots"
         self._session_dir.mkdir(parents=True, exist_ok=True)
 
-        # Also support legacy runs/ dir for reading
-        self._legacy_runs_dir = self._session_dir / "runs"
-
         # Read cache: journal.md text keyed by (mtime_ns, size), plus parsed
         # sections derived from that text. Invalidated when the stamp changes
         # (external writers, e.g. the MCP journal_write tool) or explicitly on
@@ -467,7 +448,7 @@ class JournalManager:
             return self._agent_dir / "learnings.md"
         # Fallback: try to find learnings in session dir parent
         parent = self._session_dir.parent
-        if parent.name == "sessions" or parent.name == "trading_sessions":
+        if parent.name == "sessions":
             return parent.parent / "learnings.md"
         return None
 
@@ -648,11 +629,8 @@ class JournalManager:
         return self._get_section("Summary")
 
     def read_state(self) -> str:
-        """Return the summary (backwards compat alias for read_summary)."""
-        summary = self._get_section("Summary")
-        if summary:
-            return summary
-        return self._get_section("State")
+        """Return the current summary for the journal tool's state section."""
+        return self.read_summary()
 
     def read_recent(self, max_entries: int = 10) -> str:
         """Return recent decisions from snapshots."""
@@ -673,27 +651,7 @@ class JournalManager:
             if parts:
                 return "\n".join(parts)
 
-        # Legacy: check runs/ and Recent Actions
-        runs = self._list_legacy_runs(limit=max_entries)
-        if runs:
-            parts = []
-            for run in runs:
-                content = self._read_legacy_run(run["tick"])
-                if content:
-                    m = re.search(
-                        r"^## Decision\n(.*?)(?=^## |\Z)",
-                        content,
-                        re.MULTILINE | re.DOTALL,
-                    )
-                    if m:
-                        parts.append(f"- **#{run['tick']}** {m.group(1).strip()}")
-            if parts:
-                return "\n".join(parts)
-
-        content = self._get_section("Recent Actions")
-        if not content:
-            content = self._get_section("Actions Log")
-        return content
+        return self.get_recent_decisions(count=max_entries)
 
     # ------------------------------------------------------------------
     # Snapshots (full context dumps)
@@ -733,8 +691,7 @@ class JournalManager:
         path = self._snapshots_dir / f"snapshot_{tick}.md"
         if path.exists():
             return path.read_text()
-        # Legacy fallback
-        return self._read_legacy_run(tick)
+        return ""
 
     def list_snapshots(self, limit: int = 10) -> list[dict[str, Any]]:
         """List recent snapshots, newest first."""
@@ -757,10 +714,6 @@ class JournalManager:
                             "size": f.stat().st_size,
                         }
                     )
-
-        # If none found, check legacy runs/
-        if not results:
-            return self._list_legacy_runs(limit=limit)
 
         return results
 
@@ -800,43 +753,12 @@ class JournalManager:
             for _, f in ticked[: len(ticked) - MAX_SNAPSHOTS]:
                 f.unlink()
 
-    # ------------------------------------------------------------------
-    # Legacy run support (reads from runs/ dir)
-    # ------------------------------------------------------------------
-
-    def _read_legacy_run(self, tick: int) -> str:
-        path = self._legacy_runs_dir / f"run_{tick}.md"
-        if path.exists():
-            return path.read_text()
-        return ""
-
-    def _list_legacy_runs(self, limit: int = 10) -> list[dict[str, Any]]:
-        if not self._legacy_runs_dir.exists():
-            return []
-        files = sorted(
-            self._legacy_runs_dir.glob("run_*.md"),
-            key=lambda f: f.stat().st_mtime,
-            reverse=True,
-        )
-        results = []
-        for f in files[:limit]:
-            m = re.match(r"run_(\d+)\.md", f.name)
-            if m:
-                results.append(
-                    {
-                        "tick": int(m.group(1)),
-                        "file": f.name,
-                        "size": f.stat().st_size,
-                    }
-                )
-        return results
-
     def read_run_snapshot(self, tick: int) -> str:
-        """Legacy compat: try snapshots first, then runs."""
+        """Read a snapshot for the journal tool's ``run:N`` section."""
         return self.read_snapshot(tick)
 
     def list_runs(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Legacy compat: try snapshots first, then runs."""
+        """List snapshots for the journal tool's runs section."""
         return self.list_snapshots(limit=limit)
 
     # ------------------------------------------------------------------
@@ -856,11 +778,8 @@ class JournalManager:
         self._replace_section("Summary", summary)
 
     def write_state(self, state_text: str) -> None:
-        """Overwrite the Summary section (backwards compat for write via MCP)."""
-        if self._get_section("State"):
-            self._replace_section("State", state_text.strip())
-        else:
-            self._replace_section("Summary", state_text.strip())
+        """Overwrite the Summary section through the journal tool."""
+        self._replace_section("Summary", state_text.strip())
 
     def append_action(
         self,
@@ -880,15 +799,6 @@ class JournalManager:
 
         # Write to Decisions section
         self._append_bounded("Decisions", entry, MAX_DECISION_LINES)
-
-        # Also write to Recent Actions if it exists (legacy compat)
-        if "## Recent Actions" in self.read_full():
-            ra_section = self._get_section("Recent Actions")
-            ra_lines = [l for l in ra_section.splitlines() if l.strip()]
-            ra_lines.append(entry)
-            if len(ra_lines) > 10:
-                ra_lines = ra_lines[-10:]
-            self._replace_section("Recent Actions", "\n".join(ra_lines))
 
     def append_error(self, error: str) -> None:
         """Append an error as a decision entry."""
@@ -1099,11 +1009,7 @@ class JournalManager:
 
     def entry_count(self) -> int:
         """Count snapshots."""
-        snaps = self.list_snapshots(limit=1000)
-        if snaps:
-            return len(snaps)
-        section = self._get_section("Recent Actions")
-        return len([l for l in section.splitlines() if l.startswith("- ")])
+        return len(self.list_snapshots(limit=1000))
 
 
 def _parse_snapshot_line(line: str) -> dict[str, Any]:

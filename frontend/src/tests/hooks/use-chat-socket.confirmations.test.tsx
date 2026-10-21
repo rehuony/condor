@@ -120,6 +120,9 @@ const stranded = {
   summary: "Place a 1 SOL order?",
   origin: "brigado on moneymaker",
   expires_at: 0,
+  expires_in: 90,
+  tool: "place_order",
+  input: null,
 };
 
 beforeEach(() => {
@@ -149,6 +152,9 @@ describe("re-reading pending approvals on a socket open", () => {
       request_id: "abc123",
       summary: "Place a 1 SOL order?",
       origin: "brigado on moneymaker",
+      tool: "place_order",
+      input: null,
+      deadline: expect.any(Number),
     });
   });
 
@@ -179,12 +185,13 @@ describe("re-reading pending approvals on a socket open", () => {
     expect(req.deadline).toBeLessThanOrEqual(Date.now() / 1000 + 90);
   });
 
-  it("files an approval with no slot where an unaddressed one goes", async () => {
+  it("keeps a current non-web approval answerable from the active conversation", async () => {
     getPendingConfirmations.mockResolvedValue([{ ...stranded, slot_id: "" }]);
 
     await arrive();
 
     expect(chat().permissionRequests[""].request_id).toBe("abc123");
+    expect(chat().permissionFor("a-web-conversation")?.request_id).toBe("abc123");
   });
 
   it("leaves an approval this session is already showing alone", async () => {
@@ -198,6 +205,9 @@ describe("re-reading pending approvals on a socket open", () => {
         request_id: "live-1",
         summary: "the one on screen",
         origin: "",
+        tool: "place_order",
+        input: null,
+        expires_in: 90,
       });
     });
 

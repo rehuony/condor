@@ -109,7 +109,6 @@ def test_the_operational_store_is_isolated_too():
     assert _outside_the_repo(paths.notifications_path())
     assert _outside_the_repo(paths.routine_hooks_path())
     assert _outside_the_repo(paths.backtests_dir())
-    assert _outside_the_repo(paths.legacy_backtests_file())
     assert _outside_the_repo(paths.code_runs_dir())
 
 

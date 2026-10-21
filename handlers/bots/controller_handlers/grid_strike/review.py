@@ -34,12 +34,6 @@ from ..grid_strike.steps import (
 logger = logging.getLogger(__name__)
 
 
-async def handle_gs_accept_prices(update: Update, context: Context) -> None:
-    """Accept grid configuration and save - legacy handler, redirects to gs_save"""
-    # Redirect to save handler since prices step is now the final step
-    await handle_gs_save(update, context)
-
-
 async def handle_gs_wizard_take_profit(
     update: Update, context: Context, tp: float
 ) -> None:

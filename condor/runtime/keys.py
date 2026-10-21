@@ -1,15 +1,7 @@
-"""Canonical session keys. One keyspace for every frontend.
-
-Before this module every frontend invented its own key: Telegram used the raw
-integer ``chat_id`` and the web dashboard used ``f"web_{user_id}_{slot_id}"``.
-The registry then had to type-sniff (``isinstance(chat_id, int)``) to tell them
-apart. ``SessionKey`` makes the surface explicit and gives every key a single
-stable string form, which is also what the HTTP transport will put on the wire.
-"""
+"""Canonical ``surface:owner[:slot]`` session keys shared by every frontend."""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 # Known surfaces. A surface identifies which frontend owns the session.
@@ -18,9 +10,6 @@ WEB = "web"
 MCP = "mcp"
 
 SEPARATOR = ":"
-
-# Legacy web key produced by condor/web/routes/chat_ws.py before this feature.
-_LEGACY_WEB_RE = re.compile(r"^web_(?P<owner>[^_]+)_(?P<slot>.+)$")
 
 
 @dataclass(frozen=True)
@@ -63,28 +52,6 @@ class SessionKey:
     def mcp(cls, user_id: int | str) -> "SessionKey":
         return cls(surface=MCP, owner=str(user_id))
 
-    @classmethod
-    def legacy_from(cls, raw: int | str) -> "SessionKey":
-        """Build a key from a pre-facade identifier.
-
-        Accepts the two shapes that existed before this feature (an ``int``
-        Telegram chat id and ``web_{user_id}_{slot_id}``) as well as the
-        canonical form, so persisted blobs and half-migrated call sites keep
-        resolving to the same session.
-        """
-        if isinstance(raw, int):
-            return cls.telegram(raw)
-
-        text = str(raw)
-        legacy_web = _LEGACY_WEB_RE.match(text)
-        if legacy_web:
-            return cls.web(legacy_web.group("owner"), legacy_web.group("slot"))
-        if SEPARATOR in text:
-            return cls.parse(text)
-        if text.lstrip("-").isdigit():
-            return cls.telegram(text)
-        raise ValueError(f"Cannot derive a session key from {raw!r}")
-
     @property
     def is_telegram(self) -> bool:
         return self.surface == TELEGRAM
@@ -103,9 +70,8 @@ class SessionKey:
 def slot_of(session_key: str) -> str:
     """The slot a session key belongs to, or "" if the key is not canonical.
 
-    Never raises: a confirmation that cannot be attributed is still worth
-    delivering unaddressed, which is what the dashboard did for all of them
-    before this became a field.
+    Non-web confirmations have no slot and remain answerable from the dashboard.
+    An unreadable key also returns an empty slot instead of dropping the request.
     """
     try:
         return SessionKey.parse(session_key).slot

@@ -485,8 +485,8 @@ def test_reconcile_marks_delegations_interrupted(tmp_path):
     assert read_status(record)["state"] == LoopState.INTERRUPTED
 
 
-def test_reconcile_still_settles_a_pre_feat_051_delegation(tmp_path):
-    """An unowned legacy record has no user directory to have been moved into."""
+def test_reconcile_leaves_flat_agent_records_untouched(tmp_path):
+    """Only current user-owned records are part of boot reconciliation."""
     delegations = tmp_path / "brigado" / "delegations"
     delegations.mkdir(parents=True)
     name = "brigado-delegate-abc123.status.json"
@@ -505,8 +505,8 @@ def test_reconcile_still_settles_a_pre_feat_051_delegation(tmp_path):
     supervisor = LoopSupervisor()
     report = asyncio.run(supervisor.reconcile_boot(agents_root=tmp_path))
 
-    assert report.delegations == 1
-    assert read_status(delegations, name)["state"] == LoopState.INTERRUPTED
+    assert report.delegations == 0
+    assert read_status(delegations, name)["state"] == LoopState.RUNNING
 
 
 # ── Registry ownership ──

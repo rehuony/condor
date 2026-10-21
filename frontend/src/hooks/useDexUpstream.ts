@@ -72,15 +72,11 @@ export function useDexUpstream(server: string | null): DexUpstreamState {
       return state;
     },
     enabled: !!server,
-    // Stops polling if the endpoint is not there (an older backend): a banner
-    // nobody can raise is not worth a request every twenty seconds.
     retry: false,
     refetchInterval: (query) =>
-      query.state.status === "error"
-        ? false
-        : query.state.data?.rate_limited
-          ? POLL_LIMITED_MS
-          : POLL_HEALTHY_MS,
+      query.state.status !== "error" && query.state.data?.rate_limited
+        ? POLL_LIMITED_MS
+        : POLL_HEALTHY_MS,
     // A throttled dashboard is exactly when a background tab should stop asking.
     refetchIntervalInBackground: false,
   });

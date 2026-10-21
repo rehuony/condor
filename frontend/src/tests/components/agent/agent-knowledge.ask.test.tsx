@@ -102,6 +102,7 @@ function brain(): AgentBrain {
         muted: false,
       },
     ],
+    controllers: [],
     strategies: [],
   };
 }

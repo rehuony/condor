@@ -87,7 +87,6 @@ async def list_backtest_archive(
     # so is reachable by nobody -- which is exactly how the per-server listing it
     # replaces behaved, since no server name ever equalled "".
     return {
-        "migrated": store.migrated,
         "summaries": [
             _summary_entry(s)
             for s in store.list_summaries(server)

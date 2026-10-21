@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -168,14 +170,57 @@ def test_compression_is_materially_smaller_than_the_json(store):
     assert (store._dir / "task-1.json.gz").stat().st_size < raw / 2
 
 
-def test_a_legacy_uncompressed_payload_still_reads(store):
-    """A v1 file on disk keeps answering until the migration rewrites it."""
-    (store._dir / "task-1.json").write_text(
-        json.dumps({"server": "local", **_envelope()}), encoding="utf-8"
-    )
-    store._index["task-1"] = {"task_id": "task-1", "server": "local"}
+def test_a_corrupt_index_is_rebuilt_from_current_payloads(store):
+    store.save_result("local", "task-1", _envelope())
+    expected = store.get_summary("task-1")
+    store._index_path.write_text("{broken")
 
-    assert store.get_result("task-1")["status"] == "completed"
+    restored = BacktestStore(data_dir=store._dir)
+
+    assert restored.get_summary("task-1") == expected
+    assert restored.get_result("task-1")["status"] == "completed"
+    assert json.loads(restored._index_path.read_text())["v"] == 2
+
+
+def test_startup_finishes_archive_recovery_off_the_event_loop(store, monkeypatch):
+    import condor.backtest_store as store_module
+    import main
+
+    store.save_result("local", "task-1", _envelope())
+    expected = store.get_summary("task-1")
+    store._index_path.write_text("{broken")
+    monkeypatch.setattr(store_module, "_store", None)
+    monkeypatch.setattr(store_module.paths, "backtests_dir", lambda: store._dir)
+    loop_thread = threading.get_ident()
+    rebuilt = []
+    original_rebuild = BacktestStore._rebuild_index
+
+    def rebuild(archive):
+        assert threading.get_ident() != loop_thread
+        original_rebuild(archive)
+        rebuilt.append(archive)
+
+    monkeypatch.setattr(BacktestStore, "_rebuild_index", rebuild)
+
+    async def stop_after_archive(*, interval):
+        assert len(rebuilt) == 1
+        assert store_module._store is rebuilt[0]
+        assert store_module._store.get_summary("task-1") == expected
+        raise asyncio.CancelledError
+
+    application = SimpleNamespace(store=SimpleNamespace(start=stop_after_archive))
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.startup(application))
+
+
+def test_an_unsupported_index_is_refused_without_overwriting_it(store):
+    raw = json.dumps({"v": 1, "tasks": {"task-1": {"server": "local"}}})
+    store._index_path.write_text(raw)
+
+    with pytest.raises(ValueError, match="Unsupported backtest index version"):
+        BacktestStore(data_dir=store._dir)
+
+    assert store._index_path.read_text() == raw
 
 
 # ── retention ─────────────────────────────────────────────────────────────────
@@ -222,75 +267,6 @@ def test_the_retention_env_override_is_honoured(store, monkeypatch):
     monkeypatch.setenv("CONDOR_BACKTEST_RETENTION_DAYS", "1")
     assert store.prune_payloads() == 1
     assert store.has_payload("old") is False
-
-
-# ── the v1 → v2 migration ─────────────────────────────────────────────────────
-
-
-def _write_v1(store, task_id: str, envelope: dict, server: str = "local") -> None:
-    (store._dir / f"{task_id}.json").write_text(
-        json.dumps({"server": server, **envelope}), encoding="utf-8"
-    )
-    index = (
-        json.loads(store._index_path.read_text(encoding="utf-8"))
-        if (store._index_path.exists())
-        else {}
-    )
-    index[task_id] = {"server": server, "config": ""}
-    store._index_path.write_text(json.dumps(index), encoding="utf-8")
-
-
-def test_a_v1_store_lists_degraded_until_it_is_migrated(tmp_path):
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "task-1", _envelope())
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    assert store.migrated is False
-    summary = store.get_summary("task-1")
-    assert summary["status"] == "unknown", "an unindexed run must not claim metrics"
-    assert summary["metrics"] == {}
-    # It is still addressable and still readable, just not yet described.
-    assert store.resolve_task_id("task") == "task-1"
-    assert store.get_result("task-1")["status"] == "completed"
-
-
-def test_migration_derives_summaries_compresses_and_drops_the_originals(tmp_path):
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "task-1", _envelope())
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    assert store.migrate() == 1
-    assert store.migrated is True
-    assert not (store._dir / "task-1.json").exists()
-    assert (store._dir / "task-1.json.gz").exists()
-    assert store.get_summary("task-1")["metrics"]["net_pnl_quote"] == 12.5
-    assert store.get_result("task-1")["status"] == "completed"
-    # Idempotent: a second pass has nothing left to convert.
-    assert store.migrate() == 0
-
-
-def test_migration_deletes_an_expired_payload_instead_of_compressing_it(tmp_path):
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "old", _envelope(completed_at=time.time() - 90 * 86400))
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    store.migrate()
-
-    assert not (store._dir / "old.json").exists()
-    assert not (store._dir / "old.json.gz").exists()
-    summary = store.get_summary("old")
-    assert summary["has_payload"] is False
-    assert summary["metrics"]["net_pnl_quote"] == 12.5, "the parse is what we kept"
-
-
-def test_a_corrupt_v1_file_is_skipped_not_fatal(tmp_path):
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "good", _envelope())
-    (seed._dir / "bad.json").write_text("{not json", encoding="utf-8")
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    assert store.migrate() == 1
-    assert store.get_summary("good")["status"] == "completed"
 
 
 # ── the seam ──────────────────────────────────────────────────────────────────
@@ -412,117 +388,3 @@ def test_an_iso_timestamp_is_a_real_clock(store):
     assert store.get_summary("naive")["completed_at"] == pytest.approx(
         store.get_summary("iso")["completed_at"], abs=1
     )
-
-
-def test_migration_drops_a_v1_entry_whose_file_is_gone(tmp_path):
-    """An index row that can never be described is not a run, it is a ghost."""
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "real", _envelope())
-    seed._index_path.write_text(
-        json.dumps(
-            {
-                "real": {"server": "local", "config": ""},
-                "ghost": {"server": "local", "config": ""},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    assert store.get_summary("ghost")["status"] == "unknown"
-    store.migrate()
-
-    assert store.get_summary("ghost") is None
-    assert store.get_summary("real")["status"] == "completed"
-
-
-# ── the migration's crash window ──────────────────────────────────────────────
-
-
-class _Killed(RuntimeError):
-    """Stands in for the process dying mid-migration."""
-
-
-def _crash_on_unlink(monkeypatch, name: str, *, delete_first: bool):
-    """Turn the first ``unlink`` of ``name`` into a kill at that syscall.
-
-    ``delete_first=True`` is the honest model of the crash the ordering has to
-    survive: the legacy file is already gone when the process dies, so whatever
-    the index holds at that instant is all that is left of the run.
-    """
-    real = Path.unlink
-    armed = {"yes": True}
-
-    def unlink(self, *args, **kwargs):
-        if armed["yes"] and self.name == name:
-            armed["yes"] = False
-            if delete_first:
-                real(self, *args, **kwargs)
-            raise _Killed(name)
-        return real(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "unlink", unlink)
-
-
-def test_the_summary_is_on_disk_before_the_legacy_file_is_unlinked(
-    tmp_path, monkeypatch
-):
-    """The index write must come first, or the unlink is an unbacked promise."""
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "task-1", _envelope())
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    _crash_on_unlink(monkeypatch, "task-1.json", delete_first=False)
-    with pytest.raises(_Killed):
-        store.migrate()
-
-    on_disk = json.loads(store._index_path.read_text(encoding="utf-8"))
-    summary = on_disk["tasks"]["task-1"]
-    assert summary["status"] == "completed", "the derived summary outlives the unlink"
-    assert summary["metrics"]["net_pnl_quote"] == 12.5
-    # The migration is not finished, and the file it derives from is still
-    # there to retry off.
-    assert on_disk["migrated"] is False
-    assert (store._dir / "task-1.json").exists()
-
-
-def test_a_crash_just_after_the_unlink_leaves_no_metricless_row(tmp_path, monkeypatch):
-    """Kept branch: the payload survives the crash, so its metrics must too."""
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "task-1", _envelope())
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    _crash_on_unlink(monkeypatch, "task-1.json", delete_first=True)
-    with pytest.raises(_Killed):
-        store.migrate()
-
-    # Reboot: the next migration has no legacy file left to re-parse, so a row
-    # written *after* the unlink would be stuck at "unknown" forever -- the
-    # orphan rule cannot drop it either, because the payload is right there.
-    resumed = BacktestStore(data_dir=tmp_path / "backtests")
-    resumed.migrate()
-    assert (resumed._dir / "task-1.json.gz").exists()
-    summary = resumed.get_summary("task-1")
-    assert summary["status"] == "completed"
-    assert summary["metrics"]["net_pnl_quote"] == 12.5
-    assert resumed.migrated is True
-
-
-def test_a_crash_just_after_an_expired_payload_is_deleted_keeps_its_metrics(
-    tmp_path, monkeypatch
-):
-    """Past-cutoff branch: the parse is the only thing that was ever kept."""
-    seed = BacktestStore(data_dir=tmp_path / "backtests")
-    _write_v1(seed, "old", _envelope(completed_at=time.time() - 90 * 86400))
-
-    store = BacktestStore(data_dir=tmp_path / "backtests")
-    _crash_on_unlink(monkeypatch, "old.json", delete_first=True)
-    with pytest.raises(_Killed):
-        store.migrate()
-
-    resumed = BacktestStore(data_dir=tmp_path / "backtests")
-    resumed.migrate()
-    summary = resumed.get_summary("old")
-    assert summary is not None, "the run must not vanish with its payload"
-    assert summary["metrics"]["net_pnl_quote"] == 12.5
-    assert summary["has_payload"] is False

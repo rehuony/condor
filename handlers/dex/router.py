@@ -294,10 +294,6 @@ SIMPLE_ACTIONS: dict[str, Callable[[Update, Context], Awaitable[None]]] = {
     "swap_hist_filter_connector": handle_swap_hist_filter_connector,
     "swap_hist_filter_status": handle_swap_hist_filter_status,
     "swap_hist_clear": handle_swap_hist_clear,
-    # Legacy swap redirects
-    "swap_quote": handle_swap,
-    "swap_execute": handle_swap,
-    "swap_search": handle_swap_history,
     # Liquidity
     "liquidity": handle_liquidity,
     "lp_refresh": handle_lp_refresh,
@@ -307,8 +303,6 @@ SIMPLE_ACTIONS: dict[str, Callable[[Update, Context], Awaitable[None]]] = {
     "lp_hist_filter_connector": handle_lp_hist_filter_connector,
     "lp_hist_filter_status": handle_lp_hist_filter_status,
     "lp_hist_clear": handle_lp_hist_clear,
-    # Legacy liquidity redirects
-    "explore_pools": handle_lp_refresh,
     # Pool
     "pool_info": handle_pool_info,
     "pool_list": handle_pool_list,

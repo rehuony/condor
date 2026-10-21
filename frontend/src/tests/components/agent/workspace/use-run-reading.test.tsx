@@ -91,7 +91,7 @@ beforeEach(() => {
   getSessionActions.mockReset().mockResolvedValue({ actions: [] });
   getStrategySessionExecutors
     .mockReset()
-    .mockResolvedValue({ deployments: [], performance: null, pnl_series: null });
+    .mockResolvedValue({ deployments: [], performance: null, pnl_series: [], unavailable: "" });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -174,7 +174,7 @@ describe("useRunReading's unavailable reason (CORR-430)", () => {
     expect(reasons.at(-1)).toBe("unreachable");
   });
 
-  it('reads an older backend that omits it as ""', async () => {
+  it('keeps the empty reason when the current response is available', async () => {
     await mountReason();
     expect(reasons.at(-1)).toBe("");
   });

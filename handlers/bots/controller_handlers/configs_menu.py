@@ -589,8 +589,3 @@ async def handle_cfg_deploy(update: Update, context: Context) -> None:
 
     # Use existing deploy configure flow
     await show_deploy_configure(update, context)
-
-
-async def show_configs_list(update: Update, context: Context) -> None:
-    """Redirect to controller configs menu (backward compatibility)"""
-    await show_controller_configs_menu(update, context)

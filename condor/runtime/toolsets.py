@@ -17,9 +17,6 @@ from typing import Any
 
 from condor.acp.client import bot_process_marker
 from condor.paths import local_agents_root, stock_agents_root
-from mcp_servers.condor.profiles import RENAMED_TOOLS, canonical_tool_name
-
-__all__ = ["RENAMED_TOOLS", "canonical_tool_name"]
 
 log = logging.getLogger(__name__)
 
@@ -183,8 +180,7 @@ def allowlist_mutes(agent_slug: str | None) -> set[str]:
 
     An empty list means unrestricted, as it always has; so does an unknown slug.
     Names may be namespaced (``mcp__condor__delegate``), the form pydantic-ai
-    also accepts, and match on their last segment. A renamed tool's old name
-    (:data:`RENAMED_TOOLS`) allows the tool it now means.
+    also accepts, and match on their last segment.
     """
     if not agent_slug:
         return set()
@@ -193,7 +189,7 @@ def allowlist_mutes(agent_slug: str | None) -> set[str]:
     agent = AgentStore().get(agent_slug)
     if agent is None or not agent.tools:
         return set()
-    allowed = {canonical_tool_name(name).rsplit("__", 1)[-1] for name in agent.tools}
+    allowed = {str(name).rsplit("__", 1)[-1] for name in agent.tools}
     return _every_tool_name() - allowed
 
 

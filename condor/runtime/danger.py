@@ -120,10 +120,7 @@ DANGEROUS_AMM_ACTIONS = {"add_liquidity", "remove_liquidity", "create_pool"}
 # away, the wind-down waits) is worse than the failure mode of not prompting (an
 # agent exits the market early). Exposure-reducing calls are let through
 # elsewhere for the same reason — see check_dex_action's remove_liquidity note.
-#
-# The legacy `*_agent` spellings are accepted by the tool's own _resolve_action,
-# so the gate has to know both or `start_agent` walks straight past it.
-DANGEROUS_CONTROL_ACTIONS = {"start", "start_agent"}
+DANGEROUS_CONTROL_ACTIONS = {"start"}
 
 # There is no gate on `manage_gateway_config`. Its `networks` and `connectors`
 # are read-only over MCP: a network config carries `nodeURL`, the RPC every
@@ -153,20 +150,13 @@ MUTATING_BOT_ACTIONS = DANGEROUS_BOT_ACTIONS
 MUTATING_CLMM_ACTIONS = DANGEROUS_CLMM_ACTIONS
 MUTATING_AMM_ACTIONS = DANGEROUS_AMM_ACTIONS
 
-#: `control_agent`'s writes, including the brakes the gate lets through. The
-#: legacy `*_agent` spellings are accepted by the tool's own `_resolve_action`,
-#: so the log has to know both or a `stop_agent` goes unrecorded.
+#: `control_agent`'s writes, including the brakes the gate lets through.
 MUTATING_CONTROL_ACTIONS = {
     "start",
-    "start_agent",
     "stop",
-    "stop_agent",
     "pause",
-    "pause_agent",
     "resume",
-    "resume_agent",
     "shutdown",
-    "shutdown_agent",
     "set_state",
 }
 
@@ -183,7 +173,7 @@ READ_ONLY_LIQUIDITY_ACTIONS = {
     "positions_owned",
     "quote_liquidity",
 }
-READ_ONLY_CONTROL_ACTIONS = {"list", "list_agents", "get_state"}
+READ_ONLY_CONTROL_ACTIONS = {"list", "get_state"}
 #: `manage_controllers`' writes and reads. The tool's config half is outside the
 #: *gate* and stays there (a saved config touches no running bot); its code half
 #: is not, since SEC-713 (see ``raw_controller_code_refusal``). Either way a

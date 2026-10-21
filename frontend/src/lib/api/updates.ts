@@ -81,7 +81,7 @@ export interface Step {
   output_tail: string;
 }
 
-export type RunState = "running" | "restarting" | "succeeded" | "failed";
+export type RunState = "running" | "succeeded" | "failed";
 
 export interface Run {
   id: string;
@@ -100,7 +100,7 @@ export interface Run {
 
 /** True while the run has not been judged yet — the poll keeps going. */
 export function isLive(run: Run | null | undefined): boolean {
-  return run?.state === "running" || run?.state === "restarting";
+  return run?.state === "running";
 }
 
 export const UPDATES_STATUS_KEY = ["updates-status"] as const;

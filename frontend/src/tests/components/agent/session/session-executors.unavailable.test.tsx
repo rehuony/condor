@@ -121,15 +121,6 @@ describe("SessionExecutors with a withheld server", () => {
     expect(text()).toBe("No executors for this session.");
   });
 
-  it("treats an older backend that omits the field as available", async () => {
-    const { unavailable: _omit, ...older } = payload("");
-    void _omit;
-    getStrategySessionExecutors.mockResolvedValue(older);
-    await mount();
-
-    expect(container.querySelector("[data-session-unavailable]")).toBeNull();
-    expect(text()).toBe("No executors for this session.");
-  });
 });
 
 describe("unavailableLabel", () => {

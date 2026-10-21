@@ -87,6 +87,7 @@ const BRAIN: AgentBrain = {
       muted: false,
     },
   ],
+  controllers: [],
   strategies: [],
 };
 

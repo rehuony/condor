@@ -7,9 +7,8 @@
  * subprocess). A user reading that green dot waits for a reply from a process
  * that is not there.
  *
- * These pin the three states the backend can put a slot in: reaped, live, and
- * unknown — the last being a roster from a server older than `alive`, which
- * has to keep reading exactly as it did before.
+ * These pin live and detached slots, plus the local pending state while a
+ * new or resumed conversation waits for its subprocess.
  *
  * Needs a DOM, so this file overrides vitest's default `node` environment.
  *
@@ -34,7 +33,7 @@ let root: Root;
 
 function slot(info: Partial<ChatSlot["info"]>): ChatSlot {
   return {
-    info: { slot_id: "s1", agent_key: "claude_acp", ...info },
+    info: { alive: true, slot_id: "s1", agent_key: "claude_acp", ...info },
     messages: [],
   };
 }
@@ -98,13 +97,11 @@ describe("SessionTabs status marker", () => {
     expect(marker().getAttribute("aria-label")).toBe("Session live");
   });
 
-  it("keeps the green dot when the backend sends no `alive` at all", async () => {
-    // A server older than the roster's `alive` key listed only live slots, so
-    // an absent key is not a detached slot and must not be shown as one.
-    await render([slot({})]);
+  it("shows a pending local slot as answering until its subprocess starts", async () => {
+    await render([{ ...slot({ alive: false }), pending: true }]);
 
-    expect(liveDots()).toHaveLength(1);
-    expect(marker().getAttribute("aria-label")).toBe("Session live");
+    expect(liveDots()).toHaveLength(0);
+    expect(marker().getAttribute("aria-label")).toBe("Answering");
   });
 
   it("answers first: a detached slot that is streaming shows the spinner", async () => {

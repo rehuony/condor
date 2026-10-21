@@ -70,7 +70,7 @@ function message(text: string): ChatMessage {
 
 function slot(slotId: string, agentSlug: string, text: string): ChatSlot {
   return {
-    info: { slot_id: slotId, agent_key: "", agent_slug: agentSlug },
+    info: { alive: true, slot_id: slotId, agent_key: "", agent_slug: agentSlug },
     messages: [message(text)],
   };
 }

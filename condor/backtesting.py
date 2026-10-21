@@ -373,12 +373,9 @@ async def fetch_and_save(client, server: str, task_id: str) -> dict | None:
 async def _save(server: str, task_id: str, task: dict) -> None:
     """Persist the envelope. A store failure must never lose the backtest itself.
 
-    The write is ``json.dumps`` plus gzip level 6 over the whole envelope, which
-    the store's own ``migrate`` docstring measures at seconds per file (payloads
-    run to 137 MB). This coroutine shares its loop with the Telegram poller and
-    every dashboard request, so the compression goes to a thread — the same
-    treatment ``migrate_backtest_archive`` already gets in ``main.py``. The
-    store is resolved on the loop first so only the bound method crosses over.
+    Compression of large payloads runs in a thread so it cannot block Telegram
+    polling or dashboard requests. Resolve the store on the loop first, then
+    hand only the bound save method to the worker.
     """
     from condor.backtest_store import get_backtest_store
 

@@ -51,11 +51,8 @@ from utils import updater
 
 log = logging.getLogger(__name__)
 
-# Run states. ``RESTARTING`` is legacy: it is what a version of Condor that
-# exec'd itself left in the journal, and boot still judges such a run
-# (:func:`finalize_pending_run`). Nothing writes it any more.
+# Run states.
 RUNNING = "running"
-RESTARTING = "restarting"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
 
@@ -147,7 +144,7 @@ class Run:
 
     @property
     def live(self) -> bool:
-        return self.state in (RUNNING, RESTARTING)
+        return self.state == RUNNING
 
     def step(self, key: str) -> Step | None:
         for step in self.steps:
@@ -639,98 +636,42 @@ async def _update_condor(run: Run) -> bool:
 
 
 async def finalize_pending_run() -> Run | None:
-    """Judge a run this process did not start and cannot finish. At boot, once.
+    """Fail an interrupted update once at boot, preserving its completed steps.
 
-    A run is only ever executed by the process that started it, so a journal
-    still reading ``running`` or ``restarting`` when a *fresh* process reads it
-    describes a run nobody is driving any more. Boot is the only place that can
-    say so, and it must, or the panel polls a live-looking run for ever: there
-    is no Done button on a run still in flight, a reload restores it, and a
-    relaunch — the very thing the run asked for — restores it too.
-
-    Two shapes reach here.
-
-    ``restarting`` is the legacy crossing: updating *from* a Condor old enough
-    to exec itself. That version journals ``restarting`` and dies, and the
-    version it lands on is the only thing that can answer the one question it
-    left — did the process come back on the commit it aimed at? HEAD answers it,
-    so this is judged on the outcome and can succeed.
-
-    ``running`` is an update that was interrupted: the process was killed, it
-    crashed, or someone restarted it mid-run. There is no outcome to check —
-    the plan stopped somewhere unknown — so it is failed honestly, naming the
-    step it died on. Whatever landed before that is on disk and a new run
-    fast-forwards over it; nothing here touches the working tree.
+    A running journal belongs to the previous process. The current process
+    cannot finish it, even if its target commit is already on disk.
     """
     global _current
 
     run = read_journal()
     if run is None or not run.live:
         return None
-
-    was_restarting = run.state == RESTARTING
     run.ended = time.time()
 
-    # The step the process died on, whichever kind of interruption it was: the
-    # legacy path always ends on ``.restart``, an interrupted one on whatever
-    # was in flight. Both read better as "this is where it stopped" than as a
-    # spinner that never resolves.
-    step = None
-    for candidate in run.steps:
-        if candidate.key.endswith(".restart") or candidate.state == RUNNING:
-            step = candidate
+    step = next((s for s in reversed(run.steps) if s.state == RUNNING), None)
     if step is not None:
-        step.ended = time.time()
+        step.ended = run.ended
 
-    if not was_restarting:
-        run.state = FAILED
-        where = f" during {step.label.lower()}" if step is not None else ""
-        done = [s.label.lower() for s in run.steps if s.state == OK]
-        completed = (
-            f" What did finish: {', '.join(done)}." if done else " Nothing finished."
-        )
-        # The old wording described the state of the *disk* accurately and left
-        # out the part that matters now: the process reading this booted on the
-        # partial result. The fast-forward lands before dependencies are synced
-        # and before the dashboard is rebuilt, so this Condor may be running new
-        # code against a stale venv.
-        run.error = (
-            f"This update was interrupted{where} — Condor stopped before the run "
-            f"finished.{completed} Nothing was rolled back, so Condor is now "
-            "*running* that partial result: new code, possibly with dependencies "
-            "or a dashboard bundle that never caught up. Run the update again "
-            "before anything else."
-        )
-        if step is not None:
-            step.state = FAILED
-            step.output_tail = run.error
-        run.done.set()
-        _current = run
-        _write_journal(run)
-        log.warning("Update %s was interrupted; judged failed at boot", run.id)
-        return run
-
-    head = await updater.get_local_commit_full()
-    target = run.target_commit or ""
-
-    if target and head and head == target:
-        run.state = SUCCEEDED
-        if step is not None:
-            step.state = OK
-            step.output_tail = f"Came back on {head[:7]}."
-    else:
-        run.state = FAILED
-        run.error = (
-            f"Came back on {head[:7] or 'an unknown commit'}, "
-            f"expected {target[:7] or 'an unknown commit'}."
-        )
-        if step is not None:
-            step.state = FAILED
-            step.output_tail = run.error
-
+    run.state = FAILED
+    where = f" during {step.label.lower()}" if step is not None else ""
+    done = [s.label.lower() for s in run.steps if s.state == OK]
+    completed = (
+        f" What did finish: {', '.join(done)}." if done else " Nothing finished."
+    )
+    run.error = (
+        f"This update was interrupted{where} — Condor stopped before the run "
+        f"finished.{completed} Nothing was rolled back, so Condor is now "
+        "*running* that partial result: new code, possibly with dependencies "
+        "or a dashboard bundle that never caught up. Run the update again "
+        "before anything else."
+    )
+    if step is not None:
+        step.state = FAILED
+        step.output_tail = run.error
     run.done.set()
     _current = run
     _write_journal(run)
+    log.warning("Update %s was interrupted; judged failed at boot", run.id)
     return run
 
 

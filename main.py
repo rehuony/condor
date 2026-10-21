@@ -136,6 +136,12 @@ async def startup(application: TelegramApp) -> None:
     → this → ``start_polling``) so it can run uvicorn alongside the bot. Called
     explicitly from there, before the first update is served.
     """
+    # Recovering a current archive index can read large payloads. Finish it off
+    # the event loop before scheduled jobs or requests can initialize the store.
+    from condor.backtest_store import get_backtest_store
+
+    await asyncio.to_thread(get_backtest_store)
+
     await application.store.start(interval=10)
 
     # Timed work (scheduled routines, update checks, reflection) runs on our
@@ -147,17 +153,6 @@ async def startup(application: TelegramApp) -> None:
 
     # Whisper is loaded lazily on the first audio message. Text/image-only
     # installations do not need an idle speech model or a startup download.
-
-    # Bringing the backtest archive to its tiered v2 layout (FEAT-075) parses
-    # and re-compresses every saved payload, which is minutes on a store measured
-    # in gigabytes. Run it in the background so startup can continue.
-    # The archive degrades honestly while this runs (summaries report
-    # ``status: unknown`` and the dashboard says "indexing"), so the tab stays
-    # usable throughout, and the work is per-file and idempotent so a crash
-    # resumes rather than restarts.
-    from condor.backtest_store import migrate_backtest_archive
-
-    asyncio.get_event_loop().run_in_executor(None, migrate_backtest_archive)
 
     # Whatever this process pushes at users from here on. In local mode there is
     # no Telegram to push to, so it is the dashboard bell (FEAT-048) instead —
@@ -281,15 +276,7 @@ async def announce_boot(application: TelegramApp) -> None:
         version = f" ({branch} @ {commit})" if commit else ""
         boot_text = f"Condor is online and ready.{version}"
 
-        # Judged above, before the admin block, so the panel is correct even
-        # on an install with nobody to tell. What is left here is the
-        # telling: a Condor old enough to exec itself at the end of an
-        # update could not report its own outcome, because the process that
-        # would have is the one that died (FEAT-070).
-        if finished is not None and finished.state == "succeeded":
-            moved = f"{(finished.from_commit or '')[:7]} → {commit}"
-            boot_text = f"Update complete: {branch} {moved}. Condor is ready."
-        elif finished is not None:
+        if finished is not None:
             boot_text = f"Update failed: {finished.error} Condor is ready.{version}"
 
         # One call reaches Telegram *and* the dashboard bell (FEAT-048), so

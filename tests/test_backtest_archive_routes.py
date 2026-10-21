@@ -81,7 +81,6 @@ def _archive(user, server=None):
 def test_the_archive_spans_every_server_the_caller_can_reach(store):
     body = _archive(ALICE)
 
-    assert body["migrated"] is True
     assert {s["task_id"] for s in body["summaries"]} == {"task-local", "task-brigado"}
     assert {s["server"] for s in body["summaries"]} == {"local", "brigado_2"}
 

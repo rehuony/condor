@@ -102,6 +102,7 @@ const BRAIN: AgentBrain = {
   skill_proposal: null,
   memories: [],
   routines: [],
+  controllers: [],
   strategies: [],
 };
 
@@ -109,6 +110,7 @@ const BRAIN: AgentBrain = {
 function streamingSlot(text: string): ChatSlot {
   return {
     info: {
+      alive: true,
       slot_id: "s1",
       conversation_id: "c1",
       agent_key: "",

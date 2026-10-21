@@ -468,7 +468,7 @@ describe("reading and uploading styles", () => {
 });
 
 describe("the panel's Controllers tab", () => {
-  function brain(controllers?: ControllerCard[]): AgentBrain {
+  function brain(controllers: ControllerCard[]): AgentBrain {
     return {
       slug: "brigado",
       name: "Brigado",
@@ -485,7 +485,7 @@ describe("the panel's Controllers tab", () => {
       memories: [],
       routines: [],
       strategies: [],
-      ...(controllers ? { controllers } : {}),
+      controllers,
     };
   }
 
@@ -519,9 +519,4 @@ describe("the panel's Controllers tab", () => {
     expect(tabNames().some((n) => n?.startsWith("Controllers"))).toBe(false);
   });
 
-  it("hides the tab when the server predates the field", async () => {
-    getAgentBrain.mockResolvedValue(brain());
-    await renderPanel();
-    expect(tabNames().some((n) => n?.startsWith("Controllers"))).toBe(false);
-  });
 });

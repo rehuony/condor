@@ -1935,9 +1935,9 @@ def _tool_cards(slug: str, allowlist: list[str]) -> list[ToolCard]:
     It reads the two ``profiles.py`` leaf modules — never ``server.py``, whose
     import parses argv and builds a ``FastMCP`` singleton.
     """
-    from condor.runtime.toolsets import canonical_tool_name, seat_tools
+    from condor.runtime.toolsets import seat_tools
 
-    named = {canonical_tool_name(name) for name in allowlist}
+    named = {str(name).rsplit("__", 1)[-1] for name in allowlist}
     return [
         ToolCard(**row, allowlisted=row["name"] in named) for row in seat_tools(slug)
     ]

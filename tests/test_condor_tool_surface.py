@@ -220,29 +220,24 @@ def test_every_control_action_reaches_control_agent(action):
 
 
 @pytest.mark.parametrize(
-    "action,sibling",
+    "family,action",
     [
-        ("start_agent", "control_agent"),
-        ("list_agents", "control_agent"),
-        ("create_strategy", "manage_loops"),
-        ("agent_tracker", "trading_agent_journal_read"),
+        ("manage_agents", "get_agent"),
+        ("manage_agents", "create_agent"),
+        ("manage_loops", "create_strategy"),
+        ("control_agent", "start_agent"),
+        ("control_agent", "list_agents"),
     ],
 )
-def test_a_misrouted_action_names_the_sibling_tool(action, sibling):
-    """A funnel-era action gets the call that works, not a bare error."""
+def test_retired_prefixed_actions_are_rejected(family, action):
     from mcp_servers.condor.tools import trading_agent
 
-    result = trading_agent.manage_agents(action)
-    assert sibling in result["error"]
-
-
-def test_the_legacy_prefixed_names_still_resolve_in_their_own_family():
-    """Prompts in the wild say "create_agent"; the family that owns it answers."""
-    from mcp_servers.condor.tools import trading_agent
-
-    result = trading_agent.manage_agents("get_agent")
-    assert "belongs to" not in result.get("error", "")
-    assert "Unknown action" not in result.get("error", "")
+    fn = getattr(trading_agent, family)
+    result = asyncio.run(fn(action)) if family == "control_agent" else fn(action)
+    assert "Unknown action" in result["error"]
+    tools = asyncio.run(server.mcp.list_tools())
+    schema = next(tool.inputSchema for tool in tools if tool.name == family)
+    assert action not in schema["properties"]["action"]["enum"]
 
 
 def test_journal_read_tracker_section_replaces_agent_tracker(monkeypatch):
@@ -335,18 +330,17 @@ def test_the_agent_builder_skill_calls_only_registered_tools():
 
 
 def test_no_condor_skill_names_a_funnel_era_action_as_a_tool():
-    """FEAT-068 split ``manage_trading_agent`` into three tools; its action
-    vocabulary survives only as ``action=`` strings, never as callables.
+    """Internal operation names must not leak into model-facing instructions."""
+    from mcp_servers.condor.tools.trading_agent import (
+        _AGENT_ACTIONS,
+        _CONTROL_ACTIONS,
+        _STRATEGY_ACTIONS,
+    )
 
-    ``_ACTION_OWNER`` is that vocabulary, so the guard tracks the split itself
-    rather than a hand-copied deny-list that would rot the same way the skill
-    did. Bare mentions count too: prose saying "``delete_agent`` refuses while
-    the agent owns strategies" reads as a tool name even without parentheses.
-    """
-    from mcp_servers.condor.tools.trading_agent import _ACTION_OWNER
-
-    dead = set(_ACTION_OWNER) - _every_registered_tool()
-    assert dead, "the compatibility map named no dead actions — did it move?"
+    internal = set().union(
+        _AGENT_ACTIONS.values(), _CONTROL_ACTIONS.values(), _STRATEGY_ACTIONS.values()
+    )
+    dead = internal - _every_registered_tool()
 
     skills = _committed_condor_skills()
     assert skills, "found no committed condor skills — the guard would pass vacuously"

@@ -129,11 +129,12 @@ describe("ApprovalPrompt", () => {
     expect(container.querySelector('[data-testid="approval-detail"]')).toBeNull();
   });
 
-  it("renders an older backend's summary-only request without inventing a preview", () => {
-    render(request({ tool: undefined, input: undefined, deadline: undefined, origin: "" }));
+  it("keeps a call with unreadable arguments answerable without inventing them", () => {
+    render(request({ input: null, origin: "" }));
 
     expect(container.textContent).toContain("The agent wants to run:");
     expect(container.querySelector("pre")).toBeNull();
+    expect(container.textContent).toContain("1:30");
     expect(button("Allow")).toBeTruthy();
   });
 });

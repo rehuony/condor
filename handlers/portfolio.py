@@ -13,9 +13,8 @@ from condor.telegram.types import (
     InlineKeyboardMarkup,
     Update,
 )
-from handlers import is_gateway_network
+from handlers import clear_all_input_states, is_gateway_network
 from handlers.bots._shared import NO_ACCESSIBLE_SERVERS, resolve_accessible_server
-from handlers.config import clear_config_state
 from utils.auth import hummingbot_api_required, restricted
 from utils.telegram_formatters import (
     escape_markdown_v2,
@@ -202,7 +201,7 @@ async def portfolio_command(update: Update, context: Context) -> None:
     Progressive loading: Fetches all data in parallel and updates UI as each piece arrives.
     """
     # Clear any config state to prevent interference
-    clear_config_state(context)
+    clear_all_input_states(context)
 
     # Get the appropriate message object for replies
     message = update.message or (

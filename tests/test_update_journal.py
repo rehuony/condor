@@ -1,10 +1,7 @@
 """The durable record of an update, and how a restart is judged.
 
-The process that starts a Condor update is the process that dies, so no live
-transport can report the outcome — the interesting part happens in the gap. The
-journal is the contract instead: every step transition is one atomic write, and
-the run left at ``restarting`` is resolved at boot by asking HEAD whether it is
-the commit the update aimed at.
+Every step transition is written atomically. A running journal at boot means
+its process stopped before the update finished, so it is settled as failed.
 
 ``$CONDOR_DATA_DIR`` is already pointed at ``tmp_path`` by the suite's autouse
 fixture, so the journal these tests write is never the developer's own.
@@ -113,13 +110,13 @@ def test_a_junk_journal_reads_as_no_run():
 
 
 def test_a_journaled_run_round_trips():
-    run = _a_run(target_commit="0ed2a0f" * 5, state=run_module.RESTARTING)
+    run = _a_run(target_commit="0ed2a0f" * 5, state=run_module.RUNNING)
     run_module._write_journal(run)
 
     restored = run_module.read_journal()
     assert restored is not None
     assert restored.id == run.id
-    assert restored.state == run_module.RESTARTING
+    assert restored.state == run_module.RUNNING
     assert restored.target_commit == run.target_commit
     assert [s.key for s in restored.steps] == ["condor.fast-forward"]
     assert restored.live is True
@@ -130,7 +127,6 @@ def test_a_journaled_run_round_trips():
 # ---------------------------------------------------------------------------
 
 TARGET = "0ed2a0f1234567890abcdef1234567890abcdef1"
-OTHER = "73e5400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def _finalize_after(head: str, **run_kw):
@@ -141,34 +137,7 @@ def _finalize_after(head: str, **run_kw):
         return asyncio.run(run_module.finalize_pending_run())
 
 
-def test_coming_back_on_the_target_commit_is_a_success():
-    run = _finalize_after(
-        TARGET,
-        state=run_module.RESTARTING,
-        target_commit=TARGET,
-        steps=[run_module.Step("condor.restart", "Restarting Condor", state="running")],
-    )
-    assert run is not None
-    assert run.state == "succeeded"
-    assert run.steps[0].state == "ok"
-    assert _journal()["state"] == "succeeded"
-
-
-def test_coming_back_on_a_different_commit_is_a_failure():
-    """The restart happened; the new code did not. Say which sha came up."""
-    run = _finalize_after(
-        OTHER,
-        state=run_module.RESTARTING,
-        target_commit=TARGET,
-        steps=[run_module.Step("condor.restart", "Restarting Condor", state="running")],
-    )
-    assert run is not None
-    assert run.state == "failed"
-    assert "73e5400" in run.error and "0ed2a0f" in run.error
-    assert run.steps[0].state == "failed"
-
-
-def test_a_run_that_was_not_restarting_is_left_alone():
+def test_a_finished_run_is_left_alone():
     assert _finalize_after(TARGET, state=run_module.SUCCEEDED) is None
     assert _finalize_after(TARGET, state=run_module.FAILED) is None
 

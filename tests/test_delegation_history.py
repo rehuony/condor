@@ -2,8 +2,8 @@
 
 The live registry dies with the process; these tests cover what survives it:
 the record rebuilt from ``status.json``, the transcript rebuilt from
-``events.json``, the two pre-FEAT-051 shapes still readable in the agent
-directories, and the "the process died mid-task" reconciliation.
+``events.json``, recovery from an incomplete current record, and the
+"the process died mid-task" reconciliation.
 
 Every reader is scoped by owner (FEAT-051): ``user_id`` first, ``None`` only
 from an admin path.
@@ -30,7 +30,7 @@ from condor.agents.delegation_history import (
     read_history_events,
 )
 
-LEGACY_MD = """# Delegation scout-delegate-legacy01
+TRANSCRIPT_MD = """# Delegation scout-delegate-partial01
 
 - **Status:** done
 - **Agent:** scout
@@ -72,8 +72,8 @@ def _write_agent(root, slug):
     return d
 
 
-def _delegations_dir(root, slug):
-    d = root / slug / "delegations"
+def _record_dir(task_id):
+    d = paths.delegation_dir(USER, task_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -166,24 +166,25 @@ def test_transcript_survives_with_the_same_shape_the_wire_uses(tmp_path, monkeyp
     assert tool["output"] == "ok"
 
 
-def test_legacy_transcript_without_a_status_file_is_still_listed(tmp_path, monkeypatch):
+def test_current_transcript_survives_a_missing_status_file(tmp_path, monkeypatch):
     monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path))
     _write_agent(tmp_path, "scout")
-    (_delegations_dir(tmp_path, "scout") / "scout-delegate-legacy01.md").write_text(
-        LEGACY_MD
+    (_record_dir("scout-delegate-partial01") / "transcript.md").write_text(
+        TRANSCRIPT_MD
     )
 
-    record = read_history(None, "scout-delegate-legacy01")
+    record = read_history(None, "scout-delegate-partial01")
     assert record is not None
     assert record["status"] == "done"
     assert record["agent"] == "scout"
     assert record["task"] == "check the SOL pools"
     assert record["result"] == "three pools worth watching"
     assert record["tool_count"] == 7
-    # Nobody's, so nobody but an admin can see it -- the route relies on this.
+    # The transcript does not establish ownership; the reader must not guess it.
     assert record["user_id"] == 0
+    assert read_history(USER + 1, "scout-delegate-partial01") is None
 
-    events, markdown = read_history_events(None, "scout-delegate-legacy01")
+    events, markdown = read_history_events(None, "scout-delegate-partial01")
     assert events == []
     assert "🔧 **1. get_market_data**" in markdown
 
@@ -191,9 +192,7 @@ def test_legacy_transcript_without_a_status_file_is_still_listed(tmp_path, monke
 def test_a_task_the_process_died_on_reads_as_interrupted(tmp_path, monkeypatch):
     monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path))
     _write_agent(tmp_path, "scout")
-    (
-        _delegations_dir(tmp_path, "scout") / "scout-delegate-ghost01.status.json"
-    ).write_text(
+    (_record_dir("scout-delegate-ghost01") / "status.json").write_text(
         json.dumps(
             {
                 "state": "running",
@@ -257,16 +256,13 @@ def test_a_task_id_can_never_walk_out_of_the_delegations_directory(
 def _spy_on_transcript_reads(monkeypatch):
     """Collects every delegation transcript opened from here on.
 
-    Both shapes count: ``{task_id}/transcript.md`` and the flat, agent-keyed
-    ``delegations/{task_id}.md``. Reads still happen; this only watches.
+    Reads still happen; this only watches current record directories.
     """
     real = Path.read_text
     opened: list[Path] = []
 
     def spy(self, *args, **kwargs):
-        if self.name == DELEGATION_TRANSCRIPT_FILENAME or (
-            self.suffix == ".md" and self.parent.name == "delegations"
-        ):
+        if self.name == DELEGATION_TRANSCRIPT_FILENAME:
             opened.append(self)
         return real(self, *args, **kwargs)
 
@@ -301,30 +297,30 @@ def test_a_current_record_never_opens_its_transcript(tmp_path, monkeypatch):
     assert record["server_name"] == "local"
 
 
-def test_a_pre_feat035_record_still_backfills_from_its_transcript(
+def test_an_incomplete_status_record_backfills_from_its_transcript(
     tmp_path, monkeypatch
 ):
     """State and provenance only: the task and the result are in the markdown."""
     monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path))
     _write_agent(tmp_path, "scout")
-    directory = _delegations_dir(tmp_path, "scout")
-    (directory / "scout-delegate-legacy02.status.json").write_text(
+    directory = _record_dir("scout-delegate-partial02")
+    (directory / "status.json").write_text(
         json.dumps(
             {
                 "state": "done",
-                "task_id": "scout-delegate-legacy02",
+                "task_id": "scout-delegate-partial02",
                 "agent_slug": "scout",
                 "boot_id": "a-boot-that-is-not-ours",
                 "pid": 999,
             }
         )
     )
-    (directory / "scout-delegate-legacy02.md").write_text(LEGACY_MD)
+    (directory / "transcript.md").write_text(TRANSCRIPT_MD)
 
     opened = _spy_on_transcript_reads(monkeypatch)
-    record = read_history(None, "scout-delegate-legacy02")
+    record = read_history(None, "scout-delegate-partial02")
 
-    assert [p.name for p in opened] == ["scout-delegate-legacy02.md"]
+    assert [p.name for p in opened] == ["transcript.md"]
     assert record["task"] == "check the SOL pools"
     assert record["result"] == "three pools worth watching"
     assert record["tool_count"] == 7
@@ -363,27 +359,29 @@ def test_a_delegation_that_changed_is_never_served_from_stale_state(
     assert read_history(USER, dt.task_id) is None
 
 
-def test_a_rewritten_legacy_transcript_is_parsed_again(tmp_path, monkeypatch):
+def test_a_rewritten_transcript_is_parsed_again(tmp_path, monkeypatch):
     """The parse is memoized on (mtime, size); a changed file is a cache miss."""
     monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path))
     _write_agent(tmp_path, "scout")
-    md = _delegations_dir(tmp_path, "scout") / "scout-delegate-legacy01.md"
-    md.write_text(LEGACY_MD)
+    md = _record_dir("scout-delegate-partial01") / "transcript.md"
+    md.write_text(TRANSCRIPT_MD)
 
-    assert read_history(None, "scout-delegate-legacy01")["result"] == (
+    assert read_history(None, "scout-delegate-partial01")["result"] == (
         "three pools worth watching"
     )
 
     # A different length: the size changes.
-    md.write_text(LEGACY_MD.replace("three pools worth watching", "nothing to see"))
-    assert read_history(None, "scout-delegate-legacy01")["result"] == "nothing to see"
+    md.write_text(TRANSCRIPT_MD.replace("three pools worth watching", "nothing to see"))
+    assert read_history(None, "scout-delegate-partial01")["result"] == "nothing to see"
 
     # The same length: only the mtime changes.
-    md.write_text(LEGACY_MD.replace("three pools worth watching", "three ponds, damp"))
+    md.write_text(
+        TRANSCRIPT_MD.replace("three pools worth watching", "three ponds, damp")
+    )
     stamp = md.stat().st_mtime + 10
     os.utime(md, (stamp, stamp))
     assert (
-        read_history(None, "scout-delegate-legacy01")["result"] == "three ponds, damp"
+        read_history(None, "scout-delegate-partial01")["result"] == "three ponds, damp"
     )
 
 
@@ -392,10 +390,9 @@ def test_a_listing_hydrates_only_the_page_it_returns(tmp_path, monkeypatch):
     monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path))
     _write_agent(tmp_path, "scout")
 
-    legacy = _delegations_dir(tmp_path, "scout")
     for i in range(40):
-        md = legacy / f"scout-delegate-old{i:02d}.md"
-        md.write_text(LEGACY_MD)
+        md = _record_dir(f"scout-delegate-old{i:02d}") / "transcript.md"
+        md.write_text(TRANSCRIPT_MD)
         os.utime(md, (1_700_000_000 + i, 1_700_000_000 + i))
 
     for i in range(40):
@@ -416,7 +413,7 @@ def test_a_listing_hydrates_only_the_page_it_returns(tmp_path, monkeypatch):
                 }
             )
         )
-        (record_dir / "transcript.md").write_text(LEGACY_MD)
+        (record_dir / "transcript.md").write_text(TRANSCRIPT_MD)
 
     opened = _spy_on_transcript_reads(monkeypatch)
     rows = list_history(user_id=None, limit=5)
@@ -434,7 +431,20 @@ def test_the_no_server_placeholder_does_not_reach_the_wire(tmp_path, monkeypatch
     """``- **Server:** -`` means "no server", not a server literally named "-"."""
     monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path))
     _write_agent(tmp_path, "scout")
-    md = _delegations_dir(tmp_path, "scout") / "scout-delegate-legacy03.md"
-    md.write_text(LEGACY_MD.replace("- **Server:** local", "- **Server:** -"))
+    md = _record_dir("scout-delegate-partial03") / "transcript.md"
+    md.write_text(TRANSCRIPT_MD.replace("- **Server:** local", "- **Server:** -"))
 
-    assert read_history(None, "scout-delegate-legacy03")["server_name"] is None
+    assert read_history(None, "scout-delegate-partial03")["server_name"] is None
+
+
+def test_flat_agent_records_are_not_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONDOR_AGENTS_ROOT", str(tmp_path))
+    old_dir = _write_agent(tmp_path, "scout") / "delegations"
+    old_dir.mkdir()
+    (old_dir / "old.md").write_text(TRANSCRIPT_MD)
+    (old_dir / "old.status.json").write_text('{"state": "done"}')
+    (old_dir / "old.events.json").write_text('{"events": []}')
+
+    assert list_history(user_id=None) == []
+    assert read_history(None, "old") is None
+    assert read_history_events(None, "old") == ([], "")

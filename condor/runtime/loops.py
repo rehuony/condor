@@ -235,7 +235,7 @@ class LoopSupervisor:
                     log.exception("Could not restart %s", run.label)
                     report.errors.append(f"{run.label}: restart failed ({exc})")
 
-        report.delegations = self._reconcile_delegations(agents_root)
+        report.delegations = self._reconcile_delegations()
 
         # Forget state belonging to strategies that no longer exist.
         try:
@@ -256,14 +256,13 @@ class LoopSupervisor:
             )
         return report
 
-    def _reconcile_delegations(self, agents_root: Path | None = None) -> int:
+    def _reconcile_delegations(self) -> int:
         """Mark delegations the previous process was still running as interrupted.
 
         Never restarted: a delegation is one-shot, and re-running it could
         duplicate whatever side effects it already had.
 
-        Walks the user-keyed delegation store (FEAT-051) and the agent
-        directories that retain unowned legacy records, which can also be stale.
+        Walks each owner's delegation records.
         """
         from condor import paths
 
@@ -275,24 +274,6 @@ class LoopSupervisor:
             for record_dir in sorted(p for p in delegations.iterdir() if p.is_dir()):
                 count += self._interrupt_if_stale(record_dir, STATUS_FILENAME)
 
-        count += self._reconcile_legacy_delegations(agents_root)
-        return count
-
-    def _reconcile_legacy_delegations(self, agents_root: Path | None) -> int:
-        """The same sweep over ``agents/{slug}/delegations/{task}.status.json``."""
-        from condor.paths import local_agents_root
-
-        root = Path(agents_root) if agents_root is not None else local_agents_root()
-        if not root.is_dir():
-            return 0
-
-        count = 0
-        for agent_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-            delegations = agent_dir / "delegations"
-            if not delegations.is_dir():
-                continue
-            for path in sorted(delegations.glob("*.status.json")):
-                count += self._interrupt_if_stale(delegations, path.name)
         return count
 
     @staticmethod

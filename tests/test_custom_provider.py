@@ -1,8 +1,8 @@
 """Tests for custom OpenAI-compatible endpoints.
 
 Agent keys look like "custom@<endpoint>:<model-id>", where the endpoint names
-one of the user's saved records in condor/preferences.py. The unnamed
-"custom:<model-id>" form predates named endpoints and is still accepted.
+one of the user's saved records in condor/preferences.py. Execution requires
+a named endpoint and an explicit model id.
 """
 
 import asyncio
@@ -53,15 +53,13 @@ from handlers.agents.menu import (
 
 
 def test_custom_is_pydantic_ai_model():
-    assert is_pydantic_ai_model("custom:llama-3.3-70b")
-    assert is_pydantic_ai_model("custom:model:with:colons")
+    assert is_pydantic_ai_model("custom@venice:model:with:colons")
     assert is_pydantic_ai_model("custom@venice:llama-3.3-70b")
     assert not is_pydantic_ai_model("claude-code")
 
 
 def test_model_prefix_strips_endpoint_name():
     assert model_prefix("custom@venice:llama-3.3-70b") == "custom"
-    assert model_prefix("custom:llama-3.3-70b") == "custom"
     assert model_prefix("openrouter:anthropic/claude-sonnet-4.5") == "openrouter"
     assert model_prefix("claude-code") == ""
 
@@ -85,8 +83,9 @@ def test_parse_custom_agent_key_keeps_separators_in_model_id():
     )
 
 
-def test_parse_custom_agent_key_legacy_and_foreign():
-    assert parse_custom_agent_key("custom:llama-3.3-70b") == (None, "llama-3.3-70b")
+def test_parse_custom_agent_key_unnamed_and_foreign():
+    assert parse_custom_agent_key("custom:llama-3.3-70b") == (None, "")
+    assert parse_custom_agent_key("custom:") == (None, "")
     assert parse_custom_agent_key("openrouter:openai/gpt-4o") == (None, "")
     assert parse_custom_agent_key("claude-code") == (None, "")
 
@@ -137,11 +136,10 @@ def test_unique_provider_name_suffixes_collisions():
     assert unique_provider_name(user_data, "Other") == "Other"
 
 
-def test_find_provider_without_name_resolves_only_when_unambiguous():
+def test_find_provider_without_name_never_guesses_an_endpoint():
     user_data = {}
     save_custom_provider(user_data, "One", "https://a.example/v1")
-    # A legacy "custom:<model>" key has no endpoint name to match on
-    assert find_custom_provider(user_data, None)["name"] == "One"
+    assert find_custom_provider(user_data, None) is None
     save_custom_provider(user_data, "Two", "https://b.example/v1")
     assert find_custom_provider(user_data, None) is None
 
@@ -200,7 +198,7 @@ def test_resolve_custom_endpoint_strict_resolves_saved_endpoint():
 def test_resolve_custom_endpoint_env_fallback(monkeypatch):
     monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://env.example/v1")
     monkeypatch.setenv("CUSTOM_LLM_API_KEY", "sk-env")
-    assert resolve_custom_endpoint("custom:m", user_data={}) == (
+    assert resolve_custom_endpoint("custom@env:m", user_data={}) == (
         "https://env.example/v1",
         "sk-env",
     )
@@ -213,24 +211,6 @@ def test_active_agent_key_round_trips_through_preferences():
     set_active_agent_key(user_data, "custom@Venice:claude-sonnet-4-6")
     agent = user_data["user_preferences"]["agent"]
     assert agent["active_agent_key"] == "custom@Venice:claude-sonnet-4-6"
-
-
-def test_legacy_custom_llm_is_migrated():
-    # The first iteration stored one endpoint in raw user_data, outside the
-    # preference system. It should move across on first read, once.
-    user_data = {
-        "custom_llm": {"base_url": "https://api.venice.ai/api/v1", "api_key": "sk-old"}
-    }
-    providers = get_custom_providers(user_data)
-    assert providers == [
-        {
-            "name": "Venice",
-            "base_url": "https://api.venice.ai/api/v1",
-            "api_key": "sk-old",
-        }
-    ]
-    assert "custom_llm" not in user_data
-    assert get_custom_providers(user_data) == providers
 
 
 # -- URL normalization --
@@ -486,20 +466,23 @@ def test_forgetting_an_already_removed_endpoint_reports_it_gone():
 
 def test_build_model_requires_base_url(monkeypatch):
     monkeypatch.delenv("CUSTOM_LLM_BASE_URL", raising=False)
-    client = PydanticAIClient(model="custom:foo")
+    client = PydanticAIClient(model="custom@venice:foo")
     with pytest.raises(RuntimeError, match="base URL"):
         asyncio.run(client._build_model())
 
 
-def test_build_model_requires_model_id():
-    client = PydanticAIClient(model="custom:", base_url="https://api.example.com/v1")
-    with pytest.raises(RuntimeError, match="model id"):
+@pytest.mark.parametrize(
+    "key", ["custom:foo", "custom:", "custom@:foo", "custom@venice:"]
+)
+def test_build_model_requires_named_endpoint_and_model_id(key):
+    client = PydanticAIClient(model=key, base_url="https://api.example.com/v1")
+    with pytest.raises(RuntimeError, match="named endpoint and explicit model id"):
         asyncio.run(client._build_model())
 
 
 def test_build_model_uses_base_url_and_key():
     client = PydanticAIClient(
-        model="custom:llama-3.3-70b",
+        model="custom@venice:llama-3.3-70b",
         base_url="https://api.venice.ai/api/v1",
         api_key="sk-test",
     )
@@ -522,7 +505,7 @@ def test_build_model_strips_endpoint_name_from_model_id():
 def test_build_model_env_fallbacks(monkeypatch):
     monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://env.example/v1")
     monkeypatch.setenv("CUSTOM_LLM_API_KEY", "sk-env")
-    client = PydanticAIClient(model="custom:m")
+    client = PydanticAIClient(model="custom@env:m")
     model = asyncio.run(client._build_model())
     assert str(model.client.base_url).rstrip("/") == "https://env.example/v1"
     assert model.client.api_key == "sk-env"

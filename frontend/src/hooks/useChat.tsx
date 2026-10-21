@@ -82,8 +82,8 @@ export function useSessionOptions(enabled = true): SessionOptions {
   if (!data) return FALLBACK;
   return {
     agents: data.agents,
-    customProviders: data.custom_providers ?? [],
-    agentBindings: data.agent_bindings ?? [],
+    customProviders: data.custom_providers,
+    agentBindings: data.agent_bindings,
     defaultAgent: data.default_agent,
   };
 }

@@ -278,14 +278,14 @@ def vapid_key_path() -> Path:
 def update_run_path() -> Path:
     """The current or last ``/update`` run (``condor.updates.run``).
 
-    Durable because the process that starts a Condor update is the process that
-    dies: this file is how the machine that comes back up answers "did it work".
+    Preserves completed steps and lets the next process identify an update
+    interrupted before it finished.
     """
     return data_dir() / "update_run.json"
 
 
 def backtests_dir() -> Path:
-    """One JSON file per backtest, plus ``_index.json`` (``backtest_store.py``)."""
+    """One gzip payload per backtest, plus ``_index.json`` (``backtest_store.py``)."""
     return data_dir() / "backtests"
 
 
@@ -297,11 +297,6 @@ def run_history_dir() -> Path:
     (``run_history_store.py``).
     """
     return data_dir() / "run_history"
-
-
-def legacy_backtests_file() -> Path:
-    """The single-file backtest store ``BacktestStore`` folds in and deletes."""
-    return data_dir() / "backtests.json"
 
 
 def code_runs_dir() -> Path:

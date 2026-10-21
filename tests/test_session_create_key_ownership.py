@@ -188,15 +188,19 @@ def test_admin_can_mint_a_fresh_key_for_another_user(env):
     assert [(s.key, s.user_id) for s in created] == [(f"web:{VICTIM.id}:s1", VICTIM.id)]
 
 
-def test_legacy_key_is_checked_and_forwarded_in_canonical_form(env):
-    _, created, _ = env
+@pytest.mark.parametrize(
+    "key",
+    [f"web_{VICTIM.id}_s1", f"web_{ATTACKER.id}_s1", str(VICTIM.id), str(ATTACKER.id)],
+)
+def test_retired_keys_are_rejected_without_reaching_the_runtime(env, key):
+    _, created, torn = env
 
     with pytest.raises(HTTPException) as exc:
-        _post(f"web_{VICTIM.id}_s1", ATTACKER)
-    assert exc.value.status_code == 403
+        _post(key, ATTACKER)
 
-    _post(f"web_{ATTACKER.id}_s1", ATTACKER)
-    assert [s.key for s in created] == [f"web:{ATTACKER.id}:s1"]
+    assert exc.value.status_code == 400
+    assert created == []
+    assert torn == []
 
 
 def test_malformed_key_is_a_400_from_the_parser(env):

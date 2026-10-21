@@ -47,6 +47,20 @@ def test_noop_buttons_are_awaitable():
 
 
 @pytest.mark.parametrize(
+    "action", ["swap_quote", "swap_execute", "swap_search", "explore_pools"]
+)
+def test_retired_callbacks_are_not_dispatched(action):
+    assert (
+        asyncio.run(
+            dispatch_action(
+                None, None, action, router.SIMPLE_ACTIONS, router.PREFIX_ACTIONS
+            )
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
     "prefix, rest, expected",
     [
         ("pos_view_tf:", "3:4h", ("3", "4h")),

@@ -174,7 +174,7 @@ def test_a_base_url_override_never_carries_an_env_api_key(monkeypatch):
     monkeypatch.setattr("condor.preferences.load_user_data_for", lambda uid: {})
 
     _build("openrouter:x/y", user_id=555, base_url_override=EVIL)
-    _build("custom:m", user_id=555, base_url_override=EVIL)
+    _build("custom@env:m", user_id=555, base_url_override=EVIL)
     assert [(b["base_url"], b["api_key"]) for b in built] == [
         (EVIL, "not-needed"),
         (EVIL, "not-needed"),
@@ -184,7 +184,7 @@ def test_a_base_url_override_never_carries_an_env_api_key(monkeypatch):
     built.clear()
     monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://install.example/v1")
     _build("openrouter:x/y", user_id=555)
-    _build("custom:m", user_id=555)
+    _build("custom@env:m", user_id=555)
     assert [b["api_key"] for b in built] == ["sk-env", "ck-env"]
     assert EVIL not in [b["base_url"] for b in built]
 

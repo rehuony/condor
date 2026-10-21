@@ -57,6 +57,7 @@ const ROSTER = [
 function handoverSlot(messages: ChatMessage[]): ChatSlot {
   return {
     info: {
+      alive: true,
       slot_id: "s1",
       conversation_id: "s1",
       agent_key: "claude-code",

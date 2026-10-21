@@ -72,7 +72,7 @@ function slot(slotId: string, agentSlug: string): ChatSlot {
     toolCalls: [],
   };
   return {
-    info: { slot_id: slotId, agent_key: "", agent_slug: agentSlug },
+    info: { alive: true, slot_id: slotId, agent_key: "", agent_slug: agentSlug },
     messages: [message],
   };
 }

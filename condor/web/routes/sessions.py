@@ -37,9 +37,9 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 def _parse_key(raw: str) -> SessionKey:
-    """Parse a key from the URL, accepting the pre-facade forms too."""
+    """Parse the canonical session key from the URL."""
     try:
-        return SessionKey.legacy_from(raw)
+        return SessionKey.parse(raw)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Malformed session key: {raw}")
 

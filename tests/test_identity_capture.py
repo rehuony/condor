@@ -17,7 +17,7 @@ import time
 import pytest
 
 import config_manager as cm_module
-from config_manager import ABSENT_USERNAME, user_display_name
+from config_manager import user_display_name
 
 
 @pytest.fixture
@@ -62,11 +62,6 @@ def test_an_id_with_no_record_at_all_is_still_nameable():
     assert user_display_name(None, 6483117755) == "User 6483117755"
 
 
-def test_the_no_username_sentinel_never_renders_as_a_name():
-    """It meant 'Telegram told us nothing'; showing it as a handle is a lie."""
-    assert user_display_name({"user_id": 7, "username": ABSENT_USERNAME}) == "User 7"
-
-
 # ── registration ──
 
 
@@ -81,18 +76,10 @@ def test_registration_stores_the_names_telegram_supplied(cm):
 
 
 def test_an_absent_handle_is_an_absent_key_not_a_placeholder(cm):
-    """`register_pending(uid, None)` used to store `username: None`, and the
-    /start path used to store the literal string "No username"."""
+    """An omitted Telegram handle stays absent from the stored record."""
     cm.register_pending(7, None, first_name="Federico")
 
     assert "username" not in cm.get_user(7)
-
-
-def test_registration_refuses_to_store_the_sentinel_even_if_handed_it(cm):
-    cm.register_pending(7, ABSENT_USERNAME)
-
-    assert "username" not in cm.get_user(7)
-    assert user_display_name(cm.get_user(7)) == "User 7"
 
 
 def test_registering_someone_who_already_exists_changes_nothing(cm):
@@ -192,50 +179,3 @@ def test_a_name_change_is_captured_even_inside_the_quiet_window(cm):
 
     assert cm.touch_user_identity(7, first_name="Federico") is True
     assert cm.get_user(7)["first_name"] == "Federico"
-
-
-# ── the stored sentinel is healed on load ──
-
-
-def test_the_no_username_sentinel_is_dropped_when_the_config_is_read(cm):
-    cm._data["users"][7] = {
-        "user_id": 7,
-        "role": "pending",
-        "username": ABSENT_USERNAME,
-    }
-    cm._save_config()
-
-    reloaded = cm_module.ConfigManager(config_path=str(cm.config_path))
-
-    assert "username" not in reloaded.get_user(7)
-    assert user_display_name(reloaded.get_user(7)) == "User 7"
-
-
-def test_healing_the_sentinel_is_written_back_to_disk(cm):
-    """Otherwise it is re-read and re-dropped forever, and any surface reading
-    config.yml directly still sees it."""
-    cm._data["users"][7] = {
-        "user_id": 7,
-        "role": "pending",
-        "username": ABSENT_USERNAME,
-    }
-    cm._save_config()
-
-    cm_module.ConfigManager(config_path=str(cm.config_path))
-
-    assert ABSENT_USERNAME not in cm.config_path.read_text()
-
-
-def test_a_real_handle_survives_the_healing_pass(cm):
-    cm._data["users"][7] = {"user_id": 7, "role": "pending", "username": "real"}
-    cm._data["users"][8] = {
-        "user_id": 8,
-        "role": "pending",
-        "username": ABSENT_USERNAME,
-    }
-    cm._save_config()
-
-    reloaded = cm_module.ConfigManager(config_path=str(cm.config_path))
-
-    assert reloaded.get_user(7)["username"] == "real"
-    assert "username" not in reloaded.get_user(8)

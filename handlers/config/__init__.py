@@ -14,19 +14,6 @@ from condor.telegram.types import (
 logger = logging.getLogger(__name__)
 
 
-def clear_config_state(context: Context) -> None:
-    """
-    Clear all config-related state from user context.
-    Call this when starting other commands to prevent state pollution.
-
-    Note: This is now a convenience wrapper around clear_all_input_states()
-    for backwards compatibility.
-    """
-    from handlers import clear_all_input_states
-
-    clear_all_input_states(context)
-
-
 def _get_start_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
     """Build the start menu inline keyboard."""
     keyboard = [

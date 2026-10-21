@@ -50,7 +50,6 @@ export interface RunningInstance {
  * - `no_server` — its config names no server
  * - `no_access` — the caller may not use the server it names (SEC-334)
  * - `unreachable` — the server is offline or its credentials failed
- * Optional on the wire so an older backend reads as `""`.
  */
 export type StrategyUnavailable = "" | "no_server" | "no_access" | "unreachable";
 
@@ -73,13 +72,11 @@ export interface StrategySummary {
    * declared none (ARCH-324).
    *
    * The rollup above was computed *from* this server, so a reader that wants to
-   * fold the same records has to fetch them from here. Optional on the wire so
-   * an older backend reads as "no server" and the caller shows a dash rather
-   * than folding the wrong fleet.
+   * fold the same records has to fetch them from here.
    */
-  server_name?: string;
+  server_name: string;
   /** Why the figures above are zero when it is not "nothing traded". */
-  unavailable?: StrategyUnavailable;
+  unavailable: StrategyUnavailable;
   instances: RunningInstance[];
 }
 
@@ -125,14 +122,10 @@ interface FleetOwnerWire {
 
 /**
  * The deed index's wire shape (FEAT-106), snake-cased like everything else here.
- *
- * Absent from an older backend, and the mapper below reads that as an empty
- * index — which attributes nothing and judges nothing, exactly as the page
- * behaved before this field existed.
  */
 interface DeedIndexWire {
-  bots?: Record<string, { run_key: string; run_id?: string; at?: number }>;
-  since?: number;
+  bots: Record<string, { run_key: string; run_id: string; at: number }>;
+  since: number;
 }
 
 export interface AgentSummary {
@@ -381,11 +374,8 @@ export interface AgentBrain {
   memories: MemoryCard[];
   routines: RoutineCard[];
   strategies: StrategyCard[];
-  /**
-   * Controllers it owns or inherits from `_shared` (FEAT-127) — disk only.
-   * Optional because a server running code from before FEAT-127 leaves it out.
-   */
-  controllers?: ControllerCard[];
+  /** Controllers it owns or inherits from `_shared` (FEAT-127) — disk only. */
+  controllers: ControllerCard[];
 }
 
 /**
@@ -556,7 +546,7 @@ export interface StrategyDetail {
   experiments: ExperimentInfo[];
   instances: RunningInstance[];
   /** Same meaning as `StrategySummary.unavailable`. */
-  unavailable?: StrategyUnavailable;
+  unavailable: StrategyUnavailable;
 }
 
 export interface SnapshotSummary {
@@ -631,18 +621,18 @@ export const agentsApi = {
    * one makes no Hummingbot call at all, which is what lets `/bots` poll it.
    */
   getFleetMap: async (): Promise<FleetMap> => {
-    const data = await apiFetch<{ owners: FleetOwnerWire[]; deeds?: DeedIndexWire }>(
+    const data = await apiFetch<{ owners: FleetOwnerWire[]; deeds: DeedIndexWire }>(
       "/api/v1/agents/fleet-map",
     );
-    const owners: FleetOwner[] = (data.owners ?? []).map((owner) => ({
+    const owners: FleetOwner[] = data.owners.map((owner) => ({
       runKey: owner.run_key,
       agentSlug: owner.agent_slug,
       agentName: owner.agent_name,
       strategySlug: owner.strategy_slug,
       strategyName: owner.strategy_name,
       namespace: owner.namespace,
-      declaredBots: owner.declared_bots ?? [],
-      agentIds: owner.agent_ids ?? [],
+      declaredBots: owner.declared_bots,
+      agentIds: owner.agent_ids,
       live: owner.live
         ? {
             agentId: owner.live.agent_id,
@@ -652,14 +642,14 @@ export const agentsApi = {
             lastTickAt: owner.live.last_tick_at,
             frequencySec: owner.live.frequency_sec,
             lastAction: owner.live.last_action,
-            lastDid: owner.live.last_did ?? null,
+            lastDid: owner.live.last_did,
             lastError: owner.live.last_error,
           }
         : null,
     }));
-    const deeds: DeedIndex = { bots: {}, since: data.deeds?.since ?? 0 };
-    for (const [name, ref] of Object.entries(data.deeds?.bots ?? {})) {
-      deeds.bots[name] = { runKey: ref.run_key, runId: ref.run_id ?? "", at: ref.at ?? 0 };
+    const deeds: DeedIndex = { bots: {}, since: data.deeds.since };
+    for (const [name, ref] of Object.entries(data.deeds.bots)) {
+      deeds.bots[name] = { runKey: ref.run_key, runId: ref.run_id, at: ref.at };
     }
     return { owners, deeds };
   },
@@ -932,12 +922,12 @@ export const agentsApi = {
       // Realized-PnL curve sliced from the session's bot-ownership window. Derived
       // from the bots' own history, not from the journal's per-tick snapshots,
       // which only record what the aggregator believed at the time.
-      pnl_series?: { timestamp: string; pnl: number; volume: number }[];
+      pnl_series: { timestamp: string; pnl: number; volume: number }[];
       /** What this run put into the world (FEAT-100). Empty for a run that
        *  deployed nothing, and for a session whose server is unreachable. */
-      deployments?: DeploymentRow[];
+      deployments: DeploymentRow[];
       /** Why `executors` is empty when it is not "traded nothing" (CORR-706). */
-      unavailable?: StrategyUnavailable;
+      unavailable: StrategyUnavailable;
     }>(
       `/api/v1/agents/${encodeURIComponent(slug)}/strategies/${encodeURIComponent(sslug)}/sessions/${sessionNum}/executors`,
     ),

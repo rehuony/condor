@@ -95,6 +95,39 @@ def _switch(user: WebUser, **body):
     )
 
 
+@pytest.mark.parametrize("key", ["111", "web_111_main"])
+def test_session_routes_reject_pre_canonical_keys(env, monkeypatch, key):
+    def unexpected(*args, **kwargs):
+        pytest.fail("an invalid key reached the runtime")
+
+    monkeypatch.setattr(routes.runtime, "get_info", unexpected)
+    client = _client(OWNER)
+    for response in (
+        client.get(f"/sessions/{key}"),
+        client.delete(f"/sessions/{key}"),
+        client.post(f"/sessions/{key}/prompt", json={"text": "hello"}),
+        client.post(f"/sessions/{key}/action", json={"action": "new"}),
+        client.post("/sessions", json={"key": key, "agent_key": "claude-code"}),
+    ):
+        assert response.status_code == 400
+        assert response.json()["detail"] == f"Malformed session key: {key}"
+    assert env == []
+
+
+@pytest.mark.parametrize("key", [KEY, "tg:111", "mcp:111"])
+def test_session_routes_accept_canonical_keys(env, monkeypatch, key):
+    seen = []
+
+    async def get_info(parsed):
+        seen.append(str(parsed))
+        return _info(OWNER.id).model_copy(update={"key": key})
+
+    monkeypatch.setattr(routes.runtime, "get_info", get_info)
+    response = _client(OWNER).get(f"/sessions/{key}")
+    assert response.status_code == 200
+    assert seen == [key]
+
+
 def test_a_stranger_cannot_respawn_someone_elses_session(env):
     """The ownership gate runs before anything is torn down."""
     resp = _switch(STRANGER, server_name=OWNER_ONLY_SERVER)

@@ -79,8 +79,3 @@ def agent_strategy_from_agent_id(agent_id: str) -> tuple[str, str]:
         agent_slug, sslug = run_key.split(".", 1)
         return agent_slug, sslug
     return run_key, run_key
-
-
-# Backwards-compatible alias (callers may still import the old name).
-def slug_from_agent_id(agent_id: str) -> str:
-    return runkey_from_agent_id(agent_id)

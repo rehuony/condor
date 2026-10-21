@@ -58,6 +58,7 @@ function brain(slug: string, name: string): AgentBrain {
     skill_proposal: null,
     memories: [],
     routines: [],
+    controllers: [],
     strategies: [],
   };
 }

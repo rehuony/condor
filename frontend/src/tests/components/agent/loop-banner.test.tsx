@@ -63,6 +63,8 @@ function strategy(over: Partial<StrategySummary> = {}): StrategySummary {
     description: "",
     status: "idle",
     agent_id: "",
+    server_name: "",
+    unavailable: "",
     session_count: 0,
     experiment_count: 0,
     tick_count: 0,

@@ -520,7 +520,7 @@ def _resolve_experiment_file(agent_id: str):
     """For an experiment agent_id ("..._eN"), locate its saved snapshot.
 
     Experiments (dry_run / run_once) keep no journal — the tick is saved as a
-    flat ``dry_runs/experiment_N.md`` (legacy: ``experiments/``). Returns
+    flat ``dry_runs/experiment_N.md``. Returns
     (path | None, num | None); num is set even when the file isn't on disk yet
     so callers can distinguish "experiment in progress" from "not an experiment".
     """
@@ -715,62 +715,8 @@ async def _agent_state(
 # ---------------------------------------------------------------------------
 # Tool entry points — one per family (FEAT-068)
 #
-# Three tools replace the old manage_trading_agent funnel, each fronting the
-# family function that already existed underneath it. Actions are short and
-# unprefixed ("create", "start"); the legacy prefixed names ("create_agent",
-# "start_agent") still resolve inside their own family, and a name belonging to
-# a SIBLING family answers with the call that would have worked instead of a
-# bare "unknown action".
+# Actions are short public verbs mapped to the internal family operations.
 # ---------------------------------------------------------------------------
-
-# action name -> (owning tool, the call that handles it)
-_ACTION_OWNER: dict[str, tuple[str, str]] = {
-    "list_agent_definitions": ("manage_agents", 'manage_agents(action="list")'),
-    "create_agent": ("manage_agents", 'manage_agents(action="create", ...)'),
-    "get_agent": ("manage_agents", 'manage_agents(action="get", agent_slug=...)'),
-    "update_agent": ("manage_agents", 'manage_agents(action="update", agent_slug=...)'),
-    "delete_agent": ("manage_agents", 'manage_agents(action="delete", agent_slug=...)'),
-    "publish_agent": (
-        "manage_agents",
-        'manage_agents(action="publish", agent_slug=...)',
-    ),
-    "list_strategies": ("manage_loops", 'manage_loops(action="list")'),
-    "get_strategy": ("manage_loops", 'manage_loops(action="get", loop_id=...)'),
-    "create_strategy": (
-        "manage_loops",
-        'manage_loops(action="create", agent_slug=..., name=..., instructions=...)',
-    ),
-    "update_strategy": (
-        "manage_loops",
-        'manage_loops(action="update", loop_id=...)',
-    ),
-    "delete_strategy": (
-        "manage_loops",
-        'manage_loops(action="delete", loop_id=...)',
-    ),
-    "list_agents": ("control_agent", 'control_agent(action="list")'),
-    "start_agent": ("control_agent", 'control_agent(action="start", loop_id=...)'),
-    "stop_agent": ("control_agent", 'control_agent(action="stop", agent_id=...)'),
-    "pause_agent": ("control_agent", 'control_agent(action="pause", agent_id=...)'),
-    "resume_agent": ("control_agent", 'control_agent(action="resume", agent_id=...)'),
-    "shutdown_agent": (
-        "control_agent",
-        'control_agent(action="shutdown", agent_id=...)',
-    ),
-    "get_state": ("control_agent", 'control_agent(action="get_state", agent_id=...)'),
-    "set_state": (
-        "control_agent",
-        'control_agent(action="set_state", agent_id=..., key=...)',
-    ),
-    "agent_tracker": (
-        "trading_agent_journal_read",
-        'trading_agent_journal_read(agent_id=..., section="tracker")',
-    ),
-    "agent_journal": (
-        "trading_agent_journal_read",
-        'trading_agent_journal_read(agent_id=..., section="recent")',
-    ),
-}
 
 _AGENT_ACTIONS = {
     "list": "list_agent_definitions",
@@ -804,15 +750,9 @@ _CONTROL_ACTIONS = {
 def _resolve_action(
     tool: str, action: str, actions: dict[str, str]
 ) -> tuple[str | None, dict | None]:
-    """Map a tool's short action to its internal name, or explain the misroute."""
+    """Map a tool's short action to its internal name, or reject an unsupported action."""
     if action in actions:
         return actions[action], None
-    owner, call = _ACTION_OWNER.get(action, ("", ""))
-    if owner == tool:
-        # Legacy prefixed name for an action this tool already owns.
-        return action, None
-    if owner:
-        return None, {"error": f"'{action}' belongs to {owner} — call {call} instead."}
     return None, {
         "error": f"Unknown action '{action}'. {tool} actions: "
         + ", ".join(actions)

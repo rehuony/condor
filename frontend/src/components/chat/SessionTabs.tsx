@@ -324,9 +324,7 @@ function SessionTab({
   const agentShort = slot.info.label || slot.info.agent_slug || "Condor";
   const TabIcon = slot.info.agent_slug ? Bot : Zap;
   const busy = isStreaming || slot.pending;
-  // Strictly `=== false`: a roster from a backend older than `alive` omits the
-  // key entirely, and an unknown state has to keep reading as it did before.
-  const detached = slot.info.alive === false;
+  const detached = !slot.info.alive;
   const status = busy
     ? "Answering"
     : detached

@@ -302,14 +302,7 @@ def test_gateway_config_has_no_write_left_that_needs_a_human():
 
 
 def _control_actions() -> set[str]:
-    """Every action string ``control_agent`` actually accepts.
-
-    Read off the signature like every other gated tool (ARCH-568). The
-    ``Literal`` carries both the short spelling (``start``) and the legacy
-    internal one (``start_agent``), because ``_resolve_action`` still answers
-    to both and they reach the same lifecycle call — so the gate has to know
-    both, and the schema has to advertise both.
-    """
+    """Every current action in the registered control tool schema."""
     return _action_literals("control_agent")
 
 
@@ -331,15 +324,13 @@ def test_gated_control_actions_exist_on_the_tool():
     assert not unknown, f"control_agent has no such action(s): {sorted(unknown)}"
 
 
-def test_both_spellings_of_start_are_gated():
-    """``start`` and its legacy alias ``start_agent`` reach the same live loop."""
-    for action in ("start", "start_agent"):
-        assert is_dangerous_tool_call(
-            {
-                "tool": "mcp__condor__control_agent",
-                "input": {"action": action, "strategy_id": "acme.momentum"},
-            }
-        ), f"control_agent({action}) launches a live loop unconfirmed"
+def test_start_is_gated():
+    assert is_dangerous_tool_call(
+        {
+            "tool": "mcp__condor__control_agent",
+            "input": {"action": "start", "loop_id": "acme.momentum"},
+        }
+    )
 
 
 def test_control_reads_and_brakes_are_not_gated():
@@ -587,7 +578,7 @@ def test_a_bot_deploy_is_recorded_and_a_bot_status_is_not():
 
 def test_the_ungated_brakes_are_recorded():
     """The gate lets a stop through; the log must still say it happened."""
-    for action in ("stop", "pause", "resume", "shutdown", "stop_agent"):
+    for action in ("stop", "pause", "resume", "shutdown"):
         call = _call("control_agent", action=action, agent_id="a.b_1")
         assert not is_dangerous_tool_call(call), f"{action} became gated"
         assert is_mutating_tool_call(call), f"{action} went unrecorded"

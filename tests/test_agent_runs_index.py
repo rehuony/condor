@@ -241,26 +241,24 @@ def test_a_run_written_before_the_action_log_is_marked_as_having_none(tmp_path):
 # ── The layout ──
 
 
-def test_a_legacy_trading_sessions_layout_is_listed_once(tmp_path):
+def test_only_current_sessions_are_listed(tmp_path):
     strategy_dir = tmp_path / "brl_mm"
     _write_session(strategy_dir, 1, ticks=5, dirname="trading_sessions")
     _write_session(strategy_dir, 1, ticks=7, dirname="sessions")
     _write_session(strategy_dir, 2, ticks=2, dirname="trading_sessions")
 
     rows = list_runs(strategy_dir, "brigado.brl_mm")
-    assert sorted(r["run_id"] for r in rows) == ["s1", "s2"]
-    # The current directory name wins the collision.
+    assert sorted(r["run_id"] for r in rows) == ["s1"]
+    # Old directories are outside the current history layout.
     assert next(r for r in rows if r["run_id"] == "s1")["tick_count"] == 7
 
 
-def test_every_enumerator_agrees_on_a_dual_layout_strategy(tmp_path):
-    """Old sessions under ``trading_sessions/``, newer ones under ``sessions/``
-    (where the engine always writes): count, list, runs, ids and the next
-    number must all see the same two sessions (ARCH-663)."""
+def test_every_enumerator_agrees_on_current_sessions(tmp_path):
+    """Count, list, runs, ids and numbering all read the same current sessions."""
     strategy_dir = tmp_path / "brl_mm"
     _write_session(strategy_dir, 1, ticks=1, dirname="sessions")
-    _write_session(strategy_dir, 1, ticks=1, dirname="trading_sessions")
-    _write_session(strategy_dir, 2, ticks=1, dirname="trading_sessions")
+    _write_session(strategy_dir, 2, ticks=1, dirname="sessions")
+    _write_session(strategy_dir, 99, ticks=1, dirname="trading_sessions")
 
     sessions = sessions_index.list_sessions(strategy_dir)
     runs = list_runs(strategy_dir, "brigado.brl_mm")
@@ -272,7 +270,7 @@ def test_every_enumerator_agrees_on_a_dual_layout_strategy(tmp_path):
     assert sessions_index.count_sessions(strategy_dir) == 2
     assert len(sessions) == len(runs) == len(session_ids) == 2
     assert sorted(s["number"] for s in sessions) == [1, 2]
-    # The next run must not reuse the legacy session_2's number (and agent_id).
+    # Numbering follows current sessions, including gaps and ignored old paths.
     assert next_session_number(strategy_dir) == 3
 
 

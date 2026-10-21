@@ -5,18 +5,16 @@ import type { PermissionRequest } from "@/hooks/useChatSocket";
 import { formatToolName } from "@/lib/formatters";
 
 /**
- * Whole seconds until `deadline`, ticking once a second; null when the
- * backend did not say. Stops ticking at zero — nothing changes after that.
+ * Whole seconds until `deadline`, ticking once a second until zero.
  */
-function useSecondsLeft(deadline?: number): number | null {
+function useSecondsLeft(deadline: number): number {
   const [now, setNow] = useState(() => Date.now() / 1000);
-  const running = deadline !== undefined && deadline > now;
+  const running = deadline > now;
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(timer);
   }, [running]);
-  if (deadline === undefined) return null;
   return Math.max(0, Math.ceil(deadline - now));
 }
 
@@ -76,7 +74,7 @@ export function ApprovalPrompt({
         <p className="min-w-0 flex-1 text-sm font-semibold text-[var(--color-text)]">
           {expired ? "Approval timed out" : "Paused — waiting for your approval"}
         </p>
-        {secondsLeft !== null && !expired && (
+        {!expired && (
           <span
             className="shrink-0 font-mono text-xs tabular-nums text-[var(--color-text-muted)]"
             title="Denied automatically when this runs out"

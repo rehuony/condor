@@ -279,17 +279,6 @@ class StaleFork:
         return not self.forked_from
 
 
-def _legacy_digest(path: Path) -> str:
-    """What :func:`content_digest` returned before newlines were normalized.
-
-    A stamp written from a CRLF working tree holds the raw-bytes hash, and after
-    normalization it would compare as changed for a reason that has nothing to
-    do with upstream. Checking the legacy form as well keeps those stamps
-    meaningful instead of reporting every one of them stale once.
-    """
-    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()[:12]}"
-
-
 def stale_forks(agent_slug: str | None) -> list[StaleFork]:
     """Forked items of one agent whose stock counterpart has since moved.
 
@@ -354,7 +343,7 @@ def _compare_layer(
 
         now = content_digest(counterpart)
         if forked_from:
-            if now == forked_from or _legacy_digest(counterpart) == forked_from:
+            if now == forked_from:
                 continue
             out.append(StaleFork(path, shown, forked_from, now, owner))
             continue

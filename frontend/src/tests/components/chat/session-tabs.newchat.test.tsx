@@ -27,7 +27,7 @@ let root: Root;
 
 function slot(info: Partial<ChatSlot["info"]>): ChatSlot {
   return {
-    info: { slot_id: "s1", agent_key: "claude_acp", ...info },
+    info: { alive: true, slot_id: "s1", agent_key: "claude_acp", ...info },
     messages: [],
   };
 }

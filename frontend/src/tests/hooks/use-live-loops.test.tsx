@@ -188,6 +188,8 @@ describe("loopStats", () => {
           description: "",
           status: "running",
           agent_id: "brigado.brl_mm",
+          server_name: "",
+          unavailable: "",
           session_count: 3,
           experiment_count: 1,
           tick_count: 40,

@@ -153,7 +153,6 @@ def _mutate(user_data: Dict, section: str) -> Iterator[Any]:
 # ============================================
 
 USER_PREFERENCES_KEY = "user_preferences"
-_MIGRATION_DONE_KEY = "_prefs_migration_done"
 
 # Marks a ``user_data`` built *for* one server — a routine or agent run launched
 # against it — rather than a chat's own preferences. ``get_effective_server``
@@ -472,87 +471,10 @@ def _ensure_preferences(user_data: Dict) -> UserPreferences:
     return prefs
 
 
-def _migrate_legacy_data(user_data: Dict) -> None:
-    """Migrate data from old format to new unified preferences
-
-    This handles backward compatibility with existing user data that may have:
-    - trading_context: old CLOB/DEX trading context
-    - portfolio_config: old portfolio settings
-    """
-    # Every accessor comes through here, so this is where hydration from
-    # config.yml belongs: bolted onto individual getters it reached only two of
-    # them, and the rest returned defaults on a cold pickle. Its own
-    # _prefs_hydrated guard keeps it one-shot.
+def _initialize_preferences(user_data: Dict) -> None:
+    """Hydrate saved preferences and ensure every getter has default sections."""
     _load_from_cm(user_data)
-
-    # Always guarantee the preferences structure exists (cheap fast path),
-    # even when migration already ran — e.g. after clear_preferences().
-    prefs = _ensure_preferences(user_data)
-
-    # Skip migration work once it has already run for this user
-    if user_data.get(_MIGRATION_DONE_KEY):
-        return
-
-    migrated = False
-
-    # Migrate old trading_context
-    if "trading_context" in user_data:
-        old_context = user_data["trading_context"]
-
-        # Migrate account
-        if "account" in old_context and old_context["account"]:
-            prefs["clob"]["account"] = old_context["account"]
-            migrated = True
-
-        # Migrate last_clob
-        if "last_clob" in old_context and old_context["last_clob"]:
-            prefs["clob"]["last_order"].update(old_context["last_clob"])
-            migrated = True
-
-        # Migrate last_dex_swap
-        if "last_dex_swap" in old_context and old_context["last_dex_swap"]:
-            prefs["dex"]["last_swap"].update(old_context["last_dex_swap"])
-            migrated = True
-
-        # Migrate last_dex_pool
-        if "last_dex_pool" in old_context and old_context["last_dex_pool"]:
-            prefs["dex"]["last_pool"].update(old_context["last_dex_pool"])
-            migrated = True
-
-        # Remove old key after migration
-        del user_data["trading_context"]
-        logger.info("Migrated trading_context to user_preferences")
-
-    # Migrate old portfolio_config
-    if "portfolio_config" in user_data:
-        old_config = user_data["portfolio_config"]
-
-        if "days" in old_config:
-            prefs["portfolio"]["days"] = old_config["days"]
-            migrated = True
-
-        if "interval" in old_config:
-            prefs["portfolio"]["interval"] = old_config["interval"]
-            migrated = True
-
-        # Remove old key after migration
-        del user_data["portfolio_config"]
-        logger.info("Migrated portfolio_config to user_preferences")
-
-    # Migrate executor_deployed_pairs from raw user_data key
-    if "executor_deployed_pairs" in user_data:
-        old_pairs = user_data["executor_deployed_pairs"]
-        if isinstance(old_pairs, list) and old_pairs:
-            prefs["executors"]["deployed_pairs"] = old_pairs
-            migrated = True
-        del user_data["executor_deployed_pairs"]
-        logger.info("Migrated executor_deployed_pairs to user_preferences.executors")
-
-    if migrated:
-        logger.info("Legacy data migration completed")
-
-    # Mark migration as done so subsequent calls are a no-op
-    user_data[_MIGRATION_DONE_KEY] = True
+    _ensure_preferences(user_data)
 
 
 # ============================================
@@ -569,7 +491,7 @@ def get_preferences(user_data: Dict) -> UserPreferences:
     Returns:
         Complete user preferences dictionary
     """
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     return deepcopy(user_data[USER_PREFERENCES_KEY])
 
 
@@ -579,7 +501,7 @@ def get_portfolio_prefs(user_data: Dict) -> PortfolioPrefs:
     Returns:
         Portfolio preferences with days and interval
     """
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     prefs = user_data[USER_PREFERENCES_KEY]
     return {
         "days": prefs["portfolio"].get("days", DEFAULT_PORTFOLIO_DAYS),
@@ -593,7 +515,7 @@ def get_clob_prefs(user_data: Dict) -> CLOBPrefs:
     Returns:
         CLOB preferences with account, defaults, and last order params
     """
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     return deepcopy(user_data[USER_PREFERENCES_KEY]["clob"])
 
 
@@ -603,7 +525,7 @@ def get_dex_prefs(user_data: Dict) -> DEXPrefs:
     Returns:
         DEX preferences with network, connector, slippage, and last params
     """
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     return deepcopy(user_data[USER_PREFERENCES_KEY]["dex"])
 
 
@@ -613,7 +535,7 @@ def get_general_prefs(user_data: Dict) -> GeneralPrefs:
     Returns:
         General preferences with active_server
     """
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     return deepcopy(user_data[USER_PREFERENCES_KEY]["general"])
 
 
@@ -806,7 +728,7 @@ def get_gateway_prefs(user_data: Dict) -> GatewayPrefs:
     Returns:
         Gateway preferences with wallet_networks
     """
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     prefs = user_data[USER_PREFERENCES_KEY]
     return deepcopy(prefs.get("gateway", {"wallet_networks": {}}))
 
@@ -931,7 +853,7 @@ def get_unified_trade_prefs(user_data: Dict) -> UnifiedTradePrefs:
     Returns:
         Unified trade preferences with last_connector_type and last_connector_name
     """
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     prefs = user_data[USER_PREFERENCES_KEY]
     return deepcopy(
         prefs.get(
@@ -983,7 +905,7 @@ def set_last_trade_connector(
 
 def get_executor_prefs(user_data: Dict) -> ExecutorPrefs:
     """Get executor preferences"""
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     return deepcopy(user_data[USER_PREFERENCES_KEY]["executors"])
 
 
@@ -1044,7 +966,7 @@ def set_executor_last_config(
 
 def get_agent_prefs(user_data: Dict) -> "AgentPrefs":
     """Get agent preferences"""
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     _refresh_active_agent_key(user_data)
     return deepcopy(
         user_data[USER_PREFERENCES_KEY].get(
@@ -1130,40 +1052,29 @@ def build_custom_agent_key(provider_name: str, model_id: str) -> str:
 def parse_custom_agent_key(agent_key: str) -> tuple[Optional[str], str]:
     """Split a custom agent key into ``(provider_name, model_id)``.
 
-    Returns ``(None, model_id)`` for the legacy ``custom:<model-id>`` form,
-    which predates named endpoints and resolves against the first saved
-    provider (or the ``CUSTOM_LLM_*`` env vars). Returns ``(None, "")`` for
-    keys that aren't custom-provider keys at all.
+    Returns ``(None, "")`` for unnamed keys and picker sentinels.
     """
     prefix, _, model_id = agent_key.partition(":")
     head, _, provider = prefix.partition("@")
-    if head != CUSTOM_KEY_PREFIX:
+    if head != CUSTOM_KEY_PREFIX or not provider:
         return None, ""
-    return (provider or None), model_id
+    return provider, model_id
 
 
 def get_custom_providers(user_data: Dict) -> List[CustomProviderPrefs]:
     """All saved OpenAI-compatible endpoints for this user."""
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     prefs = _ensure_preferences(user_data)
-    _migrate_legacy_custom_llm(user_data, prefs)
     return deepcopy(prefs.get("agent", {}).get("custom_providers", []) or [])
 
 
 def find_custom_provider(
     user_data: Dict, name: Optional[str]
 ) -> Optional[CustomProviderPrefs]:
-    """Look up one endpoint by nickname.
-
-    With ``name=None`` (a legacy ``custom:<model>`` key) falls back to the only
-    saved endpoint, so users who configured one before named endpoints existed
-    keep working without reconfiguring.
-    """
-    providers = get_custom_providers(user_data)
-    if not providers:
+    """Look up one endpoint by its explicit nickname."""
+    if not name:
         return None
-    if name is None:
-        return providers[0] if len(providers) == 1 else None
+    providers = get_custom_providers(user_data)
     target = sanitize_provider_name(name)
     for provider in providers:
         if sanitize_provider_name(provider.get("name", "")) == target:
@@ -1319,39 +1230,6 @@ def set_active_agent_key(user_data: Dict, agent_key: str) -> None:
         agent["active_agent_key"] = agent_key
 
 
-def _migrate_legacy_custom_llm(user_data: Dict, prefs: Dict) -> None:
-    """Fold the old single-slot ``user_data["custom_llm"]`` into the list.
-
-    The first iteration of custom-endpoint support stored one endpoint in raw
-    user_data, outside the preference system (and so invisible to the web
-    dashboard). Move it across once, then drop the legacy key.
-    """
-    legacy = user_data.get("custom_llm")
-    if not isinstance(legacy, dict) or not legacy.get("base_url"):
-        user_data.pop("custom_llm", None)
-        return
-
-    agent = prefs.setdefault("agent", {})
-    providers: List[CustomProviderPrefs] = agent.setdefault("custom_providers", [])
-    base_url = legacy["base_url"]
-    if not any(p.get("base_url") == base_url for p in providers):
-        name = sanitize_provider_name(suggest_provider_name(base_url))
-        taken = {sanitize_provider_name(p.get("name", "")) for p in providers}
-        while name in taken:
-            name = f"{name}-2"
-        with _mutate(user_data, "agent"):
-            providers.append(
-                {
-                    "name": name,
-                    "base_url": base_url,
-                    "api_key": legacy.get("api_key", ""),
-                }
-            )
-        logger.info("Migrated legacy custom_llm endpoint %s → '%s'", base_url, name)
-
-    user_data.pop("custom_llm", None)
-
-
 def suggest_provider_name(base_url: str) -> str:
     """Derive a readable nickname from an endpoint URL.
 
@@ -1403,7 +1281,7 @@ def load_user_data_for(user_id: int) -> Dict:
 
 def get_voice_prefs(user_data: Dict) -> "VoicePrefs":
     """Get voice preferences"""
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     return deepcopy(
         user_data[USER_PREFERENCES_KEY].get(
             "voice",
@@ -1423,7 +1301,7 @@ def get_voice_prefs(user_data: Dict) -> "VoicePrefs":
 
 def get_notes(user_data: Dict) -> Dict[str, str]:
     """Get all notes (key-value pairs stored by the AI agent)."""
-    _migrate_legacy_data(user_data)
+    _initialize_preferences(user_data)
     return deepcopy(user_data[USER_PREFERENCES_KEY].get("notes", {}))
 
 
@@ -1455,7 +1333,6 @@ def clear_preferences(user_data: Dict) -> None:
     _clear_sections_in_cm(user_data)
     if USER_PREFERENCES_KEY in user_data:
         del user_data[USER_PREFERENCES_KEY]
-    # Reset bookkeeping flags so migration/hydration rebuild consistently
-    user_data.pop(_MIGRATION_DONE_KEY, None)
+    # The next access must hydrate the reset preferences.
     user_data.pop("_prefs_hydrated", None)
     logger.info("Cleared all user preferences")

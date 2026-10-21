@@ -53,6 +53,8 @@ function strategy(status: string): StrategySummary {
     description: "",
     status,
     agent_id: "a1",
+    server_name: "",
+    unavailable: "",
     session_count: 1,
     experiment_count: 0,
     tick_count: 0,

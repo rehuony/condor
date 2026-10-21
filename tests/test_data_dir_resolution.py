@@ -42,7 +42,6 @@ def test_the_default_is_the_repos_data_directory(unset_override):
     assert paths.notifications_path() == REPO / "data" / "notifications.json"
     assert paths.routine_hooks_path() == REPO / "data" / "routine_hooks.json"
     assert paths.backtests_dir() == REPO / "data" / "backtests"
-    assert paths.legacy_backtests_file() == REPO / "data" / "backtests.json"
     assert paths.code_runs_dir() == REPO / "data" / "code_runs"
 
 

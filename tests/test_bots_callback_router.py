@@ -1,10 +1,4 @@
-"""The bots callback router is a dispatch table, and it routes what it used to.
-
-ARCH-249 replaced a 130-branch ``elif main_action == ...`` chain with
-``SIMPLE_ACTIONS`` + ``PARAMETERIZED_ACTIONS``. That is only a refactor if every
-callback string still reaches the same handler with the same parsed arguments,
-so the mapping the chain had is frozen below and checked against the live tables.
-"""
+"""Current bots callbacks dispatch with the expected arguments."""
 
 import asyncio
 from types import SimpleNamespace
@@ -18,17 +12,12 @@ from handlers.bots import (
     bots_callback_handler,
 )
 
-# Every action the if/elif chain handled before ARCH-249, mapped to the handler
-# it dispatched and the parameters it parsed. Frozen as a subset check: a new
-# wizard may add actions without touching this table, but losing or rewiring one
-# of these is a regression.
-PRE_REFACTOR_ROUTES: dict[str, tuple[str | None, tuple[str, ...]]] = {
+# Current routes and their argument parsers.
+EXPECTED_ROUTES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "main_menu": ("show_bots_menu", ()),
     "refresh": ("handle_refresh", ()),
     "close": ("handle_close", ()),
     "controller_configs": ("show_controller_configs_menu", ()),
-    "configs_page": ("handle_configs_page", ("_as_int",)),
-    "list_configs": ("show_configs_list", ()),
     "cfg_select_type": ("show_type_selector", ()),
     "cfg_type": ("show_configs_by_type", ("_as_text",)),
     "cfg_toggle": ("handle_cfg_toggle", ("_as_text",)),
@@ -92,7 +81,6 @@ PRE_REFACTOR_ROUTES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "gs_side": ("handle_gs_wizard_side", ("_as_text",)),
     "gs_leverage": ("handle_gs_wizard_leverage", ("_as_int",)),
     "gs_amount": ("handle_gs_wizard_amount", ("_as_float",)),
-    "gs_accept_prices": ("handle_gs_accept_prices", ()),
     "gs_back_to_prices": ("handle_gs_back_to_prices", ()),
     "gs_back_to_connector": ("handle_gs_back_to_connector", ()),
     "gs_back_to_pair": ("handle_gs_back_to_pair", ()),
@@ -208,7 +196,7 @@ def fire(callback_data: str) -> list[str]:
     return replies
 
 
-def test_the_chain_that_was_replaced_is_still_fully_routed():
+def test_current_actions_route_to_expected_handlers():
     live: dict[str, tuple[str | None, tuple[str, ...]]] = {
         action: (None if handler is None else handler.__name__, ())
         for action, handler in SIMPLE_ACTIONS.items()
@@ -220,8 +208,7 @@ def test_the_chain_that_was_replaced_is_still_fully_routed():
         }
     )
 
-    assert len(PRE_REFACTOR_ROUTES) == 131
-    for action, route in PRE_REFACTOR_ROUTES.items():
+    for action, route in EXPECTED_ROUTES.items():
         assert action in live, f"{action} no longer routes anywhere"
         assert live[action] == route, f"{action} changed handler or parameters"
 
@@ -319,5 +306,9 @@ def test_a_malformed_number_gets_the_unknown_action_reply():
     assert replies == ["Unknown action: cfg_page:abc"]
 
 
-def test_an_unknown_action_says_so():
-    assert fire("bots:not_a_real_action") == ["Unknown action: not_a_real_action"]
+@pytest.mark.parametrize(
+    "action",
+    ["not_a_real_action", "configs_page:1", "list_configs", "gs_accept_prices"],
+)
+def test_an_unknown_or_retired_action_says_so(action):
+    assert fire(f"bots:{action}") == [f"Unknown action: {action}"]

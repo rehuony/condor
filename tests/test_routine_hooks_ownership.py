@@ -1,13 +1,8 @@
-"""Tests for SEC-152: routine hooks are owned, and only their owner's runs fire them.
+"""Routine hooks are isolated by owner and enforce recipient permissions.
 
-Hooks used to be one global config per routine name: any approved user could
-PUT one, read anyone else's, and — because dispatch keyed only on the routine
-name — receive the full interactive report (portfolio value, PnL, positions)
-of every run of that routine by anyone, forever. These tests pin the three
-halves of the fix: the REST endpoints are per-owner, dispatch fires only the
-run owner's hooks, and no hook can deliver to a chat its owner does not
-control (checked again at dispatch, so a file written by an older build is
-defused too).
+The REST endpoints are per-owner, dispatch fires only the run owner's hooks,
+and recipients are checked again at dispatch to cover permission changes and
+hand-edited files.
 """
 
 import asyncio
@@ -47,8 +42,6 @@ def hooks_file(monkeypatch):
     path = paths.routine_hooks_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(config_manager, "get_config_manager", FakeConfigManager)
-    # The "dropped a dead field" log fires once per routine per process.
-    monkeypatch.setattr(hooks, "_dead_field_warned", set())
     return path
 
 
@@ -189,7 +182,7 @@ def test_dispatch_sends_nothing_for_an_unowned_run():
 
 
 def test_dispatch_drops_a_chat_the_owner_does_not_control(hooks_file):
-    """A hooks file from a pre-SEC-152 build must not deliver anywhere new."""
+    """A hand-edited hooks file must still respect the recipient policy."""
     write_raw(
         hooks_file,
         {ROUTINE: {str(OWNER.id): hook_body([str(OWNER.id), GROUP_CHAT])}},
@@ -199,54 +192,6 @@ def test_dispatch_drops_a_chat_the_owner_does_not_control(hooks_file):
     fire(ROUTINE, OWNER.id, bot)
 
     assert bot.sent == [OWNER.id]
-
-
-# ── Migration: hooks written before ownership existed ──
-
-
-def test_legacy_flat_entry_is_preserved_on_disk(hooks_file):
-    write_raw(hooks_file, {ROUTINE: hook_body([GROUP_CHAT])})
-
-    hooks.save_hooks("other_routine", hook_body([str(OWNER.id)]), OWNER.id)
-
-    stored = read_raw(hooks_file)
-    assert stored[ROUTINE][""]["telegram"]["chat_ids"] == [GROUP_CHAT]
-
-
-def test_legacy_entry_no_longer_fires_for_everyone(hooks_file):
-    write_raw(hooks_file, {ROUTINE: hook_body([GROUP_CHAT])})
-    bot = FakeBot()
-
-    fire(ROUTINE, STRANGER.id, bot)
-    assert bot.sent == []
-
-    # The admin's runs keep delivering exactly as before the change.
-    fire(ROUTINE, ADMIN.id, bot)
-    assert bot.sent == [int(GROUP_CHAT)]
-
-
-def test_legacy_entry_is_hidden_from_non_admins(hooks_file, make_client):
-    write_raw(hooks_file, {ROUTINE: hook_body([GROUP_CHAT])})
-
-    assert make_client(STRANGER).get(f"/routines/{ROUTINE}/hooks").json() == (
-        hooks._default_config()
-    )
-    assert make_client(ADMIN).get(f"/routines/{ROUTINE}/hooks").json()["telegram"][
-        "chat_ids"
-    ] == [GROUP_CHAT]
-
-
-def test_admin_save_adopts_the_legacy_entry(hooks_file):
-    write_raw(hooks_file, {ROUTINE: hook_body([GROUP_CHAT])})
-
-    hooks.save_hooks(ROUTINE, hook_body([GROUP_CHAT, str(ADMIN.id)]), ADMIN.id)
-
-    stored = read_raw(hooks_file)
-    assert "" not in stored[ROUTINE]
-    assert stored[ROUTINE][str(ADMIN.id)]["telegram"]["chat_ids"] == [
-        GROUP_CHAT,
-        str(ADMIN.id),
-    ]
 
 
 # ── The store hands dispatch the run's owner ──
@@ -268,68 +213,3 @@ def test_fire_hooks_passes_the_instance_owner(monkeypatch):
     asyncio.run(store._fire_hooks("i1", FakeResult(), None, False))
 
     assert seen == {"name": ROUTINE, "owner_id": OWNER.id}
-
-
-# ── READ-172: the dead `email` block on old on-disk configs ──
-
-
-def legacy_email_body(chat_ids, recipients=("someone@example.com",)):
-    """A hook config as written before the email destination was deleted."""
-    body = hook_body(chat_ids)
-    body["email"] = {"enabled": True, "recipients": list(recipients)}
-    return body
-
-
-def test_owned_config_with_a_legacy_email_block_still_loads(hooks_file):
-    """A config a user already has on disk must survive the field's removal."""
-    write_raw(
-        hooks_file, {ROUTINE: {str(OWNER.id): legacy_email_body([str(OWNER.id)])}}
-    )
-
-    cfg = hooks.load_hooks(ROUTINE, OWNER.id)
-
-    assert cfg is not None, "an old config must not fail to load"
-    assert "email" not in cfg
-    assert cfg["telegram"]["chat_ids"] == [str(OWNER.id)]
-    assert cfg["trigger"] == "success"
-
-
-def test_unowned_legacy_entry_with_an_email_block_still_loads(hooks_file):
-    write_raw(hooks_file, {ROUTINE: legacy_email_body([GROUP_CHAT])})
-
-    cfg = hooks.load_hooks(ROUTINE, ADMIN.id)
-
-    assert cfg is not None
-    assert "email" not in cfg
-    assert cfg["telegram"]["chat_ids"] == [GROUP_CHAT]
-
-
-def test_a_legacy_email_block_does_not_stop_telegram_delivery(hooks_file):
-    write_raw(
-        hooks_file, {ROUTINE: {str(OWNER.id): legacy_email_body([str(OWNER.id)])}}
-    )
-    bot = FakeBot()
-
-    fire(ROUTINE, OWNER.id, bot)
-
-    assert bot.sent == [OWNER.id]
-
-
-def test_the_dashboard_is_never_shown_the_dead_email_block(make_client, hooks_file):
-    write_raw(
-        hooks_file, {ROUTINE: {str(OWNER.id): legacy_email_body([str(OWNER.id)])}}
-    )
-
-    assert "email" not in make_client(OWNER).get(f"/routines/{ROUTINE}/hooks").json()
-
-
-def test_the_email_block_is_dropped_on_load_not_silently_on_save(hooks_file):
-    """The next write cleans the file because the *loader* already dropped it."""
-    write_raw(hooks_file, {ROUTINE: legacy_email_body([GROUP_CHAT])})
-
-    # Saving an unrelated routine rewrites the whole file.
-    hooks.save_hooks("other_routine", hook_body([str(OWNER.id)]), OWNER.id)
-
-    stored = read_raw(hooks_file)
-    assert "email" not in stored[ROUTINE][""]
-    assert stored[ROUTINE][""]["telegram"]["chat_ids"] == [GROUP_CHAT]

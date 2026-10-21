@@ -330,26 +330,6 @@ async def _fetch_lp_positions(client) -> dict:
     return data
 
 
-async def _fetch_gateway_data(client) -> dict:
-    """Fetch gateway balances and LP positions, organized by network (legacy wrapper)"""
-    import asyncio
-
-    # Fetch both in parallel
-    balances_task = asyncio.create_task(_fetch_balances(client))
-    lp_task = asyncio.create_task(_fetch_lp_positions(client))
-
-    balances_data = await balances_task
-    lp_data = await lp_task
-
-    # Merge results
-    return {
-        "balances_by_network": balances_data.get("balances_by_network", {}),
-        "total_value": balances_data.get("total_value", 0),
-        "lp_positions": lp_data.get("lp_positions", []),
-        "token_cache": lp_data.get("token_cache", {}),
-    }
-
-
 def _build_menu_keyboard() -> InlineKeyboardMarkup:
     """Build the DEX menu keyboard"""
     keyboard = [

@@ -1,6 +1,12 @@
 """Tests for one-time web login token redemption (condor/web/auth.py)."""
 
 import time
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from fastapi import FastAPI, WebSocketDisconnect
+from starlette.testclient import TestClient
 
 import condor.web.auth as auth
 from condor.web.auth import create_login_token, redeem_login_token
@@ -62,3 +68,42 @@ def test_expired_redemptions_do_not_block_later_valid_redemption():
     info = redeem_login_token(valid)
     assert info is not None
     assert info["user_id"] == user_id
+
+
+@pytest.mark.parametrize("path", ["/ws", "/ws/chat"])
+@pytest.mark.parametrize("subprotocol", [False, True])
+def test_websockets_require_the_current_auth_subprotocol(
+    monkeypatch, path, subprotocol
+):
+    from condor.web import ws_manager
+    from condor.web.routes import chat_ws, ws
+    from config_manager import UserRole
+
+    monkeypatch.setattr(
+        "config_manager.get_config_manager",
+        lambda: SimpleNamespace(get_user_role=lambda user_id: UserRole.USER),
+    )
+    manager = ws_manager.WebSocketManager()
+    monkeypatch.setattr(ws, "get_ws_manager", lambda: manager)
+    monkeypatch.setattr(chat_ws, "_get_user_sessions", AsyncMock(return_value=[]))
+    app = FastAPI()
+    app.include_router(ws.router)
+    app.include_router(chat_ws.router)
+    token = auth.create_jwt(123)
+    client = TestClient(app)
+
+    if subprotocol:
+        with client.websocket_connect(
+            path, subprotocols=[auth.WS_AUTH_SUBPROTOCOL, token]
+        ) as socket:
+            assert socket.accepted_subprotocol == auth.WS_AUTH_SUBPROTOCOL
+            if path == "/ws/chat":
+                assert socket.receive_json() == {
+                    "event": "sessions_list",
+                    "sessions": [],
+                }
+    else:
+        with pytest.raises(WebSocketDisconnect) as rejected:
+            with client.websocket_connect(f"{path}?token={token}"):
+                pytest.fail("a query token authenticated the socket")
+        assert rejected.value.code == 4001

@@ -135,7 +135,7 @@ def ws_env(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_ws, "_slot_gates", {})
     monkeypatch.setattr(chat_ws, "_attached_sockets", {})
     monkeypatch.setattr(chat_ws, "_orphaned_turns", set())
-    monkeypatch.setattr(chat_ws, "extract_ws_token", lambda ws, token: ("t", None))
+    monkeypatch.setattr(chat_ws, "extract_ws_token", lambda ws: ("t", None))
     monkeypatch.setattr(chat_ws, "decode_jwt", lambda token: {"sub": USER})
     # Only the role gate is stubbed: the rest of the config manager is what
     # spawns a session, so replacing the whole singleton breaks the spawn.
@@ -158,7 +158,7 @@ async def _until_busy(slot_id: str) -> None:
 
 
 async def _connect(ws: _FakeWS) -> asyncio.Task:
-    task = asyncio.create_task(chat_ws.chat_websocket(ws, token="t"))
+    task = asyncio.create_task(chat_ws.chat_websocket(ws))
     await ws.wait_for("sessions_list")
     return task
 

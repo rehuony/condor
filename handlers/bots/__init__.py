@@ -46,7 +46,6 @@ from .controller_handlers import (  # Unified configs menu with multi-select; Ed
     handle_cfg_toggle,
     handle_clear_all,
     handle_config_file_upload,
-    handle_configs_page,
     handle_cycle_order_type,
     handle_deploy_confirm,
     handle_deploy_custom_name,
@@ -58,7 +57,6 @@ from .controller_handlers import (  # Unified configs menu with multi-select; Ed
     handle_deploy_use_default,
     handle_edit_config,
     handle_execute_deploy,
-    handle_gs_accept_prices,
     handle_gs_back_to_amount,
     handle_gs_back_to_connector,
     handle_gs_back_to_leverage,
@@ -130,7 +128,6 @@ from .controller_handlers import (  # Unified configs menu with multi-select; Ed
     show_cfg_edit_form,
     show_config_form,
     show_configs_by_type,
-    show_configs_list,
     show_controller_configs_menu,
     show_deploy_config_step,
     show_deploy_configure,
@@ -282,7 +279,6 @@ SIMPLE_ACTIONS: dict[str, HandlerFunc | None] = {
     "close": handle_close,
     # Controller configs menu
     "controller_configs": show_controller_configs_menu,
-    "list_configs": show_configs_list,
     # Unified configs menu with multi-select
     "cfg_select_type": show_type_selector,
     "cfg_clear_selection": handle_cfg_clear_selection,
@@ -327,7 +323,6 @@ SIMPLE_ACTIONS: dict[str, HandlerFunc | None] = {
     "deploy_confirm": handle_deploy_confirm,
     "deploy_custom_name": handle_deploy_custom_name,
     # Progressive Grid Strike wizard
-    "gs_accept_prices": handle_gs_accept_prices,
     "gs_back_to_prices": handle_gs_back_to_prices,
     "gs_back_to_connector": handle_gs_back_to_connector,
     "gs_back_to_pair": handle_gs_back_to_pair,
@@ -377,7 +372,6 @@ SIMPLE_ACTIONS: dict[str, HandlerFunc | None] = {
 # Actions carrying parameters: "bots:{action}:{param}[:{param}]". The parser
 # tuple names each parameter the handler takes after (update, context).
 PARAMETERIZED_ACTIONS: dict[str, tuple[ParamHandlerFunc, tuple[ParamParser, ...]]] = {
-    "configs_page": (handle_configs_page, (_as_int,)),
     "cfg_type": (show_configs_by_type, (_as_text,)),
     "cfg_toggle": (handle_cfg_toggle, (_as_text,)),
     "cfg_page": (handle_cfg_page, (_as_int,)),

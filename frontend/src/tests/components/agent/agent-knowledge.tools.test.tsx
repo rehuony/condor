@@ -67,6 +67,7 @@ function brain(
     skill_proposal: null,
     memories: [],
     routines: [],
+    controllers: [],
     strategies: [],
   };
 }

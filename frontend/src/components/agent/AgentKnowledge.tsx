@@ -284,7 +284,7 @@ export const AgentKnowledge = memo(function AgentKnowledge({
     tools: brain?.tools.filter((t) => !t.muted).length ?? 0,
     strategies: brain?.strategies.length ?? 0,
     routines: brain?.routines.filter((r) => !r.muted).length ?? 0,
-    controllers: brain?.controllers?.length ?? 0,
+    controllers: brain?.controllers.length ?? 0,
   };
   const totals = {
     skills: brain?.skills.length ?? 0,
@@ -584,7 +584,7 @@ export const AgentKnowledge = memo(function AgentKnowledge({
             {activeTab === "controllers" && (
               <ControllersTab
                 slug={slug}
-                controllers={brain.controllers ?? []}
+                controllers={brain.controllers}
               />
             )}
             {activeTab === "activity" && <ActivityFeed agent={slug} />}

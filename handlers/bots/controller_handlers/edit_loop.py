@@ -695,12 +695,3 @@ async def handle_cfg_branch(update: Update, context: Context) -> None:
 
     await query.answer(f"Branched to {new_id}")
     await show_cfg_edit_form(update, context)
-
-
-async def handle_configs_page(update: Update, context: Context, page: int) -> None:
-    """Handle pagination for controller configs menu (legacy, redirects to cfg_page)"""
-    controller_type = context.user_data.get("configs_controller_type")
-    if controller_type:
-        await show_configs_by_type(update, context, controller_type, page)
-    else:
-        await show_controller_configs_menu(update, context, page=page)

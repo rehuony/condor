@@ -215,9 +215,7 @@ def _with_implied_tools(slug: str, tools: list[str]) -> list[str]:
     """
     if not tools:
         return tools
-    from mcp_servers.condor.profiles import canonical_tool_name
-
-    names = {canonical_tool_name(t).rsplit("__", 1)[-1] for t in tools}
+    names = {str(t).rsplit("__", 1)[-1] for t in tools}
     if CONTROLLERS_TOOL in names:
         return tools
     from condor.agent_controllers import agent_controllers

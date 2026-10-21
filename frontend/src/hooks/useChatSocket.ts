@@ -99,9 +99,8 @@ export interface SlotInfo {
    * subprocess that died — and not a slot that ended: the conversation is
    * intact, so the tab stays, its transcript still hydrates, and the first
    * message sent into it reattaches a session on the way through (CORR-265).
-   * Absent from a backend older than that, which listed only live slots.
    */
-  alive?: boolean;
+  alive: boolean;
   /** Display name of whoever is answering. */
   label?: string;
   /**
@@ -122,29 +121,26 @@ export interface PermissionRequest {
    *  overwrite's impact preview). Empty for most calls. */
   detail?: string;
   /** The bare tool name, previewed like the command it is. */
-  tool?: string;
+  tool: string;
   /** Its arguments; null when the backend could not read them. */
-  input?: Record<string, unknown> | null;
+  input: Record<string, unknown> | null;
   /**
    * When the runtime denies it unanswered, in *this* browser's epoch seconds —
    * derived from the server's relative `expires_in` on arrival, so a skewed
-   * local clock cannot make the countdown lie. Absent from an older backend.
+   * local clock cannot make the countdown lie.
    */
-  deadline?: number;
+  deadline: number;
 }
 
 /** A relative `expires_in` from the wire, as a local deadline. */
-export function deadlineFrom(expiresIn: unknown): number | undefined {
-  return typeof expiresIn === "number" ? Date.now() / 1000 + expiresIn : undefined;
+export function deadlineFrom(expiresIn: number): number {
+  return Date.now() / 1000 + expiresIn;
 }
 
 /**
- * Bucket for a request the backend did not stamp with a slot.
- *
- * Only an older server does that. Its requests are shown in whichever
- * conversation is active — the pre-CORR-101 behaviour — so a dashboard running
- * ahead of its backend still lets the user answer rather than silently
- * swallowing the approval until it times out.
+ * Bucket for current approvals without a web slot, including Telegram and MCP
+ * requests returned by the shared confirmation registry. They remain answerable
+ * from the active conversation after a reconnect.
  */
 const UNATTRIBUTED = "";
 
@@ -1264,6 +1260,7 @@ export function useChatSocket() {
             server_name: meta?.server_name,
             agent_slug: meta?.agent_slug,
             label: meta?.label,
+            alive: false,
           },
           messages: [],
           pending: true,
@@ -1310,6 +1307,7 @@ export function useChatSocket() {
           agent_key: agentKey,
           server_name: serverName,
           agent_slug: agentSlug || "",
+          alive: false,
         },
         messages: [],
         pending: true,
@@ -1526,10 +1524,7 @@ export function useChatSocket() {
             server_pinned: Boolean(data.server_pinned),
             agent_slug: (data.agent_slug as string) || "",
             label: (data.label as string) || undefined,
-            // A `session_started` is a live subprocess by definition — the
-            // reattach path emits it without an `alive` key, so stating it here
-            // is what returns a detached tab's dot to green rather than leaving
-            // that to the "older backend" undefined fallback.
+            // A `session_started` confirms that the subprocess is live.
             alive: true,
           };
           // The optimistic tab this session belongs to: a new chat is found by
@@ -1750,9 +1745,9 @@ export function useChatSocket() {
               origin: (data.origin as string) || "",
               detail:
                 typeof data.detail === "string" && data.detail ? data.detail : undefined,
-              tool: typeof data.tool === "string" ? data.tool : undefined,
-              input: (data.input as Record<string, unknown> | null | undefined) ?? null,
-              deadline: deadlineFrom(data.expires_in),
+              tool: data.tool as string,
+              input: data.input as Record<string, unknown> | null,
+              deadline: deadlineFrom(data.expires_in as number),
             },
           }));
           break;

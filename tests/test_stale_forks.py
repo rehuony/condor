@@ -97,30 +97,6 @@ def test_a_file_the_operator_authored_is_never_stale(shipped):
     assert stale_forks("scout") == []
 
 
-def test_a_legacy_crlf_stamp_is_not_reported_stale(shipped):
-    """Stamps written before newline normalization must not all fire at once.
-
-    A stamp taken from a CRLF working tree holds the raw-bytes hash. After
-    normalization that compares as changed, which would report every such fork
-    stale for a reason that has nothing to do with upstream.
-    """
-    import hashlib
-
-    target = fork_if_stock("scout", "AGENT.md")
-    shipped.write_bytes(shipped.read_bytes().replace(b"\n", b"\r\n"))
-    legacy = f"sha256:{hashlib.sha256(shipped.read_bytes()).hexdigest()[:12]}"
-
-    text = target.read_text("utf-8")
-    target.write_text(
-        text.replace(
-            [ln for ln in text.splitlines() if ln.startswith(FORKED_FROM_KEY)][0],
-            f"{FORKED_FROM_KEY}: {legacy}",
-        ),
-        "utf-8",
-    )
-    assert stale_forks("scout") == []
-
-
 # ── Files that cannot carry a stamp, and files that never had one ──
 
 

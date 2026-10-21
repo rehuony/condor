@@ -140,6 +140,12 @@ port, and required API connectivity. Record the deployed SHA and verification
 results. For a different process supervisor, use that deployment's stop/start
 commands instead of starting a second instance with tmux.
 
+Condor's frontend and backend are deployed from the same current revision.
+Retired Condor protocols and storage migrations are not supported. Keep the
+existing runtime data in its current format; inspect any data from another
+installation before importing it. External-service compatibility is independent
+of this policy.
+
 Hummingbot API, Gateway, and exchange services are separate dependencies. Check
 their compatibility and update them deliberately; a Condor source update is not
 authorization to replace another service or its data. The in-app updater also

@@ -88,6 +88,7 @@ function brain(muted: { lp?: boolean; scanner?: boolean } = {}): AgentBrain {
         muted: muted.scanner ?? false,
       },
     ],
+    controllers: [],
     strategies: [],
   };
 }

@@ -75,6 +75,8 @@ function agentSummary(over: Partial<AgentSummary> = {}): AgentSummary {
         description: "",
         status: "running",
         agent_id: "brigado.brl_mm",
+        server_name: "",
+        unavailable: "",
         session_count: 5,
         experiment_count: 2,
         tick_count: 12,

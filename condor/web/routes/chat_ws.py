@@ -12,7 +12,7 @@ import logging
 from typing import Any
 from weakref import WeakSet
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from condor.asyncutil import TaskSet
 from condor.llm.openrouter_models import fetch_models
@@ -484,14 +484,13 @@ turns.register_change_sink(_push_conversation_change)
 
 
 @router.websocket("/ws/chat")
-async def chat_websocket(ws: WebSocket, token: str | None = Query(default=None)):
+async def chat_websocket(ws: WebSocket):
     """Chat WebSocket endpoint.
 
     Authenticates via the JWT passed in the ``Sec-WebSocket-Protocol``
-    subprotocol header (preferred), falling back to the deprecated ``?token=``
-    query param for older clients / live sessions.
+    subprotocol header.
     """
-    auth_token, accept_subprotocol = extract_ws_token(ws, token)
+    auth_token, accept_subprotocol = extract_ws_token(ws)
     payload = decode_jwt(auth_token) if auth_token else None
     if not payload:
         await ws.close(code=4001, reason="Invalid token")

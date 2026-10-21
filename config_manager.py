@@ -48,12 +48,6 @@ PERMISSION_HIERARCHY = {
 # Declared here so the gate and the thing that grants it share one spelling.
 CODE_RUN_PREFERENCE = "code_run"
 
-# The sentinel `main.py` used to write into `username` when Telegram gave it
-# none (FEAT-088). It only ever meant "absent", but stored it is indistinguishable
-# from a real handle, so the panel renders `@No username` forever. It is dropped
-# on load and never written again — an absent handle is an absent key.
-ABSENT_USERNAME = "No username"
-
 # How stale `last_seen` is allowed to get before a contact rewrites config.yml.
 # `restricted` runs on every message *and* every button press, and each write is
 # a full YAML dump of the file, so recording the exact second would turn a menu
@@ -203,28 +197,6 @@ class ConfigManager:
         self._data.setdefault("server_access", {})
         self._data.setdefault("chat_defaults", {})
         self._data.setdefault("user_preferences", {})
-
-        # Drop the `"No username"` sentinel (FEAT-088). It is not a migration of
-        # meaning — the string only ever stood for "Telegram told us nothing" —
-        # so leaving it would keep `@No username` renderable for the life of the
-        # install. Healed on load and rewritten on the next save.
-        users = self._data["users"]
-        if any(
-            isinstance(r, dict) and r.get("username") == ABSENT_USERNAME
-            for r in users.values()
-        ):
-            for record in users.values():
-                if isinstance(record, dict) and record.get("username") == (
-                    ABSENT_USERNAME
-                ):
-                    record.pop("username", None)
-            self._save_config()
-
-        # Migrate audit_log from config.yml to separate file (one-time)
-        if "audit_log" in self._data:
-            self._audit_log = self._data.pop("audit_log")
-            self._save_audit_log()
-            self._save_config()  # Save config without audit_log
 
         # Always trust admin_id from env
         admin_id = self._get_admin_from_env()
@@ -824,7 +796,7 @@ class ConfigManager:
         Records the names Telegram supplied alongside the handle (FEAT-088):
         the admin panel has to answer *who this is*, and a handle is optional on
         Telegram while a first name is not. Absent fields are left out of the
-        record rather than stored as `None` or as a `"No username"` placeholder,
+        record rather than stored as `None`,
         so "we were never told" and "they are called this" stay distinguishable.
         """
         users = self._data["users"]
@@ -842,7 +814,7 @@ class ConfigManager:
             ("last_name", last_name),
         ):
             value = (value or "").strip()
-            if value and value != ABSENT_USERNAME:
+            if value:
                 record[key] = value
         users[user_id] = record
         self._audit("user_registered", "user", str(user_id), user_id)
@@ -885,7 +857,7 @@ class ConfigManager:
             ("last_name", last_name),
         ):
             value = (value or "").strip()
-            if not value or value == ABSENT_USERNAME:
+            if not value:
                 continue
             if user.get(key) != value:
                 user[key] = value
@@ -1384,7 +1356,7 @@ def user_display_name(record: Optional[dict], user_id: int = None) -> str:
         return full
 
     username = str(record.get("username") or "").strip()
-    if username and username != ABSENT_USERNAME:
+    if username:
         return username
 
     return f"User {uid}" if uid is not None else ""

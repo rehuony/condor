@@ -77,7 +77,7 @@ def ws_env(monkeypatch):
 
     monkeypatch.setattr(chat_ws, "_attached_sockets", {})
     monkeypatch.setattr(chat_ws, "_orphaned_turns", set())
-    monkeypatch.setattr(chat_ws, "extract_ws_token", lambda ws, token: ("t", None))
+    monkeypatch.setattr(chat_ws, "extract_ws_token", lambda ws: ("t", None))
     monkeypatch.setattr(chat_ws, "decode_jwt", lambda token: {"sub": USER})
     monkeypatch.setattr(
         type(get_config_manager()),
@@ -93,7 +93,7 @@ def ws_env(monkeypatch):
 
 
 async def _connect(ws: _FakeWS) -> asyncio.Task:
-    conn = asyncio.create_task(chat_ws.chat_websocket(ws, token="t"))
+    conn = asyncio.create_task(chat_ws.chat_websocket(ws))
     await ws.wait_for("sessions_list")
     return conn
 

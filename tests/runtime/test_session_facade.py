@@ -74,18 +74,13 @@ def test_key_roundtrip():
     ):
         assert SessionKey.parse(str(key)) == key
 
-    # Legacy shapes still resolve to the same session.
-    assert SessionKey.legacy_from("web_42_ab12") == SessionKey.web(42, "ab12")
-    assert SessionKey.legacy_from(12345) == SessionKey.telegram(12345)
-    assert SessionKey.legacy_from("12345") == SessionKey.telegram(12345)
-    assert SessionKey.legacy_from("tg:12345") == SessionKey.telegram(12345)
-
     # Only Telegram keys carry a chat id.
     assert SessionKey.telegram(555).telegram_chat_id == 555
     assert SessionKey.web(42, "s1").telegram_chat_id is None
 
-    with pytest.raises(ValueError):
-        SessionKey.parse("nonsense")
+    for invalid in ("nonsense", "12345", "web_42_ab12"):
+        with pytest.raises(ValueError):
+            SessionKey.parse(invalid)
 
 
 # ── Registry lifecycle ──

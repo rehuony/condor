@@ -61,3 +61,38 @@ def test_an_experiment_id_still_resolves_to_its_strategy_dir(base):
     )
     assert "skipped" in result
     assert not (base / "sessions").exists()
+
+
+def test_current_journal_tool_sections_keep_their_contract(base):
+    from condor.agents.journal import JournalManager
+
+    session = base / "sessions" / "session_1"
+    journal = JournalManager("brigado.grid_1", session_dir=session, agent_dir=base)
+    assert trading_agent.journal_write(
+        agent_id="brigado.grid_1", entry_type="state", text="Holding SOL"
+    ) == {"written": True}
+    for section in ("state", "summary"):
+        assert trading_agent.journal_read("brigado.grid_1", section=section) == {
+            "content": "Holding SOL"
+        }
+    journal.append_action(1, "Hold", "Waiting for the signal")
+    assert "Hold" in trading_agent.journal_read("brigado.grid_1")["content"]
+    assert journal.entry_count() == 0
+    snapshot = journal.save_full_snapshot(
+        tick=1,
+        timestamp="2026-10-21 10:00:00",
+        system_prompt="Observe",
+        response_text="Hold",
+        tool_calls=[],
+        executors_data="No executors",
+        risk_state={},
+        duration=1.0,
+    )
+    assert trading_agent.journal_read("brigado.grid_1", section="run:1") == {
+        "content": snapshot.read_text()
+    }
+    assert journal.entry_count() == 1
+    assert (
+        trading_agent.journal_read("brigado.grid_1", section="runs")["runs"][0]["tick"]
+        == 1
+    )

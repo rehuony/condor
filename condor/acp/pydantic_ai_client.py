@@ -439,8 +439,6 @@ class PydanticAIClient:
         user's saved endpoints; base_url and api_key are resolved from it by
         ``condor.preferences.resolve_custom_endpoint``, with CUSTOM_LLM_* env
         vars as fallback.
-        The bare "custom:<model-id>" form (no endpoint name) is still accepted
-        for configs written before endpoints were nameable.
     """
 
     # PermissionedToolset checks the recorded decision before invoking the sink.
@@ -588,9 +586,12 @@ class PydanticAIClient:
         # base_url and api_key come from the user's setup flow (stored per-user)
         # with CUSTOM_LLM_BASE_URL / CUSTOM_LLM_API_KEY env fallbacks.
         if prefix == "custom":
-            if not model_id:
+            from condor.preferences import parse_custom_agent_key
+
+            provider_name, model_id = parse_custom_agent_key(self.model_name)
+            if not provider_name or not model_id:
                 raise RuntimeError(
-                    "Custom provider requires an explicit model id, e.g. "
+                    "Custom provider requires a named endpoint and explicit model id, e.g. "
                     "'custom@venice:llama-3.3-70b'. Pick one via /agent → "
                     "Change LLM → Custom endpoint (or Settings → AI Providers "
                     "on the web dashboard)."
@@ -865,11 +866,8 @@ class PydanticAIClient:
         from all MCP servers; we keep only those whose name is allowlisted. Tool
         names may be namespaced by the MCP layer (e.g. ``mcp__condor__manage_skill``),
         so we match on either the full name or its last ``__``-delimited segment.
-        A stored old name of a renamed tool allows the tool it now means.
         """
-        from mcp_servers.condor.profiles import canonical_tool_name
-
-        allowed = {canonical_tool_name(n) for n in self.allowed_tools or ()}
+        allowed = self.allowed_tools or set()
 
         def _ok(name: str) -> bool:
             return name in allowed or name.rsplit("__", 1)[-1] in allowed

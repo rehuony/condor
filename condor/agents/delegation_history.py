@@ -26,26 +26,11 @@ record carries a ``caller`` (the agent that asked) where a delegation carries a
 tool count. A record written before that field existed has no ``kind``, and it was
 a delegation -- so the default here is a fact about the past, not a guess.
 
-Four shapes of record exist on disk, and all four are readable here:
-
-* **current** -- a ``{task_id}/`` directory under its owner, holding
-  ``status.json`` (the whole record), ``events.json`` (the transcript, in the
-  exact projection the wire uses) and ``transcript.md``.
-* **pre-FEAT-051** -- the same three files, flat and keyed by agent, at
-  ``agents/{slug}/delegations/{task_id}.{status.json,events.json,md}``.
-* **pre-FEAT-035** -- a ``.status.json`` that carries only state and provenance;
-  the task text and result come from parsing the markdown header.
-* **legacy** -- a lone ``.md``, from before status files existed at all.
-
-The last two belong to nobody -- no ``user_id`` was ever written -- so they
-remain readable through the unscoped path, which is admin-only.
-
-Only those last two ever cost a transcript read (PERF-204). A current
-``status.json`` *is* the whole record, and ``transcript.md`` beside it embeds
-every tool call's input and output -- so the listing route, which the dashboard
-re-polls every five seconds and which drops the bodies anyway, opens nothing but
-small JSON. What the older shapes still need is parsed at most once per version
-of the file, and a listing only ever builds the page it returns.
+Each ``{task_id}/`` directory holds ``status.json`` (the record),
+``events.json`` (the wire transcript) and ``transcript.md``. A complete status
+record needs no transcript read. If a status or events write failed, the
+transcript in that same owner directory is still readable. Listings hydrate
+only the requested page, and unchanged transcript parses are cached.
 """
 
 from __future__ import annotations
@@ -66,10 +51,6 @@ log = logging.getLogger(__name__)
 DELEGATION_STATUS_FILENAME = "status.json"
 DELEGATION_TRANSCRIPT_FILENAME = "transcript.md"
 DELEGATION_EVENTS_FILENAME = "events.json"
-
-# The flat, agent-keyed shape retained for reading older records.
-STATUS_SUFFIX = ".status.json"
-EVENTS_SUFFIX = ".events.json"
 
 # A record whose state was never recorded. Honest: the file exists, so the task
 # does; what it ended as we do not know.
@@ -98,25 +79,6 @@ def _owners(user_id: int | str | None) -> list[str]:
         safe = _safe(user_id)
         return [safe] if safe else []
     return list(paths.iter_user_ids())
-
-
-def _legacy_dirs(agent_slug: str | None = None):
-    """Every pre-FEAT-051 ``delegations/`` directory, newest agents last."""
-    from condor.agents.agent import AgentStore
-
-    store = AgentStore()
-    agents = []
-    if agent_slug:
-        agent = store.get(agent_slug)
-        if agent is not None:
-            agents = [agent]
-    else:
-        agents = store.list_all()
-
-    for agent in agents:
-        d = agent.home / "delegations"
-        if d.is_dir():
-            yield agent.slug, d
 
 
 # ── markdown fallback ──────────────────────────────────────────────────────
@@ -205,9 +167,7 @@ def _read_markdown(md_path: Path) -> dict[str, Any]:
 # is never served from a stale parse.
 _MD_CACHE: dict[Path, tuple[float, int, dict[str, Any]]] = {}
 
-# Only the two unowned legacy shapes still reach the parser, and nothing writes
-# those any more, so this cannot grow with usage. The cap is for the
-# pathological directory, not for a hot path; dropping it whole is fine because
+# Incomplete status records can still need their transcript. Bound the cache;
 # every entry is rebuildable from the file it names.
 _MD_CACHE_MAX = 512
 
@@ -235,8 +195,7 @@ def _parse_markdown(md_path: Path) -> dict[str, Any]:
 def _from_markdown(md_path: Path, agent_slug: str, task_id: str) -> dict[str, Any]:
     """A record rebuilt from the transcript alone.
 
-    Always a delegation: only a delegation ever wrote a transcript, and these
-    shapes predate there being a second kind at all.
+    Always a delegation: a consult writes a status record without a transcript.
     """
     parsed = _parse_markdown(md_path)
     return {
@@ -290,10 +249,9 @@ def _from_status(
 ) -> dict[str, Any]:
     """A record rebuilt from its status file, backfilled from the markdown.
 
-    Backfill is what makes a *pre*-FEAT-035 status file useful: it recorded the
-    state and the provenance but not the task or the result, and the markdown
-    beside it has both. A current status file carries all of it, so the
-    transcript -- the big file -- is not opened at all; see :data:`_CONTENT_KEYS`.
+    An incomplete status write can leave the task or result only in the
+    transcript. Complete status records avoid that read entirely; see
+    :data:`_CONTENT_KEYS`.
 
     ``data`` lets a caller that has already read the status file hand it over
     rather than paying for a second read.
@@ -479,38 +437,6 @@ def terminal_record_dirs(
     return records
 
 
-def _legacy_entries_in(agent_slug: str, directory: Path) -> Iterator[Entry]:
-    """Every delegation in one pre-FEAT-051 directory, status files first.
-
-    The lone-``.md`` records are the ones this buys the most: their sort key is
-    the file's mtime, so ordering them costs a ``stat()`` and the transcript is
-    opened only for the handful that make the page.
-    """
-    from condor.runtime.registry_file import read_status
-
-    seen: set[str] = set()
-    for status_path in sorted(directory.glob(f"*{STATUS_SUFFIX}")):
-        task_id = status_path.name[: -len(STATUS_SUFFIX)]
-        seen.add(task_id)
-        md_path = directory / f"{task_id}.md"
-        data = read_status(directory, status_path.name) or {}
-        yield (
-            _status_sort_key(data, md_path),
-            task_id,
-            lambda sp=status_path, tid=task_id, mp=md_path, d=data: _from_status(
-                sp, agent_slug, tid, mp, d
-            ),
-        )
-    for md_path in sorted(directory.glob("*.md")):
-        task_id = md_path.name[: -len(".md")]
-        if task_id not in seen:
-            yield (
-                _mtime(md_path),
-                task_id,
-                lambda mp=md_path, tid=task_id: _from_markdown(mp, agent_slug, tid),
-            )
-
-
 # ── the read API ───────────────────────────────────────────────────────────
 
 
@@ -523,10 +449,9 @@ def list_history(
 ) -> list[dict[str, Any]]:
     """Recorded agent runs, newest first.
 
-    Scoped to one person unless ``user_id`` is None, which is admin-only and
-    also picks up the unowned legacy records. Filtering by agent is a filter,
-    not a lookup: the store is keyed by user now, and the agent-first view is
-    the rarer one (it reads the same status files either way). ``kind`` is the
+    Scoped to one person unless ``user_id`` is None, which is admin-only.
+    Filtering by agent is a filter, not a lookup: the store is keyed by user,
+    and the agent-first view reads the same status files. ``kind`` is the
     same shape of filter: ``None`` is every channel (the Activity tab), a kind
     is one of them (the chat dock, which is about background tasks only).
 
@@ -545,16 +470,6 @@ def list_history(
             entries.extend(_entries_of(owner))
         except OSError:
             log.debug("Could not list delegations for user %s", owner, exc_info=True)
-
-    if user_id is None:
-        seen = {task_id for _key, task_id, _load in entries}
-        for slug, directory in _legacy_dirs(agent_slug):
-            try:
-                entries.extend(
-                    e for e in _legacy_entries_in(slug, directory) if e[1] not in seen
-                )
-            except OSError:
-                log.debug("Could not list delegations in %s", directory, exc_info=True)
 
     entries.sort(key=lambda e: e[0], reverse=True)
 
@@ -591,16 +506,6 @@ def read_history(user_id: int | str | None, task_id: str) -> dict[str, Any] | No
             if record is not None:
                 return record
 
-    if user_id is not None:
-        return None
-
-    for slug, directory in _legacy_dirs():
-        status_path = directory / f"{safe}{STATUS_SUFFIX}"
-        md_path = directory / f"{safe}.md"
-        if status_path.is_file():
-            return _from_status(status_path, slug, safe, md_path)
-        if md_path.is_file():
-            return _from_markdown(md_path, slug, safe)
     return None
 
 
@@ -630,15 +535,6 @@ def read_history_events(
         if found is not None:
             return found
 
-    if user_id is not None:
-        return [], ""
-
-    for _slug, directory in _legacy_dirs():
-        found = _events_or_markdown(
-            directory / f"{safe}{EVENTS_SUFFIX}", directory / f"{safe}.md"
-        )
-        if found is not None:
-            return found
     return [], ""
 
 

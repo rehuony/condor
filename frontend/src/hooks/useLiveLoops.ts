@@ -80,7 +80,7 @@ export function loopStats(
   return strategy
     ? {
         latestSessionPnl: strategy.latest_session_pnl,
-        unavailable: strategy.unavailable ?? "",
+        unavailable: strategy.unavailable,
         sessionCount: strategy.session_count,
         experimentCount: strategy.experiment_count,
       }

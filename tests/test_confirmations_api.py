@@ -66,10 +66,11 @@ def test_list_is_scoped_to_the_asking_user(registry):
     assert [p["id"] for p in body] == [mine.id]
 
 
-def test_a_non_canonical_session_key_is_listed_unaddressed(registry):
-    """A Telegram-raised approval has no slot; it is still answerable."""
+@pytest.mark.parametrize("surface", ["tg", "mcp"])
+def test_a_non_web_session_is_listed_unaddressed(registry, surface):
+    """Current non-web approvals have no slot and remain answerable."""
     registry.register(
-        session_key="not-a-canonical-key",
+        session_key=f"{surface}:{USER.id}",
         user_id=USER.id,
         summary="from somewhere else",
         tool_call={},

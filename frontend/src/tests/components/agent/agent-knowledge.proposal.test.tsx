@@ -79,6 +79,7 @@ function brain(proposal: SkillProposal | null): AgentBrain {
     skill_proposal: proposal,
     memories: [],
     routines: [],
+    controllers: [],
     strategies: [],
   };
 }

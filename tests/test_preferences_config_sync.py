@@ -1,6 +1,6 @@
 """Every preference write reaches config.yml, and every read hydrates from it.
 
-Writes go through ``_mutate`` and reads through ``_migrate_legacy_data`` so
+Writes go through ``_mutate`` and reads through ``_initialize_preferences`` so
 Telegram preferences persist and a cold pickle reads the saved configuration.
 """
 

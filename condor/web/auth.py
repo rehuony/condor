@@ -73,20 +73,16 @@ def decode_jwt(token: str) -> Optional[dict]:
 WS_AUTH_SUBPROTOCOL = "condor-jwt"
 
 
-def extract_ws_token(
-    ws: WebSocket, query_token: Optional[str]
-) -> tuple[Optional[str], Optional[str]]:
+def extract_ws_token(ws: WebSocket) -> tuple[Optional[str], Optional[str]]:
     """Extract the auth JWT from a WebSocket handshake.
 
-    Prefers the ``Sec-WebSocket-Protocol`` subprotocol header: the client offers
+    Reads the ``Sec-WebSocket-Protocol`` subprotocol header: the client offers
     ``[WS_AUTH_SUBPROTOCOL, <jwt>]`` and we read the token from the second value.
-    Falls back to the (deprecated, log-leaking) ``?token=`` query param so live
-    sessions and older clients keep working during rollout.
 
     Returns ``(token, accept_subprotocol)``. ``accept_subprotocol`` is the
     sentinel (never the token) when the subprotocol path is used and must be
     echoed back in ``ws.accept(subprotocol=...)`` or the browser rejects the
-    handshake; it is ``None`` for the query-param fallback.
+    handshake. Missing credentials return ``(None, None)``.
     """
     subprotocols = ws.scope.get("subprotocols", [])
     if (
@@ -95,7 +91,7 @@ def extract_ws_token(
         and len(subprotocols) >= 2
     ):
         return subprotocols[1], WS_AUTH_SUBPROTOCOL
-    return query_token, None
+    return None, None
 
 
 # ── FastAPI dependency ──

@@ -101,6 +101,7 @@ const BRAIN: AgentBrain = {
   skill_proposal: null,
   memories: [],
   routines: [],
+  controllers: [],
   strategies: [],
 };
 

@@ -36,8 +36,7 @@ from condor.fsutil import atomic_write_bytes, atomic_write_json
 
 logger = logging.getLogger(__name__)
 
-#: Index schema version. ``1`` (or a missing key) is the flat
-#: ``{task_id: {server, config}}`` map this store used to write.
+#: Summary index schema version.
 INDEX_VERSION = 2
 
 #: How long a payload is kept. Summaries are never pruned. ``0`` disables
@@ -79,28 +78,17 @@ class BacktestStore:
         data_dir = paths.backtests_dir() if data_dir is None else Path(data_dir)
         self._dir = data_dir
         self._index_path = data_dir / "_index.json"
-        # task_id -> summary (see _summarize). Guarded by _lock because the
-        # v2 migration runs in a thread executor while requests read the index.
+        # task_id -> summary (see _summarize), shared by readers and writers.
         self._index: dict[str, dict[str, Any]] = {}
-        self._meta: dict[str, Any] = {"v": INDEX_VERSION, "migrated": True}
+        self._meta: dict[str, Any] = {"v": INDEX_VERSION}
         self._lock = threading.RLock()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._load_index()
-        self._migrate_legacy()
 
     # -- public API --
 
-    @property
-    def migrated(self) -> bool:
-        """False while v1 files still hold summaries nobody has derived yet.
-
-        Exposed on the archive response so the dashboard can say "indexing…"
-        instead of quietly listing half a store with no metrics.
-        """
-        return bool(self._meta.get("migrated", True))
-
     def save_result(self, server: str, task_id: str, result: dict[str, Any]) -> None:
-        """Persist one task envelope and its summary. Signature unchanged."""
+        """Persist one task envelope and its summary."""
         task = {"server": server, **result}
         self._write_payload(task_id, task)
         with self._lock:
@@ -166,9 +154,7 @@ class BacktestStore:
             return False
         if not summary.get("has_payload", True):
             return False
-        return (
-            self._payload_path(task_id).exists() or self._legacy_path(task_id).exists()
-        )
+        return self._payload_path(task_id).exists()
 
     def prune_payloads(self, max_age_days: int | None = None) -> int:
         """Delete payloads older than the cutoff; keep every summary.
@@ -217,101 +203,16 @@ class BacktestStore:
         self._unlink_payload(task_id)
         return True
 
-    def migrate(self) -> int:
-        """Bring a v1 store to v2: derive every summary, gzip every payload.
-
-        Per file and idempotent, so a crash resumes where it stopped. Each file
-        is parsed once — that parse is what produces the summary, and the
-        summary is the thing that has to survive — but a payload already past
-        the retention cutoff is then *deleted* rather than compressed, which is
-        where the expensive half of the work is skipped.
-
-        Runs off the boot path (see ``migrate_backtest_archive``): 39 files cost
-        roughly 0.7 s to parse and 2.5 s to compress each.
-        """
-        legacy = sorted(
-            p
-            for p in self._dir.glob("*.json")
-            if p.name != self._index_path.name and not p.name.startswith(".")
-        )
-        if not legacy and self.migrated:
-            return 0
-
-        cutoff = time.time() - retention_days() * 86400 if retention_days() else None
-        converted = 0
-        for path in legacy:
-            task_id = path.stem
-            try:
-                task = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                logger.warning("Skipping unreadable backtest file %s", path)
-                continue
-            if not isinstance(task, dict):
-                logger.warning("Skipping non-object backtest file %s", path)
-                continue
-
-            summary = _summarize(task.get("server", ""), task_id, task)
-            try:
-                mtime = path.stat().st_mtime
-            except OSError:
-                mtime = time.time()
-            if cutoff is not None and _ordering_key(summary, mtime) < cutoff:
-                summary["has_payload"] = False
-            else:
-                self._write_payload(task_id, task)
-            # Persist the summary *before* dropping the legacy file: the summary
-            # is the half that has to outlive everything, and the legacy file is
-            # the only thing a resumed migration can re-derive it from. A crash
-            # after this write leaves a redundant ``.json`` the next pass
-            # re-parses idempotently; a crash before it would lose the run's
-            # metrics for good.
-            with self._lock:
-                self._index[task_id] = summary
-                self._persist_index()
-            path.unlink(missing_ok=True)
-            converted += 1
-
-        # A v1 entry with no file on disk can never be described -- the parse
-        # that would have produced its summary has nothing to read -- so it
-        # would list as a permanent "unknown" row with no metrics. Dropping it
-        # is the honest end state; the run it named is already gone.
-        with self._lock:
-            orphans = [
-                tid
-                for tid, summary in self._index.items()
-                if summary.get("status") == "unknown"
-                and not self._payload_path(tid).exists()
-                and not self._legacy_path(tid).exists()
-            ]
-            for tid in orphans:
-                del self._index[tid]
-            self._meta["v"] = INDEX_VERSION
-            self._meta["migrated"] = True
-            self._persist_index()
-        if orphans:
-            logger.info("Dropped %d backtest index entries with no file", len(orphans))
-        if converted:
-            logger.info("Migrated %d backtest file(s) to the v2 archive", converted)
-        self.prune_payloads()
-        return converted
-
     # -- internals --
 
     def _payload_path(self, task_id: str) -> Path:
         return self._dir / f"{_safe_name(task_id)}.json.gz"
-
-    def _legacy_path(self, task_id: str) -> Path:
-        """The uncompressed file a not-yet-migrated task still lives in."""
-        return self._dir / f"{_safe_name(task_id)}.json"
 
     def _read_payload(self, task_id: str) -> dict[str, Any] | None:
         path = self._payload_path(task_id)
         try:
             if path.exists():
                 return json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
-            legacy = self._legacy_path(task_id)
-            if legacy.exists():
-                return json.loads(legacy.read_text(encoding="utf-8"))
         except Exception:
             logger.warning("Failed to read backtest payload %s", path)
         return None
@@ -322,22 +223,16 @@ class BacktestStore:
 
     def _unlink_payload(self, task_id: str) -> None:
         self._payload_path(task_id).unlink(missing_ok=True)
-        self._legacy_path(task_id).unlink(missing_ok=True)
 
     def _payload_age_key(self, task_id: str, summary: dict[str, Any]) -> float:
         """When this run finished, for retention purposes.
 
-        ``completed_at`` is authoritative. A summary derived from a v1 envelope
-        that carried neither timestamp falls back to the payload's mtime, which
-        is what ordering used before this store had a real clock.
+        Use the payload mtime if the task has no completion or creation time.
         """
         try:
             mtime = self._payload_path(task_id).stat().st_mtime
         except OSError:
-            try:
-                mtime = self._legacy_path(task_id).stat().st_mtime
-            except OSError:
-                mtime = 0.0
+            mtime = 0.0
         return _ordering_key(summary, mtime)
 
     def _maybe_prune(self) -> None:
@@ -365,27 +260,21 @@ class BacktestStore:
             self._rebuild_index()
             return
 
-        if raw.get("v") == INDEX_VERSION:
-            tasks = raw.get("tasks")
-            self._index = tasks if isinstance(tasks, dict) else {}
-            self._meta = {k: v for k, v in raw.items() if k != "tasks"}
-            self._meta.setdefault("migrated", True)
+        if raw.get("v") != INDEX_VERSION:
+            raise ValueError(f"Unsupported backtest index version: {raw.get('v')!r}")
+        tasks = raw.get("tasks")
+        if not isinstance(tasks, dict):
+            self._rebuild_index()
             return
-
-        # v1: a flat {task_id: {server, config}} map. Each entry becomes a
-        # degraded summary -- enough to list and to resolve an id, honestly
-        # marked as carrying no metrics -- until migrate() derives the real one.
-        self._index = {
-            tid: _degraded_summary(tid, meta)
-            for tid, meta in raw.items()
-            if isinstance(meta, dict)
-        }
-        self._meta = {"v": INDEX_VERSION, "migrated": False}
+        self._index = tasks
+        self._meta = {"v": INDEX_VERSION}
+        if "last_pruned" in raw:
+            self._meta["last_pruned"] = raw["last_pruned"]
 
     def _rebuild_index(self) -> None:
-        """Rebuild the index from whatever files are on disk."""
+        """Rebuild the index from the saved gzip payloads."""
         self._index = {}
-        self._meta = {"v": INDEX_VERSION, "migrated": True}
+        self._meta = {"v": INDEX_VERSION}
         for path in sorted(self._dir.glob("*.json.gz")):
             task_id = path.name[: -len(".json.gz")]
             try:
@@ -395,36 +284,7 @@ class BacktestStore:
                 continue
             if isinstance(task, dict):
                 self._index[task_id] = _summarize(task.get("server", ""), task_id, task)
-        if any(
-            p.name != self._index_path.name and not p.name.startswith(".")
-            for p in self._dir.glob("*.json")
-        ):
-            # Uncompressed files are still out there; migrate() owns them.
-            self._meta["migrated"] = False
         self._persist_index()
-
-    def _migrate_legacy(self) -> None:
-        """Fold the single-file ``backtests.json`` store into per-task files."""
-        legacy_file = paths.legacy_backtests_file()
-        if not legacy_file.exists():
-            return
-        try:
-            legacy_data = json.loads(legacy_file.read_text(encoding="utf-8"))
-            if not isinstance(legacy_data, dict) or not legacy_data:
-                legacy_file.unlink()
-                return
-            logger.info(
-                "Migrating %d backtest results from legacy store", len(legacy_data)
-            )
-            for task_id, entry in legacy_data.items():
-                if not isinstance(entry, dict):
-                    continue
-                server = entry.pop("server", "")
-                self.save_result(server, task_id, entry)
-            legacy_file.unlink()
-            logger.info("Legacy backtest store migrated and removed")
-        except Exception:
-            logger.warning("Failed to migrate legacy backtest store", exc_info=True)
 
 
 # -- summaries --
@@ -445,8 +305,8 @@ def _epoch(value: Any) -> float | None:
     """A task timestamp as epoch seconds, whatever shape it arrived in.
 
     The API server writes ``created_at``/``completed_at`` as ISO-8601 strings
-    (``2026-08-24T18:11:04.300751+00:00``); routines and the legacy store wrote
-    floats. Both have to reduce to one clock, because this is the key the
+    (``2026-08-24T18:11:04.300751+00:00``); routines may supply
+    epoch seconds. Both have to reduce to one clock, because this is the key the
     archive orders and expires by -- a timestamp that silently parsed to
     nothing would order every run equally and prune by file mtime forever.
     """
@@ -514,33 +374,6 @@ def _summarize(server: str, task_id: str, task: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _degraded_summary(task_id: str, meta: dict[str, Any]) -> dict[str, Any]:
-    """A v1 index entry, widened to the summary shape without opening a file.
-
-    ``status: "unknown"`` and empty metrics are the honest answer until
-    :meth:`BacktestStore.migrate` parses the payload — the alternative, claiming
-    ``completed`` with no numbers, is what makes a half-indexed archive lie.
-    """
-    return {
-        "task_id": task_id,
-        "server": str(meta.get("server") or ""),
-        "status": "unknown",
-        "config_id": str(meta.get("config") or ""),
-        "controller": "",
-        "trading_pair": "",
-        "connector": "",
-        "start_time": 0,
-        "end_time": 0,
-        "resolution": "",
-        "trade_cost": None,
-        "created_at": None,
-        "completed_at": None,
-        "metrics": {},
-        "error": None,
-        "has_payload": True,
-    }
-
-
 def _ordering_key(summary: dict[str, Any], fallback: float = 0.0) -> float:
     """When a run finished: ``completed_at``, then ``created_at``, then fallback.
 
@@ -563,12 +396,3 @@ def get_backtest_store() -> BacktestStore:
     if _store is None:
         _store = BacktestStore()
     return _store
-
-
-def migrate_backtest_archive() -> int:
-    """Entry point for the boot-time background migration (``main.startup``)."""
-    try:
-        return get_backtest_store().migrate()
-    except Exception:
-        logger.warning("Backtest archive migration failed", exc_info=True)
-        return 0
