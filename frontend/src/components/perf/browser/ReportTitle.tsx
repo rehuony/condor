@@ -84,7 +84,9 @@ export function ReportTitle({
   filtersActive,
 }: ReportTitleProps) {
   return (
-    <div className="flex items-center gap-3 min-w-0 narrow-pane:max-w-full narrow-pane:basis-full narrow-pane:flex-wrap narrow-pane:gap-y-1">
+    // The badges wrap under the title rather than overlapping what follows;
+    // on a narrow pane they share one line and the title gives way instead.
+    <div className="flex min-w-0 max-w-full flex-[1_1_18rem] flex-wrap items-center gap-x-3 gap-y-1 narrow-pane:flex-nowrap">
       {activeCtrl ? (
         <>
           <div className="truncate">
@@ -99,7 +101,9 @@ export function ReportTitle({
             <UnpricedNote leaves={unpricedLeaves} />
           </div>
           {activeCtrl.connector && (
-            <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)]/50">
+            // Dropped on a narrow pane so the pair and status share the
+            // title's line; the venue is still listed further down.
+            <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)]/50 narrow-pane:hidden">
               {activeCtrl.connector}
             </span>
           )}
@@ -157,7 +161,9 @@ export function ReportTitle({
             </span>
           </div>
           {activeExec.connector && (
-            <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)]/50">
+            // Dropped on a narrow pane so the pair and status share the
+            // title's line; the venue is still listed further down.
+            <span className="shrink-0 rounded bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)]/50 narrow-pane:hidden">
               {activeExec.connector}
             </span>
           )}

@@ -733,7 +733,7 @@ export function renderOverlayTooltipHtml(
 
   let detailRows = "";
   const addRow = (label: string, value: string, color?: string) => {
-    detailRows += `<div style="display:flex;justify-content:space-between;gap:12px"><span style="color:${textMuted}">${escapeHtml(label)}</span><span style="font-family:monospace;${color ? `color:${color}` : ""}">${escapeHtml(value)}</span></div>`;
+    detailRows += `<div style="display:flex;justify-content:space-between;gap:12px"><span style="color:${textMuted}">${escapeHtml(label)}</span><span style="font-family:var(--font-mono, monospace);font-variant-numeric:tabular-nums;${color ? `color:${color}` : ""}">${escapeHtml(value)}</span></div>`;
   };
 
   // Range-box details. Any executor drawn as a box describes itself by its
@@ -768,24 +768,62 @@ export function renderOverlayTooltipHtml(
   if (sl > 0 && sl !== -1) addRow("Stop Loss", `${(sl * 100).toFixed(2)}%`, red);
   if (cfg.keep_position != null) addRow("Keep Position", String(cfg.keep_position) === "true" ? "Yes" : "No");
 
-  return `
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-            <span style="font-weight:700;font-size:12px;font-family:monospace">${escapeHtml(o.executorId.slice(0, 10))}…</span>
-            <span style="background:${sideBg};color:${sideClr};font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase">${escapeHtml(sideLabel)}</span>
-            <span style="background:${statusBg};color:${statusClr};font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px">${escapeHtml(o.status)}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
-            <span style="background:${border};padding:1px 5px;border-radius:3px;font-size:10px;border:1px solid ${border}">${escapeHtml(o.type.toUpperCase())}</span>
-            ${o.closeType ? `<span style="font-size:10px;color:${textMuted}">${escapeHtml(o.closeType)}</span>` : ""}
-          </div>
-          <div style="border-top:1px solid ${border};margin:6px 0;padding-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
-            <div><div style="color:${textMuted};font-size:9px;text-transform:uppercase;margin-bottom:1px">Net PnL</div><div style="font-weight:600;font-size:13px;color:${pnlClr};font-family:monospace">${pnlStr}</div></div>
-            <div><div style="color:${textMuted};font-size:9px;text-transform:uppercase;margin-bottom:1px">PnL %</div><div style="font-weight:600;font-size:13px;color:${pnlClr};font-family:monospace">${pctStr || "—"}</div></div>
-            <div><div style="color:${textMuted};font-size:9px;text-transform:uppercase;margin-bottom:1px">Volume</div><div style="font-family:monospace;font-size:11px">${volStr}</div></div>
-            <div><div style="color:${textMuted};font-size:9px;text-transform:uppercase;margin-bottom:1px">Fees</div><div style="font-family:monospace;font-size:11px">${feesStr || "—"}</div></div>
-          </div>
-          ${detailRows ? `<div style="border-top:1px solid ${border};margin-top:4px;padding-top:6px;font-size:11px;display:flex;flex-direction:column;gap:3px">${detailRows}</div>` : ""}
-        `;
+  const metric = (label: string, value: string, opts: { color?: string; strong?: boolean } = {}) =>
+    `<div><div style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:${textMuted}">${label}</div>` +
+    `<div style="margin-top:2px;font-family:var(--font-mono, monospace);font-variant-numeric:tabular-nums;` +
+    `font-size:${opts.strong ? 14 : 12}px;font-weight:${opts.strong ? 600 : 500};${opts.color ? `color:${opts.color}` : ""}">${value}</div></div>`;
+  const pill = (text: string, color: string, bg: string, upper = false) =>
+    `<span style="display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:9px;font-size:10px;font-weight:600;` +
+    `${upper ? "text-transform:uppercase;letter-spacing:0.04em;" : ""}color:${color};background:${bg}">${escapeHtml(text)}</span>`;
+  const subtitle = [escapeHtml(o.type.toUpperCase()), o.closeType ? escapeHtml(o.closeType) : ""].filter(Boolean).join(" · ");
+
+  return (
+    `<div style="display:flex;align-items:center;gap:6px">` +
+    `<span style="font-family:var(--font-mono, monospace);font-size:12px;font-weight:600">${escapeHtml(o.executorId.slice(0, 10))}</span>` +
+    pill(sideLabel, sideClr, sideBg, true) +
+    `<span style="margin-left:auto">${pill(o.status, statusClr, statusBg)}</span>` +
+    `</div>` +
+    `<div style="margin-top:3px;font-size:11px;color:${textMuted}">${subtitle}</div>` +
+    `<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">` +
+    metric("Net PnL", pnlStr, { color: pnlClr, strong: true }) +
+    metric("PnL %", pctStr || "—", { color: pnlClr, strong: true }) +
+    metric("Volume", volStr) +
+    metric("Fees", feesStr || "—") +
+    `</div>` +
+    (detailRows
+      ? `<div style="margin-top:8px;padding-top:6px;border-top:1px solid ${border};font-size:12px;display:flex;flex-direction:column;gap:3px">${detailRows}</div>`
+      : "")
+  );
+}
+
+/** The hover card's width, as `.chart-hover-card` in index.css sets it. */
+const OVERLAY_CARD_W = 224;
+const CARD_GAP = 14;
+const CARD_EDGE = 8;
+
+/**
+ * Put the hover card beside the cursor, in viewport coordinates.
+ *
+ * It sits to the cursor's right and flips left only when the right would run
+ * off-screen, so it does not jump sides as the pointer crosses the chart's
+ * middle. It is vertically centred on the cursor and kept inside the
+ * viewport. A `transform` rather than `left`/`top`, so each crosshair move is
+ * a compositor update instead of a layout.
+ */
+export function placeOverlayTooltip(
+  el: HTMLElement,
+  container: DOMRect,
+  point: { x: number; y: number },
+  height: number,
+): void {
+  const x = container.left + point.x;
+  const y = container.top + point.y;
+  const maxLeft = window.innerWidth - OVERLAY_CARD_W - CARD_EDGE;
+  let left = x + CARD_GAP;
+  if (left > maxLeft) left = x - CARD_GAP - OVERLAY_CARD_W;
+  left = Math.max(CARD_EDGE, Math.min(left, maxLeft));
+  const top = Math.max(CARD_EDGE, Math.min(y - height / 2, window.innerHeight - height - CARD_EDGE));
+  el.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
 }
 
 /**

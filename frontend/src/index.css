@@ -421,3 +421,31 @@ body {
 
 /* Fade the scrolled-off edges of the main navigation. */
 .main-navigation[data-overflow-left="true"][data-overflow-right="true"] { mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent); }
+
+/* Recharts makes each chart (`tabindex="0"`) and its layers (`-1`) focusable
+   for keyboard navigation, so a mouse click left a focus ring around the plot.
+   Keyboard focus is `:focus-visible` and keeps its ring. */
+.recharts-wrapper :focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* The executor hover card both candle charts draw (renderOverlayTooltipHtml).
+   Placed with `transform` by placeOverlayTooltip; no backdrop blur, which was
+   recomputed on every crosshair move and made the card trail the cursor. */
+.chart-hover-card {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  width: 224px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.35), 0 2px 6px rgb(0 0 0 / 0.08);
+  pointer-events: none;
+  will-change: transform;
+}

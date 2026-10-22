@@ -532,7 +532,8 @@ export function ReportBrowser({
     const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = selectedReport.filename;
+    // Stored as <source>/<file>.html; a download name cannot hold the slash.
+    link.download = selectedReport.filename.replaceAll("/", "_");
     link.click();
     URL.revokeObjectURL(url);
   }, [selectedReport]);

@@ -203,14 +203,11 @@ def create_app() -> FastAPI:
                 )
             if full_path.startswith("reports/"):
                 raise HTTPException(status_code=404, detail="Report not found")
-            # Bookmarked filesystem links from old replies should reach the
+            # A filesystem link to a research file should reach the
             # authenticated viewer too. This only rewrites an address; content
             # is exclusively served by the guarded research API.
-            if (
-                full_path.startswith(".condor/research/")
-                or "/.condor/research/" in full_path
-            ):
-                relative = full_path.split(".condor/research/", 1)[1]
+            if full_path.startswith("data/research/") or "/data/research/" in full_path:
+                relative = full_path.split("data/research/", 1)[1]
                 return RedirectResponse("/research/" + quote(relative, safe="/"))
             if full_path:
                 try:

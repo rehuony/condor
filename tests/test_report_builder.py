@@ -172,6 +172,49 @@ def test_cleanup_keeps_recently_updated_report(reports_dir):
     assert not (reports_dir / "middle.html").exists()
 
 
+def _save_from(source: str) -> str:
+    builder = reports.ReportBuilder("Scan · Binance Perp").source("routine", source)
+    builder.markdown("ok")
+    return asyncio.run(builder.save())
+
+
+def test_each_source_keeps_its_reports_in_its_own_folder(reports_dir):
+    report_id = _save_from("agent/trend_watch")
+
+    filename = store.get_report(report_id)["filename"]
+    assert re.fullmatch(
+        rf"agent_trend_watch/\d{{8}}_\d{{6}}_{report_id}\.html", filename
+    )
+    assert (reports_dir / filename).is_file()
+
+
+def test_a_busy_source_never_evicts_another_and_deletes_drop_empty_folders(
+    reports_dir, monkeypatch
+):
+    monkeypatch.setattr(store, "MAX_REPORTS", 2)
+    quiet = _save_from("quiet")
+    busy = [_save_from("busy") for _ in range(3)]
+
+    kept = {entry["id"] for entry in store._read_index()}
+    assert kept == {quiet, *busy[1:]}
+    assert not list((reports_dir / "busy").glob(f"*_{busy[0]}.html"))
+
+    asyncio.run(store.delete_reports(source_name=["busy"]))
+    assert not (reports_dir / "busy").exists()
+    assert (reports_dir / "quiet").is_dir()
+
+
+def test_a_poisoned_entry_never_deletes_outside_the_reports_root(reports_dir):
+    outside = reports_dir.parent / "keep.html"
+    outside.write_text("keep", encoding="utf-8")
+    store._write_index([{"id": "bad", "filename": "../keep.html", "source_name": "x"}])
+
+    asyncio.run(store.delete_reports(report_ids=["bad"]))
+
+    assert outside.read_text(encoding="utf-8") == "keep"
+    assert store._read_index() == []
+
+
 def test_footprint_filters_invalid_rows_and_keeps_zero_visible():
     candles = [
         {

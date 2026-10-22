@@ -14,6 +14,28 @@ export interface ResearchFile {
   body: string | null;
 }
 
+/** One study's entry point, as the index describes it. */
+export interface ResearchStudy {
+  path: string;
+  topic: string;
+  date: string;
+  study: string;
+  title: string;
+  summary: string;
+  created_at: string | null;
+  modified_at: string;
+}
+
+export async function listResearch(signal?: AbortSignal): Promise<ResearchStudy[]> {
+  const response = await authFetch("/api/v1/research", { signal });
+  if (!response.ok) {
+    throw new Error(response.status === 403
+      ? "Only administrators can access this install's research files."
+      : "Unable to load research. Please try again.");
+  }
+  return (await response.json()).studies;
+}
+
 async function readFile(path: string, download: boolean, signal?: AbortSignal): Promise<Response> {
   const response = await authFetch(researchApiHref(path, download), { signal });
   if (!response.ok) {

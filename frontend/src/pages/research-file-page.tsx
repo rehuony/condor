@@ -73,7 +73,10 @@ function ResearchFileView({ path }: { path: string }) {
           <span className="hidden sm:inline">Back to chat</span><span className="sm:hidden">Chat</span>
         </Link>
         <span className="mx-1 h-4 w-px shrink-0 bg-[var(--color-border)]" aria-hidden="true" />
-        <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+        {/* A breadcrumb back to every study, so one report is not a dead end. */}
+        <Link to="/research" className={`${ACTION} shrink-0`}>Research</Link>
+        <span className="shrink-0 text-xs text-[var(--color-text-muted)]" aria-hidden="true">/</span>
+        <FileText className="ml-1 h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
         <span className="min-w-0 truncate text-xs font-medium" title={file?.name ?? path.split("/").pop()}>{file?.name ?? path.split("/").pop()}</span>
         {file && <span className="hidden shrink-0 text-xs tabular-nums text-[var(--color-text-muted)] sm:inline">{fileSize(file.size)}</span>}
         <span className="ml-auto" />

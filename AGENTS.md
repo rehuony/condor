@@ -9,6 +9,7 @@
 
 - Write maintained documentation, comments, templates, and agent instructions in English. Preserve required localized content and language-specific test fixtures.
 - Describe current behavior and reusable constraints concisely. Keep incident narratives and run-specific evidence in research artifacts.
+- Name repository files by their path from the repository root: root-relative links (`/docs/maintenance.md`) in documentation and code-span paths (`agents/_defaults/research-artifacts.md`) in agent instructions. Do not write `../` chains; a skill copied into `.condor/agents/` would resolve them against the wrong directory.
 
 ## Repository maintenance
 
@@ -19,7 +20,7 @@
 
 ## Research artifacts
 
-- Keep generated reports, datasets, and execution evidence in ignored `.condor/research/`, following the [artifact standard](agents/_defaults/research-artifacts.md) and [report template](agents/_defaults/research-report.md). Source code, tests, and maintained documentation use their normal locations.
+- Keep generated reports, datasets, and execution evidence in ignored `data/research/`, following the [artifact standard](agents/_defaults/research-artifacts.md) and [report template](agents/_defaults/research-report.md). Source code, tests, and maintained documentation use their normal locations.
 - Pass the allocated directory and standard to delegated researchers. Preserve contents and relative references when moving existing artifacts.
 - Share descriptive `/research/<relative-path>/report.md` links, without local absolute paths in labels or targets.
 

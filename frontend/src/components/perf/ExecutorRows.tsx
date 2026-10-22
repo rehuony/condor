@@ -1,5 +1,6 @@
 import { Download, Square, X } from "lucide-react";
 import { useCallback, useMemo, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 
 import {
   ExecutorTable,
@@ -121,8 +122,14 @@ export function DeleteConfirmDialog({ ids, onConfirm, onCancel, label, pending =
   );
 }
 
-/** What a selection lets you do to it, drawn only while there is one. */
-function BulkActionBar({
+const TOOL = "flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-primary)]";
+
+/**
+ * The executors' toolbar, drawn in the band's tab row and always there while
+ * the table is: Export is always offered (the selection, or every row), and a
+ * selection adds its count, Stop and Clear beside it, in the same row.
+ */
+function ExecutorToolbar({
   count,
   onStop,
   onExport,
@@ -137,33 +144,41 @@ function BulkActionBar({
   stopping: boolean;
   activeCount: number;
 }) {
-  if (count === 0) return null;
   return (
-    <div className="flex items-center gap-3 border-b border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 px-3 py-1.5">
-      <span className="text-xs font-medium">{count} selected</span>
-      <div className="flex-1" />
+    <div className="flex items-center gap-1.5">
+      {count > 0 && (
+        <>
+          <span className="whitespace-nowrap px-1 text-xs text-[var(--color-text-muted)]">
+            <span className="font-medium text-[var(--color-text)]">{count}</span> selected
+          </span>
+          {activeCount > 0 && (
+            <button
+              onClick={onStop}
+              disabled={stopping}
+              className={`${TOOL} bg-[var(--color-red)] text-white hover:opacity-90`}
+            >
+              <Square className="h-3 w-3" />
+              {stopping ? "Stopping…" : `Stop ${activeCount}`}
+            </button>
+          )}
+          <button
+            onClick={onClear}
+            className={`${TOOL} text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]`}
+            title="Clear selection"
+            aria-label="Clear selection"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          <span className="mx-0.5 h-4 w-px bg-[var(--color-border)]" aria-hidden="true" />
+        </>
+      )}
       <button
         onClick={onExport}
-        className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+        title={count > 0 ? "Export the selected executors as CSV" : "Export every executor in this table as CSV"}
+        className={`${TOOL} border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]`}
       >
         <Download className="h-3 w-3" />
         Export CSV
-      </button>
-      {activeCount > 0 && <button
-        onClick={onStop}
-        disabled={stopping}
-        className="flex items-center gap-1.5 rounded-md bg-[var(--color-red)] px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90 transition-colors disabled:opacity-50"
-      >
-        <Square className="h-3 w-3" />
-        {stopping ? "Stopping…" : "Stop Selected"}
-      </button>}
-      <button
-        onClick={onClear}
-        className="rounded p-1 hover:bg-[var(--color-surface-hover)] transition-colors"
-        title="Clear selection"
-        aria-label="Clear selection"
-      >
-        <X className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -184,6 +199,7 @@ function BulkActionBar({
  * about it.
  */
 export function ExecutorRows({
+  actionSlot,
   executors,
   stop,
   deletion,
@@ -193,6 +209,8 @@ export function ExecutorRows({
   rateFormatValue,
   rateFormatDetailed,
 }: {
+  /** Where the toolbar renders: the band's tab row; inline above the table without one. */
+  actionSlot?: HTMLElement | null;
   executors: ExecutorInfo[];
   stop: ExecutorStop;
   deletion?: ExecutorDelete;
@@ -254,42 +272,44 @@ export function ExecutorRows({
 
   const handleStopOne = useCallback((id: string) => stop.request([id]), [stop]);
 
+  const toolbar = (
+    <ExecutorToolbar
+      count={selected.length}
+      onStop={handleBulkStop}
+      onExport={() => exportExecutorsCsv(selected.length > 0 ? selected : executors)}
+      onClear={() => setSelectedIds(new Set())}
+      stopping={stop.pending}
+      activeCount={selected.filter((ex) => isExecutorActive(ex.status)).length}
+    />
+  );
+
   return (
-    <div className="flex min-h-0 flex-col">
-      <BulkActionBar
-        count={selected.length}
-        onStop={handleBulkStop}
-        onExport={() => exportExecutorsCsv(selected.length > 0 ? selected : executors)}
-        onClear={() => setSelectedIds(new Set())}
-        stopping={stop.pending}
-        activeCount={selected.filter((ex) => isExecutorActive(ex.status)).length}
-      />
+    <div className="flex flex-col">
+      {actionSlot ? createPortal(toolbar, actionSlot) : toolbar}
       {stop.error && (
         <p className="px-3 py-1.5 text-[11px] text-[var(--color-red)] bg-[var(--color-red)]/5">
           {stop.error}
         </p>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-        <ExecutorTable
-          executors={executors}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          onSort={handleSort}
-          selectedIds={selectedIds}
-          onToggleSelect={toggleSelect}
-          onSelectAll={toggleSelectAll}
-          allSelected={allSelected}
-          onRowClick={onSelect}
-          selectedExecutorId={selectedId}
-          onStop={handleStopOne}
-          stoppingIds={stop.stoppingIds}
-          onDelete={deletion ? (id) => deletion.request([id]) : undefined}
-          deletingIds={deletion?.deletingIds}
-          rateFormatPnl={rateFormatPnl}
-          rateFormatValue={rateFormatValue}
-          rateFormatDetailed={rateFormatDetailed}
-        />
-      </div>
+      <ExecutorTable
+        executors={executors}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={handleSort}
+        selectedIds={selectedIds}
+        onToggleSelect={toggleSelect}
+        onSelectAll={toggleSelectAll}
+        allSelected={allSelected}
+        onRowClick={onSelect}
+        selectedExecutorId={selectedId}
+        onStop={handleStopOne}
+        stoppingIds={stop.stoppingIds}
+        onDelete={deletion ? (id) => deletion.request([id]) : undefined}
+        deletingIds={deletion?.deletingIds}
+        rateFormatPnl={rateFormatPnl}
+        rateFormatValue={rateFormatValue}
+        rateFormatDetailed={rateFormatDetailed}
+      />
     </div>
   );
 }

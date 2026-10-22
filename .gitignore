@@ -187,7 +187,7 @@ node_modules/
 /improvements/
 /features/
 
-# Routine reports
+# Routine reports from before they moved under data/
 /reports/
 
 # Runtime store: one root for everything this deployment knows about its users

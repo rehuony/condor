@@ -5,21 +5,21 @@ maintained for the owner's personal use. Prioritize personal workflows and
 reliability; external issues, feature requests, and pull requests are not accepted.
 `main` is the development and release baseline. `origin` points to this repository;
 development and deployment do not synchronize another Condor repository. Project
-provenance is recorded in the [README](../README.md); usage is in the
+provenance is recorded in the [README](/README.md); usage is in the
 [user guide](user-guide.md).
 
 ## Repository layout
 
 Product code lives in `main.py`, `config_manager.py` and the `condor/`,
 `handlers/`, `routines/`, `agents/`, `mcp_servers/`, `utils/` and `frontend/` trees.
-Operational scripts live under [`scripts/shell/`](../scripts/README.md): the Makefile only
+Operational scripts live under [`scripts/shell/`](/scripts/README.md): the Makefile only
 dispatches to them, so a target's behavior is read in one script, and the default
 target is `make help`. Files copied into a new installation live in `templates/`.
-Runtime state (`.env`, `config.yml`, `data/`, `reports/`, `.condor/`) is ignored by Git.
+Runtime state (`.env`, `config.yml`, `data/`, `.condor/`) is ignored by Git.
 
 Keep the root free of operational scripts. When moving one, update the Makefile,
 CI, tests, documentation and every message that names it in the same change, as
-[scripts/README.md](../scripts/README.md) describes.
+[scripts/README.md](/scripts/README.md) describes.
 
 ## Development and publication
 
@@ -89,8 +89,8 @@ Run targeted regression tests while developing, then the applicable release
 checks before publication. Use controlled data for browser checks; do not place
 real trades as a test. Documentation-only changes need link and contract checks,
 not unrelated behavior tests. Report failed or unavailable checks explicitly.
-Keep generated evidence in `.condor/research/` under the
-[artifact standard](../agents/_defaults/research-artifacts.md).
+Keep generated evidence in `data/research/` under the
+[artifact standard](/agents/_defaults/research-artifacts.md).
 
 ## Deployment and updates
 

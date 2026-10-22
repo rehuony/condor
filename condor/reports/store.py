@@ -6,6 +6,8 @@ import asyncio
 import contextvars
 import json
 import os
+import re
+from collections import Counter
 from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,6 +15,7 @@ from pathlib import Path
 from condor import paths
 from condor.fsutil import atomic_write_json, atomic_write_text
 
+#: Reports kept per source; a routine that runs every minute never evicts another's.
 MAX_REPORTS = int(os.environ.get("CONDOR_MAX_REPORTS", "100"))
 
 _index_lock = asyncio.Lock()
@@ -31,9 +34,36 @@ _report_owner: contextvars.ContextVar[int | None] = contextvars.ContextVar(
 
 
 def _charts_dir() -> Path:
-    # reports/ is a repository-root output directory, not this source package;
-    # condor.paths owns it, so $CONDOR_REPORTS_DIR moves it after import.
+    # condor.paths owns the reports root, so $CONDOR_REPORTS_DIR moves it after
+    # import.
     return paths.reports_dir()
+
+
+def report_folder(source_name: str) -> str:
+    """The directory one source's reports share under the reports root.
+
+    Leading dots and underscores are stripped, so a source never lands in a
+    reserved directory such as ``_assets``.
+    """
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", source_name or "").strip("._")
+    return name or "unsorted"
+
+
+def _remove_report_file(entry: dict) -> None:
+    """Unlink an entry's file, and its source directory once that is empty.
+
+    The index is untrusted, so nothing outside the reports root is touched.
+    """
+    root = _charts_dir().resolve()
+    path = (root / entry["filename"]).resolve()
+    if not path.is_relative_to(root) or path == root:
+        return
+    path.unlink(missing_ok=True)
+    if path.parent != root:
+        try:
+            path.parent.rmdir()
+        except OSError:
+            pass  # Other reports of the source are still there.
 
 
 def _index_file() -> Path:
@@ -206,7 +236,7 @@ def list_reports(
     subject: str | None = None,
     source_name: str | Iterable[str] | None = None,
     source_prefix: str | None = None,
-    limit: int = 50,
+    limit: int | None = 50,
     offset: int = 0,
     owner_id: int | None = None,
 ) -> tuple[list[dict], int]:
@@ -265,7 +295,8 @@ def list_reports(
         ]
 
     total = len(entries)
-    return entries[offset : offset + limit], total
+    end = None if limit is None else offset + limit
+    return entries[offset:end], total
 
 
 def list_reports_grouped(owner_id: int | None = None) -> list[dict]:
@@ -345,7 +376,7 @@ async def delete_reports(
         # entry pointing at a file that is gone.
         _write_index([entry for entry in entries if not matches(entry)])
         for entry in doomed:
-            (_charts_dir() / entry["filename"]).unlink(missing_ok=True)
+            _remove_report_file(entry)
     return [entry["id"] for entry in doomed]
 
 
@@ -354,18 +385,27 @@ async def delete_report(report_id: str) -> bool:
     return bool(await delete_reports(report_ids=[report_id]))
 
 
-def _cleanup_locked(max_reports: int = MAX_REPORTS) -> None:
-    """Run cleanup while the caller already holds the index lock."""
+def _cleanup_locked(max_reports: int | None = None) -> None:
+    """Keep each source's newest ``max_reports``; the caller holds the index lock."""
+    if max_reports is None:
+        max_reports = MAX_REPORTS
     entries = _read_index()
-    if len(entries) <= max_reports:
-        return
-    entries.sort(
-        key=lambda entry: entry.get("updated_at") or entry.get("created_at", "")
+    newest_first = sorted(
+        entries,
+        key=lambda entry: entry.get("updated_at") or entry.get("created_at", ""),
+        reverse=True,
     )
-    to_remove = entries[: len(entries) - max_reports]
-    keep_ids = {entry["id"] for entry in entries[len(entries) - max_reports :]}
-    for entry in to_remove:
-        path = _charts_dir() / entry["filename"]
-        if path.exists():
-            path.unlink()
-    _write_index([entry for entry in entries if entry["id"] in keep_ids])
+    kept_per_source: Counter[str] = Counter()
+    doomed = []
+    for entry in newest_first:
+        source = entry.get("source_name", "")
+        if kept_per_source[source] < max_reports:
+            kept_per_source[source] += 1
+        else:
+            doomed.append(entry)
+    if not doomed:
+        return
+    doomed_ids = {entry["id"] for entry in doomed}
+    _write_index([entry for entry in entries if entry["id"] not in doomed_ids])
+    for entry in doomed:
+        _remove_report_file(entry)

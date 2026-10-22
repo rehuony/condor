@@ -22,6 +22,7 @@ const Dex = lazy(() => import("@/pages/Dex").then((m) => ({ default: m.Dex })));
 const DexPool = lazy(() => import("@/pages/DexPool").then((m) => ({ default: m.DexPool })));
 const Portfolio = lazy(() => import("@/pages/Portfolio").then((m) => ({ default: m.Portfolio })));
 const ResearchFilePage = lazy(() => import("@/pages/research-file-page").then((m) => ({ default: m.ResearchFilePage })));
+const ResearchIndexPage = lazy(() => import("@/pages/research-index-page").then((m) => ({ default: m.ResearchIndexPage })));
 const Routines = lazy(() => import("@/pages/Routines").then((m) => ({ default: m.Routines })));
 const Settings = lazy(() => import("@/pages/Settings").then((m) => ({ default: m.Settings })));
 
@@ -131,6 +132,7 @@ export default function App() {
                     />
                     <Route path="/routines" element={<Routines />} />
                     <Route path="/reports" element={<Navigate to="/routines?tab=reports" replace />} />
+                    <Route path="/research" element={<ResearchIndexPage />} />
                     <Route path="/research/*" element={<ResearchFilePage />} />
                     {/* `/agents` has pointed at the home since the fleet grid
                         was deleted, and the home is the conversation with every

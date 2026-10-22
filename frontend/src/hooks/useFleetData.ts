@@ -70,6 +70,12 @@ export interface FleetData {
   rateFormatValue: (val: number, quote: string) => string;
   rateFormatDetailed: (val: number, quote: string) => string;
   isLoading: boolean;
+  /**
+   * The data the chart folds is still on its first load: the performance
+   * history and, for Terminated, the finished runs and their controllers. The
+   * chart shows an empty card meanwhile rather than "No performance history".
+   */
+  historyLoading: boolean;
   error: unknown;
   /** `false` only when the server answered and said it could not be reached. */
   serverOnline: boolean;
@@ -211,7 +217,7 @@ export function useFleetData(
   //
   // Each walk is still paged, for the reason it always was: a page is capped at
   // 1000 rows and one controller's month at `5m` is 8,640 (CORR-237).
-  const { data: perfHistory } = useQuery({
+  const { data: perfHistory, isLoading: perfHistoryLoading } = useQuery({
     // Built by the factory, not by hand: the shared socket's prefix-matched
     // live merge (`mergeIntoMatchingQueries`) only finds this entry while the
     // key keeps the shape stated on `controllerPerfHistoryAllQuery` (ARCH-285).
@@ -306,7 +312,7 @@ export function useFleetData(
 
   // The finished runs, which only the Terminated population reports — so the
   // request is not made at all while the reader is looking at the live fleet.
-  const { data: runsData } = useQuery({
+  const { data: runsData, isLoading: runsLoading } = useQuery({
     queryKey: ["bot-runs", server],
     queryFn: () => botsApi.getBotRuns(server!, { limit: 200 }),
     enabled: on && population === "terminated",
@@ -321,7 +327,7 @@ export function useFleetData(
   // what gives Terminated real controllers under real bots instead of one
   // `(unattached)` bucket — and the route serves it warm, so this poll is a
   // net rather than a cost.
-  const { data: terminatedData } = useQuery({
+  const { data: terminatedData, isLoading: terminatedLoading } = useQuery({
     queryKey: ["terminated-controllers", server],
     queryFn: () => botsApi.getTerminatedControllers(server!),
     enabled: on && population === "terminated",
@@ -375,6 +381,7 @@ export function useFleetData(
     rateFormatValue: formatValue,
     rateFormatDetailed: formatValueDetailed,
     isLoading,
+    historyLoading: perfHistoryLoading || runsLoading || terminatedLoading,
     error,
     serverOnline: data?.server_online !== false,
     errorHint: data?.error_hint,

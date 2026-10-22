@@ -88,7 +88,7 @@ function AppShellBody() {
   // loops and journals, none of which is an exchange — so blocking it would
   // teach nobody anything. Matched exactly rather than by prefix, because `/`
   // prefixes every route in the app.
-  const exemptRoutes = ["/routines", "/settings", "/research/"];
+  const exemptRoutes = ["/routines", "/settings", "/research"];
   const showKeysOverlay =
     server && !keysLoading && hasKeys === false && pathname !== "/" &&
     !exemptRoutes.some((r) => pathname.startsWith(r));
@@ -121,19 +121,20 @@ function AppShellBody() {
 
   return (
     <div className="flex h-dvh min-w-0 flex-col">
-      {/* Top bar: one row from sm up. The nav is a size container: when its
-          own width cannot hold every label it keeps only the current page's,
+      {/* Top bar: always one row. The nav is a size container: when its own
+          width cannot hold every label it keeps only the current page's,
           showing the rest as icons (label in the tooltip and for screen
-          readers), and if even that does not fit it scrolls under the edge
-          fades. Only a phone, too narrow for the nav beside the controls,
-          gives the nav its own full-width row. */}
-      <header className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 max-sm:pt-1 sm:h-12 sm:flex-nowrap xl:gap-x-4 xl:px-4">
-        <NavLink to="/" className="flex shrink-0 items-center gap-2 font-bold tracking-tight">
+          readers); narrower still, the current page is an icon too, and if
+          even that does not fit it scrolls under the edge fades. A phone
+          gives the nav the room instead of the logo, which only repeats the
+          Agents link, and the server and currency selectors. */}
+      <header className="flex h-12 shrink-0 items-center gap-x-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 xl:gap-x-4 xl:px-4">
+        <NavLink to="/" className="flex shrink-0 items-center gap-2 font-bold tracking-tight max-sm:hidden">
           <img src="/condor_old.jpeg" alt="Condor" className="h-6 w-6 rounded-full" />
           <span className="hidden text-sm lg:inline">Condor</span>
         </NavLink>
 
-        <nav ref={navRef} onScroll={updateNavEdges} aria-label="Main navigation" data-overflow-left={navEdges.left} data-overflow-right={navEdges.right} className="main-navigation @container flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto max-sm:order-last max-sm:basis-full">
+        <nav ref={navRef} onScroll={updateNavEdges} aria-label="Main navigation" data-overflow-left={navEdges.left} data-overflow-right={navEdges.right} className="main-navigation @container flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -141,7 +142,7 @@ function AppShellBody() {
               end={to === "/"}
               title={label}
               className={({ isActive }) =>
-                `flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors ${
+                `flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors @max-[24rem]:px-2.5 ${
                   isActive
                     ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
                     : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
@@ -151,7 +152,7 @@ function AppShellBody() {
               {({ isActive }) => (
                 <>
                   <Icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className={isActive ? undefined : "@max-[42rem]:sr-only"}>{label}</span>
+                  <span className={isActive ? "@max-[20rem]:sr-only" : "@max-[42rem]:sr-only"}>{label}</span>
                 </>
               )}
             </NavLink>
@@ -160,8 +161,10 @@ function AppShellBody() {
 
         {/* Right: server selector + controls */}
         <div className="ml-auto flex shrink-0 items-center gap-1 xl:gap-3">
-          <ServerSelector />
-          <CurrencySelector />
+          <div className="flex items-center gap-1 max-sm:hidden xl:gap-3">
+            <ServerSelector />
+            <CurrencySelector />
+          </div>
 
           <div className="flex items-center gap-1">
             {/* Inside the ChatProvider on purpose: the bell reads the same

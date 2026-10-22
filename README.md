@@ -30,7 +30,8 @@ make run
 the headless Chrome used for charts, and runs `make doctor`. The wizard asks how you will use
 Condor — **Telegram** (needs a bot token and your Telegram user id) or **Local** (no bot, see
 [Local mode](docs/user-guide.md#local-mode-no-telegram)) — and the AI model, then connects to
-an existing Hummingbot API or builds and deploys one next to Condor (`../hummingbot-api`).
+an existing Hummingbot API or builds and deploys one in a `hummingbot-api` directory beside
+the Condor checkout (`HB_API_DIR` overrides it).
 Re-run `make setup` at any time; it preserves existing configuration.
 
 > **Use Tailscale in production.** Condor controls real trading: orders, balances, bots and

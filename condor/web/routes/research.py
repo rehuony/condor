@@ -18,6 +18,9 @@ router = APIRouter(prefix="/research", tags=["research"])
 
 MAX_TEXT_PREVIEW = 1024 * 1024
 MAX_IMAGE_PREVIEW = 10 * 1024 * 1024
+
+#: Enough of a report to read its frontmatter and H1 for the index.
+_REPORT_HEAD = 64 * 1024
 _TEXT_EXTENSIONS = {
     ".md",
     ".markdown",
@@ -117,6 +120,51 @@ def _resolve(path: str) -> Path:
     except (OSError, ValueError, RuntimeError):
         pass
     raise HTTPException(404, "Research file not found")
+
+
+@router.get("")
+def list_research(user: WebUser = Depends(get_current_user)):
+    """Every study's report, newest first, described by its frontmatter.
+
+    Only ``<topic>/<date>/<study>/report.md`` is a study (the artifact
+    standard); each goes through :func:`_resolve`, so a symlink or hidden path
+    is skipped exactly as the file route refuses it.
+    """
+    require_admin(user)
+    root = paths.research_dir()
+    studies = []
+    for report in sorted(root.glob("*/*/*/report.md")) if root.is_dir() else []:
+        relative = report.relative_to(root).as_posix()
+        try:
+            file = _resolve(relative)
+            stat = file.stat()
+            with file.open("rb") as stream:
+                head = stream.read(_REPORT_HEAD).decode("utf-8-sig", "replace")
+        except (HTTPException, OSError):
+            continue
+        meta = _markdown_preview(head, file.name)
+        modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+        created = (
+            datetime.fromisoformat(meta["created_at"]) if meta["created_at"] else None
+        )
+        topic, date, study, _ = relative.split("/")
+        studies.append(
+            (
+                created or modified,
+                {
+                    "path": relative,
+                    "topic": topic,
+                    "date": date,
+                    "study": study,
+                    "title": meta["title"] if meta["title"] != file.name else study,
+                    "summary": meta["summary"],
+                    "created_at": meta["created_at"],
+                    "modified_at": modified.isoformat(),
+                },
+            )
+        )
+    studies.sort(key=lambda item: item[0], reverse=True)
+    return JSONResponse({"studies": [entry for _, entry in studies]}, headers=_HEADERS)
 
 
 @router.get("/{path:path}")

@@ -7,7 +7,7 @@ only market scanned. The 4H breakout signal was retired: it was negative R in
 and out of sample. The clarity threshold remains 80, with no card-count or
 cooldown cap.
 Historical validation used a 48-hour observation horizon; live positions have no
-time-based exit. The preserved study is under .condor/research/trend-watch-clarity/.
+time-based exit. The preserved study is under data/research/trend-watch-clarity/.
 """
 
 import asyncio

@@ -18,8 +18,9 @@
 - **Short tool chains.** 1–5 calls per response or tick. One skill-driven flow
   beats a long chain of raw calls that reconstructs what the playbook says.
 - **Research has one readable entry point.** New research belongs under
-  `.condor/research/<topic>/<YYYY-MM-DD>/<HHmmss>-<short-id>/report.md`
-  using UTC timestamps and a unique short ID. Follow
+  `data/research/<topic>/<YYYY-MM-DD>/<HHmmss>-<short-id>/report.md`
+  using UTC timestamps and a six-hex short ID; reuse the existing topic for the
+  same subject. Follow
   `agents/_defaults/research-artifacts.md` and its report template for layout,
   metadata and links. Pass the destination and standard to delegated researchers.
   Share descriptive `/research/<relative-path>/report.md` links, never local

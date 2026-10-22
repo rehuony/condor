@@ -62,9 +62,9 @@ def test_deep_link_falls_back_to_index(client):
     assert resp.content == INDEX_HTML.read_bytes()
 
 
-def test_old_research_bookmark_redirects_without_exposing_a_local_directory(client):
+def test_research_file_link_redirects_without_exposing_a_local_directory(client):
     resp = client.get(
-        "/Users/alice/project/.condor/research/topic/REVIEW.zh-CN.md",
+        "/Users/alice/project/data/research/topic/REVIEW.zh-CN.md",
         follow_redirects=False,
     )
     assert resp.status_code == 307

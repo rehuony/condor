@@ -27,7 +27,7 @@ def _source_files():
     """Maintained Python sources, excluding vendored trees and research snapshots."""
     for path in REPO.rglob("*.py"):
         relative = path.relative_to(REPO)
-        if relative.parts[:2] == (".condor", "research"):
+        if relative.parts[:2] == ("data", "research"):
             continue
         if SKIP_DIRS.isdisjoint(relative.parts):
             yield path

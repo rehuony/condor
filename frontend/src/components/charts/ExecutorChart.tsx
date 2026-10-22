@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { PairLabel } from "@/components/executor/PairLabel";
+import { attachTimeAxisLabel } from "@/components/trade/timeAxisLabel";
 import { IconButton } from "@/components/ui/IconButton";
 import { FULLSCREEN_LAYER } from "@/components/ui/dialog";
 import { useRates } from "@/hooks/useRates";
@@ -11,6 +12,7 @@ import { marketApi } from "@/lib/api/market";
 import {
   computeMultiOverlays,
   createOverlayTooltipView,
+  placeOverlayTooltip,
   getExecutorColor,
   getOverlayTimeRange,
   getPoolAddress,
@@ -101,6 +103,7 @@ export function ExecutorChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const timeLabelRef = useRef<ReturnType<typeof attachTimeAxisLabel> | null>(null);
   const snapshotTooltipRef = useRef<HTMLDivElement>(null);
   const bubblesRef = useRef<HTMLDivElement>(null);
   const chartModuleRef = useRef<typeof import("lightweight-charts") | null>(null);
@@ -203,7 +206,9 @@ export function ExecutorChart({
           vertLines: { color: colors.grid },
           horzLines: { color: colors.grid },
         },
-        crosshair: { mode: mod.CrosshairMode.Normal },
+        // The native time label is replaced by the trade chart's, so every
+        // candle chart prints the crosshair time as `YYYY-MM-DD   HH:mm`.
+        crosshair: { mode: mod.CrosshairMode.Normal, vertLine: { labelVisible: false } },
         timeScale: { timeVisible: true, secondsVisible: false },
         rightPriceScale: { borderVisible: false },
         localization: {
@@ -224,6 +229,7 @@ export function ExecutorChart({
         borderVisible: false,
       });
       seriesRef.current = series;
+      timeLabelRef.current = attachTimeAxisLabel(chart, containerRef.current);
 
       // One cached tooltip card per chart instance, torn down with the chart.
       const tooltipView = createOverlayTooltipView();
@@ -300,23 +306,7 @@ export function ExecutorChart({
           formatPnl: convertPnlRef.current,
         });
 
-        // Position tooltip on opposite side of cursor (fixed/viewport coords)
-        const containerRect = containerRef.current.getBoundingClientRect();
-        const tooltipW = 280;
-        const cursorInRightHalf = param.point.x > containerRect.width / 2;
-        let left = cursorInRightHalf
-          ? containerRect.left + param.point.x - tooltipW - 16
-          : containerRect.left + param.point.x + 16;
-        if (left < 4) left = 4;
-        if (left + tooltipW > window.innerWidth - 4) left = window.innerWidth - tooltipW - 4;
-        let top = containerRect.top + param.point.y - 10;
-        if (top + tooltipH > window.innerHeight - 4) {
-          top = window.innerHeight - tooltipH - 4;
-        }
-        if (top < 4) top = 4;
-
-        tooltip.style.left = `${left}px`;
-        tooltip.style.top = `${top}px`;
+        placeOverlayTooltip(tooltip, containerRef.current.getBoundingClientRect(), param.point, tooltipH);
       });
 
       // Draw vertical lines for grid boxes on a canvas overlay
@@ -390,6 +380,8 @@ export function ExecutorChart({
 
     return () => {
       cancelled = true;
+      timeLabelRef.current?.detach();
+      timeLabelRef.current = null;
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
@@ -791,33 +783,12 @@ export function ExecutorChart({
       <div ref={wrapperRef} style={{ position: "relative", flex: fullscreen ? 1 : undefined }}>
         <div
           ref={containerRef}
-          style={{ height: fullscreen ? "100%" : height, width: "100%" }}
+          // Positioned: the crosshair time label is laid out inside it.
+          style={{ position: "relative", height: fullscreen ? "100%" : height, width: "100%" }}
         />
         {/* Executor tooltip overlay — rendered via portal to escape overflow-hidden */}
         {createPortal(
-          <div
-            ref={tooltipRef}
-            className="chart-tooltip"
-            style={{
-              display: "none",
-              position: "fixed",
-              top: 0,
-              left: 0,
-              zIndex: 9999,
-              pointerEvents: "none",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 6,
-              padding: "6px 10px",
-              fontSize: 11,
-              color: "var(--color-text)",
-              maxWidth: 280,
-              minWidth: 200,
-              lineHeight: 1.4,
-              backdropFilter: "blur(8px)",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-            }}
-          />,
+          <div ref={tooltipRef} className="chart-hover-card" style={{ display: "none" }} />,
           document.body,
         )}
         {/* Snapshot tooltip overlay */}

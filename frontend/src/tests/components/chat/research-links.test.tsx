@@ -17,9 +17,9 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
 describe("research links in persisted and streamed messages", () => {
-  const absolute = "/Users/alice/Projects/condor/.condor/research/topic/REVIEW.md";
+  const absolute = "/Users/alice/Projects/condor/data/research/topic/REVIEW.md";
   for (const live of [true, false]) {
-    for (const href of [absolute, `file://${absolute}`, `${window.location.origin}${absolute}`, ".condor/research/topic/REVIEW.md"]) {
+    for (const href of [absolute, `file://${absolute}`, `${window.location.origin}${absolute}`, "data/research/topic/REVIEW.md"]) {
       it(`opens a private preview without a local path: ${href}, live=${live}`, () => {
         act(() => root.render(<ChatMessageView live={live} message={{ id: "m", role: "assistant", toolCalls: [], text: `[${absolute}](${href})` }} />));
         const link = container.querySelector("a")!;
@@ -31,18 +31,23 @@ describe("research links in persisted and streamed messages", () => {
     }
   }
   it("keeps descriptive labels and ordinary web references", () => {
-    act(() => root.render(<ChatMessageView message={{ id: "m", role: "assistant", toolCalls: [], text: `[调研结论](${absolute}) [Source](https://example.com/.condor/research/a.md)` }} />));
+    act(() => root.render(<ChatMessageView message={{ id: "m", role: "assistant", toolCalls: [], text: `[调研结论](${absolute}) [Source](https://example.com/data/research/a.md)` }} />));
     expect(container.querySelector("a")?.textContent).toBe("调研结论");
-    expect(container.querySelectorAll("a")[1].href).toBe("https://example.com/.condor/research/a.md");
+    expect(container.querySelectorAll("a")[1].href).toBe("https://example.com/data/research/a.md");
   });
 });
 
 it("encodes Unicode and percent names once and resolves sibling attachments", () => {
   const href = "/research/%E4%B8%BB%E9%A2%98/%E5%A4%8D%E7%9B%98%20100%25.md";
-  expect(researchLink(".condor/research/主题/复盘 100%.md")?.href).toBe(href);
+  expect(researchLink("data/research/主题/复盘 100%.md")?.href).toBe(href);
   expect(researchLink(href)).toEqual({ path: "主题/复盘 100%.md", href });
   expect(researchLink("../data.json", "topic/day/REVIEW.md")?.href).toBe("/research/topic/data.json");
   expect(researchLink("./notes.md#summary", "topic/day/REVIEW.md")?.href).toBe("/research/topic/day/notes.md#summary");
+});
+
+it("reads data/research/ links from a report and keeps a study's own data/ links relative", () => {
+  expect(researchLink("data/research/topic/day/s/report.md", "other/day/s/report.md")?.href).toBe("/research/topic/day/s/report.md");
+  expect(researchLink("data/prices.csv", "topic/day/s/report.md")?.href).toBe("/research/topic/day/s/data/prices.csv");
 });
 
 it("does not turn traversal, hidden files or external hosts into research requests", () => {

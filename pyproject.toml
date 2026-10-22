@@ -54,6 +54,8 @@ extend-exclude = "agents/[^/]+/controllers/"
 
 [tool.isort]
 profile = "black"
+# Like black: gitignored run output (data/research scripts) is not source.
+skip_gitignore = true
 extend_skip_glob = ["agents/*/controllers/*"]
 
 [tool.setuptools.package-data]

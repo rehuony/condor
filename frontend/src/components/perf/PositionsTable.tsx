@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 
-import { DENSE_TD, DENSE_TH, DENSE_TH_NUM } from "@/components/ui/table";
 import { formatCurrencyPnl, formatCurrencyVolume, pnlColor } from "@/lib/formatters";
 import {
   formatAmount,
@@ -25,6 +24,10 @@ function SideTag({ side }: { side: string }) {
   );
 }
 
+/** One line per cell, each column centred under its header; wide tables scroll sideways. */
+const TH = "whitespace-nowrap px-3 py-1.5 text-center font-medium";
+const TD = "whitespace-nowrap px-3 py-1.5 text-center";
+
 /**
  * The bottom band's positions occupant: every open position in scope, one grid.
  *
@@ -45,26 +48,26 @@ export function PositionsTable({
   const extraColumns = useMemo(() => positionExtraColumns(rows), [rows]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin border-t border-[var(--color-border)]/60">
+    <div className="border-t border-[var(--color-border)]/60">
       <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="border-y border-[var(--color-border)]/60 bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-              {showController && <th className={DENSE_TH}>Controller</th>}
-              <th className={DENSE_TH}>Connector</th>
-              <th className={DENSE_TH}>Pair</th>
-              <th className={DENSE_TH}>Side</th>
-              <th className={DENSE_TH_NUM}>Amount</th>
-              <th className={DENSE_TH_NUM}>Breakeven</th>
-              <th className={DENSE_TH_NUM} title="Amount x breakeven price">
+              {showController && <th className={TH}>Controller</th>}
+              <th className={TH}>Connector</th>
+              <th className={TH}>Pair</th>
+              <th className={TH}>Side</th>
+              <th className={TH}>Amount</th>
+              <th className={TH}>Breakeven</th>
+              <th className={TH} title="Amount x breakeven price">
                 Notional
               </th>
               {extraColumns.map((k) => (
-                <th key={k} className={DENSE_TH_NUM}>{k}</th>
+                <th key={k} className={TH}>{k}</th>
               ))}
-              <th className={DENSE_TH_NUM}>Realized</th>
-              <th className={DENSE_TH_NUM}>Unrealized</th>
-              <th className={DENSE_TH_NUM}>Volume</th>
+              <th className={TH}>Realized</th>
+              <th className={TH}>Unrealized</th>
+              <th className={TH}>Volume</th>
             </tr>
           </thead>
           <tbody>
@@ -73,16 +76,16 @@ export function PositionsTable({
               return (
                 <tr key={row.id} className="border-b border-[var(--color-border)]/30 last:border-0">
                   {showController && (
-                    <td className="px-3 py-1.5 max-w-[220px] truncate" title={row.ctrlLabel}>
+                    <td className={`${TD} max-w-[220px] truncate`} title={row.ctrlLabel}>
                       {row.ctrlLabel}
                     </td>
                   )}
-                  <td className="px-3 py-1.5 text-[var(--color-text-muted)]">{row.connector || "—"}</td>
-                  <td className="px-3 py-1.5 font-medium">{row.pair || "—"}</td>
-                  <td className={DENSE_TD}><SideTag side={row.side} /></td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{formatAmount(row.amount)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{formatAmount(row.breakeven)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">
+                  <td className={`${TD} text-[var(--color-text-muted)]`}>{row.connector || "—"}</td>
+                  <td className={`${TD} font-medium`}>{row.pair || "—"}</td>
+                  <td className={TD}><SideTag side={row.side} /></td>
+                  <td className={`${TD} tabular-nums`}>{formatAmount(row.amount)}</td>
+                  <td className={`${TD} tabular-nums`}>{formatAmount(row.breakeven)}</td>
+                  <td className={`${TD} tabular-nums`}>
                     {row.notional === null
                       ? "—"
                       : formatCurrencyVolume(row.notional, currencySymbol)}
@@ -90,7 +93,7 @@ export function PositionsTable({
                   {extraColumns.map((k) => {
                     const val = extras[k];
                     return (
-                      <td key={k} className="px-3 py-1.5 text-right tabular-nums text-[var(--color-text-muted)]">
+                      <td key={k} className={`${TD} tabular-nums text-[var(--color-text-muted)]`}>
                         {val === undefined || val === null
                           ? "—"
                           : typeof val === "number"
@@ -99,13 +102,13 @@ export function PositionsTable({
                       </td>
                     );
                   })}
-                  <td className="px-3 py-1.5 text-right tabular-nums font-medium" style={{ color: pnlColor(row.realized) }}>
+                  <td className={`${TD} tabular-nums font-medium`} style={{ color: pnlColor(row.realized) }}>
                     {formatCurrencyPnl(row.realized, currencySymbol)}
                   </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-medium" style={{ color: pnlColor(row.unrealized) }}>
+                  <td className={`${TD} tabular-nums font-medium`} style={{ color: pnlColor(row.unrealized) }}>
                     {formatCurrencyPnl(row.unrealized, currencySymbol)}
                   </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">
+                  <td className={`${TD} tabular-nums`}>
                     {formatCurrencyVolume(row.volume, currencySymbol)}
                   </td>
                 </tr>

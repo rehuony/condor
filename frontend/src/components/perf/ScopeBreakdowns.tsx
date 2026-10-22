@@ -43,7 +43,7 @@ export function ScopeBreakdowns({
   symbol: string;
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin border-t border-[var(--color-border)]/60 p-3">
+    <div className="border-t border-[var(--color-border)]/60 p-3">
       <div className="grid gap-3 md:grid-cols-2">
         <Breakdown
           title="By instrument"

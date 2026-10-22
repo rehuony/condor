@@ -64,7 +64,7 @@ _WEB_FORMATTING = (
     "- No message length limits, but stay concise.\n"
     "- Use tables for structured data (portfolios, prices, comparisons).\n"
     "- Use code blocks for configs, JSON, or commands.\n"
-    "- Link research as [Report title](/research/<path relative to .condor/research/>).\n"
+    "- Link research as [Report title](/research/<path relative to data/research/>).\n"
     "  Use descriptive labels, never local filesystem paths.\n"
     "- CHARTS: use a ```chart fence for a useful numeric series or comparison:\n"
     "  ```chart\n"

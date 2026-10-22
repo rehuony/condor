@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { attachTimeAxisLabel } from "@/components/trade/timeAxisLabel";
 import { formatCurrencyPnl } from "@/lib/formatters";
 import type { MetricEntry } from "@/lib/parse-agent";
 import { getThemeColors } from "@/lib/theme-colors";
@@ -23,6 +24,7 @@ export function AgentPnlChart({ data, height = 180, title, bare = false }: Agent
   const chartModuleRef = useRef<typeof import("lightweight-charts") | null>(null);
   const chartRef = useRef<import("lightweight-charts").IChartApi | null>(null);
   const seriesRef = useRef<import("lightweight-charts").ISeriesApi<"Baseline"> | null>(null);
+  const timeLabelRef = useRef<ReturnType<typeof attachTimeAxisLabel> | null>(null);
   // Tracks the point count of the last applied dataset, so we only auto-fit
   // on the first non-empty load and when new points are appended (not on every update).
   const lastLenRef = useRef(0);
@@ -46,7 +48,7 @@ export function AgentPnlChart({ data, height = 180, title, bare = false }: Agent
           vertLines: { color: colors.grid },
           horzLines: { color: colors.grid },
         },
-        crosshair: { mode: mod.CrosshairMode.Normal },
+        crosshair: { mode: mod.CrosshairMode.Normal, vertLine: { labelVisible: false } },
         timeScale: { timeVisible: true, secondsVisible: false },
         rightPriceScale: { borderVisible: false },
         localization: {
@@ -68,6 +70,8 @@ export function AgentPnlChart({ data, height = 180, title, bare = false }: Agent
         lastValueVisible: true,
       });
       seriesRef.current = series;
+      // The same crosshair time label as the candle charts: `YYYY-MM-DD   HH:mm`.
+      timeLabelRef.current = attachTimeAxisLabel(chart, containerRef.current);
       // Signals the data effect that the series is ready to receive data.
       setChartReady(true);
 
@@ -116,6 +120,8 @@ export function AgentPnlChart({ data, height = 180, title, bare = false }: Agent
     return () => {
       cancelled = true;
       setChartReady(false);
+      timeLabelRef.current?.detach();
+      timeLabelRef.current = null;
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
@@ -189,7 +195,7 @@ export function AgentPnlChart({ data, height = 180, title, bare = false }: Agent
         </div>
       )}
       <div style={{ position: "relative" }}>
-        <div ref={containerRef} style={{ height, width: "100%" }} />
+        <div ref={containerRef} style={{ position: "relative", height, width: "100%" }} />
         <div
           ref={tooltipRef}
           style={{

@@ -97,6 +97,7 @@ export function Bots() {
       rateFormatPnl={fleet.rateFormatPnl}
       rateFormatValue={fleet.rateFormatValue}
       rateFormatDetailed={fleet.rateFormatDetailed}
+      historyLoading={fleet.historyLoading}
     />
   );
 }

@@ -142,3 +142,16 @@ def test_routine_route_matches_prefixed_and_base_names(write_index):
 
     assert {r["source_name"] for r in body["reports"]} == {"myagent/pmm", "pmm"}
     assert body["total"] == 2
+
+
+def test_routine_route_lists_every_report_so_the_browser_matches_the_count(
+    write_index,
+):
+    # The sidebar shows the routine's full count; a 50-row page left the rest
+    # unreachable and the browser saying "1 of 50" beside "100".
+    write_index([_entry(i, "busy") for i in range(120)])
+
+    with _client() as client:
+        body = client.get("/api/v1/routines/busy/reports").json()
+
+    assert len(body["reports"]) == body["total"] == 120

@@ -1,18 +1,19 @@
-import { X } from "lucide-react";
+import { ListTree, X } from "lucide-react";
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 
-/** The bar a narrow pane opens the sheet from; `summary` says what is in scope. */
+/**
+ * The button a narrow pane opens the scope sheet from. It sits at the start of
+ * the report header, which already names the scope, so it carries no summary.
+ */
 export function ScopeSheetToggle({
   open,
   setOpen,
   toggleRef,
-  summary,
   onExpand,
 }: {
   open: boolean;
   setOpen: Dispatch<SetStateAction<boolean>>;
   toggleRef: RefObject<HTMLButtonElement | null>;
-  summary: string;
   /** Opening the sheet must also expand a rail collapsed on a wider screen. */
   onExpand: () => void;
 }) {
@@ -23,9 +24,12 @@ export function ScopeSheetToggle({
       setOpen((open) => !open);
     }}
       data-perf-scope-toggle
-      className="hidden min-h-10 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-3 py-2 text-left text-xs narrow-pane:flex">
-      <span className="min-w-0 break-words">{summary}</span>
-      <span className="shrink-0 text-[var(--color-primary)]">{open ? "Hide filters" : "Scope & filters"}</span>
+      aria-label="Scope & filters"
+      title="Scope & filters"
+      className={`hidden h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] narrow-pane:inline-flex ${
+        open ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]" : "text-[var(--color-text-muted)]"
+      }`}>
+      <ListTree className="h-4 w-4" />
     </button>
   );
 }

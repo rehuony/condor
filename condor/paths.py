@@ -19,17 +19,28 @@ apart) and the line between them is *who writes and when*:
     ├── deed_coverage.json
     └── state/{namespace}/
 
-    <repo>/data/                       # or $CONDOR_DATA_DIR
-    ├── condor_state.pickle            # the operational store: what the *bot*
-    ├── notifications.json             # accumulated while it ran, readable and
-    ├── routine_hooks.json             # editable by an operator
-    ├── backtests/
-    └── code_runs/
-
-    <repo>/reports/                    # or $CONDOR_REPORTS_DIR
-    ├── reports_index.json             # what a run had to show for itself:
-    ├── <report_id>.html               # one rendered report per file, indexed
-    └── assets/                        # and served to Telegram and the web
+    <repo>/data/                       # or $CONDOR_DATA_DIR: the operational store,
+    │                                  # what the *bot* accumulated while it ran
+    ├── condor_state.pickle            # per-user state and prefs; .bak = prior write
+    ├── notifications.json             # the dashboard bell, per user
+    ├── routine_hooks.json             # per-routine Telegram/notify hooks, per owner
+    ├── push_subscriptions.json        # Web Push registrations, per browser
+    ├── push_keys/vapid.json           # this install's VAPID keypair (0700 dir)
+    ├── update_run.json                # the current or last /update run
+    ├── trade_cards.json               # trade cards and reserved signals
+    ├── trade_cards/
+    │   ├── charts/<card_id>.png       # a card's chart, to resend a deleted message
+    │   └── previews/<uuid>.png        # Trend Watch charts rendered with send off
+    ├── backtests/                     # summaries in _index.json, payloads .json.gz
+    ├── run_history/                   # _index.json + a gzipped series per bot run
+    ├── code_runs/                     # _index.json + one JSON per run_code run (300)
+    ├── backups/                       # manual backups; nothing in Condor writes here
+    ├── research/                      # studies: <topic>/<date>/<HHmmss>-<id>/report.md
+    └── reports/                       # or $CONDOR_REPORTS_DIR: what runs had to show
+        ├── reports_index.json         # one row per report: id, source, owner, file
+        ├── <source>/<time>_<id>.html  # each source's reports, its newest MAX_REPORTS
+        ├── _assets/                   # the shared plotly bundle reports reference
+        └── _archived/                 # archived bot reports (.json + .png)
 
     <repo>/agents/                     # or $CONDOR_STOCK_AGENTS_ROOT
     ├── <slug>/AGENT.md                # the shipped library: the curated
@@ -60,9 +71,8 @@ env var could move, which cost a re-import shim so monkeypatching still worked
 and made eighteen test modules patch a pair of names by hand. A second
 producer, ``handlers/bots/archived_report.py``, built the bare name ``reports``
 instead, so a process launched from anywhere but the checkout split the store
-in two. It keeps its own root rather than folding into ``data/``: ``/reports/``
-has always had its own ``.gitignore`` line and every install's history is
-already there.
+in two. It now lives under ``data/`` with the rest of what the bot accumulates;
+``$CONDOR_REPORTS_DIR`` still moves it on its own.
 
 ``agents/`` used to be **one** root that was *half version-controlled*: an
 agent's definition and its skill library were committed, the ``store/user_{id}/``
@@ -195,8 +205,12 @@ def data_dir() -> Path:
 
 
 def research_dir() -> Path:
-    """Locally generated research artifacts, kept outside the Git index."""
-    return runtime_root() / "research"
+    """Research studies agents write and the dashboard previews.
+
+    Run output like reports, so it lives under :func:`data_dir`; the layout is
+    ``agents/_defaults/research-artifacts.md``.
+    """
+    return data_dir() / "research"
 
 
 def stock_agents_root() -> Path:
@@ -311,13 +325,9 @@ def code_runs_dir() -> Path:
 def reports_dir() -> Path:
     """Every rendered report, plus ``reports_index.json`` and the shared assets.
 
-    A root of its own and not ``data_dir() / "reports"``: ``/reports/`` has its
-    own ``.gitignore`` entry and every install already has its history there, so
-    folding it in would move files rather than close a split. What it lacked was
-    a resolver -- ``condor/reports/store.py`` built it at import from
-    ``Path(__file__).parents[2]``, which no env var could move, and
-    ``handlers/bots/archived_report.py`` built the bare name ``reports``, which
-    the working directory could. Both come from here now (ARCH-605).
+    ``data_dir() / "reports"``: reports are run output like everything else
+    there. ``condor/reports/store.py`` and ``handlers/bots/archived_report.py``
+    both resolve it here (ARCH-605).
 
     ``$CONDOR_REPORTS_DIR`` overrides it, read on every call for the same reason
     :func:`runtime_root` reads its own.
@@ -325,7 +335,7 @@ def reports_dir() -> Path:
     override = os.environ.get(REPORTS_DIR_ENV)
     if override:
         return Path(override).expanduser()
-    return _PROJECT_ROOT / REPORTS_DIRNAME
+    return data_dir() / REPORTS_DIRNAME
 
 
 def reports_index_path() -> Path:

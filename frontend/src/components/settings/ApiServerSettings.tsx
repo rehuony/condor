@@ -354,7 +354,10 @@ function MarketDataCard({ server }: { server: string }) {
   if (entries.length === 0) return null;
 
   return (
-    <Card title="Market data">
+    <Card
+      title="Market data"
+      hint="Read-only. Set in the server's .env as MARKET_DATA_*; takes effect on API restart."
+    >
       <div className="divide-y divide-[var(--color-border)]">
         {entries.map(([key, value]) => (
           <Row key={key} label={humanize(key)}>
@@ -362,10 +365,6 @@ function MarketDataCard({ server }: { server: string }) {
           </Row>
         ))}
       </div>
-      <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-        Read-only. Set in the server&apos;s <code>.env</code> as <code>MARKET_DATA_*</code>;
-        takes effect on API restart.
-      </p>
     </Card>
   );
 }

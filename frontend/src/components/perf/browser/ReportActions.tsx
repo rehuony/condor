@@ -125,7 +125,11 @@ export function ReportActions({
   onOpenEditor,
 }: ReportActionsProps) {
   return (
-    <div className="flex items-center gap-1.5">
+    // Right-aligned. Labels never break; on a narrow pane this is a row of its
+    // own, the stepper at its start and the actions grouped at its end, every
+    // labelled control showing its icon alone (its name stays in the title and
+    // for screen readers); anything that still does not fit wraps whole.
+    <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5 whitespace-nowrap narrow-pane:w-full">
       {/* The run this scope is narrowed to, and the way back out of it.
           A filter that cannot be seen is a filter that cannot be undone,
           which is the rule the bubbles beside the tree were built on —
@@ -155,7 +159,7 @@ export function ReportActions({
           {runFilter.unavailable}
         </span>
       )}
-      <div className="flex items-center border border-[var(--color-border)] rounded overflow-hidden mr-1">
+      <div className="flex items-center border border-[var(--color-border)] rounded overflow-hidden mr-1 narrow-pane:mr-auto">
         <button
           onClick={nav.up}
           disabled={nav.index <= 0}
@@ -183,11 +187,11 @@ export function ReportActions({
       {scope.kind === "fleet" && (
         <button
           onClick={onDeploy}
-          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
+          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium narrow-pane:px-2 text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
           title="Deploy a new bot"
         >
           <Rocket className="h-3.5 w-3.5" />
-          Deploy bot
+          <span className="narrow-pane:sr-only">Deploy bot</span>
         </button>
       )}
 
@@ -217,11 +221,11 @@ export function ReportActions({
           ) : (
             <button
               onClick={() => botStop.arm(activeBot.bot_name)}
-              className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10"
+              className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium narrow-pane:px-2 text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10"
               title="Stop bot"
             >
               <Square className="h-3.5 w-3.5" />
-              Stop bot
+              <span className="narrow-pane:sr-only">Stop bot</span>
             </button>
           )}
           {botStop.failed && (
@@ -238,7 +242,7 @@ export function ReportActions({
           )}
           <button
             onClick={() => setDrawer((d) => (d === "logs" ? null : "logs"))}
-            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors narrow-pane:px-2 ${
               openDrawer === "logs"
                 ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
                 : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
@@ -246,7 +250,7 @@ export function ReportActions({
             title={openDrawer === "logs" ? "Hide logs" : "Show logs"}
           >
             <ScrollText className="h-3.5 w-3.5" />
-            Logs
+            <span className="narrow-pane:sr-only">Logs</span>
             {activeBot.error_count > 0 && (
               <span className="text-[10px] text-[var(--color-yellow)]">
                 {activeBot.error_count}
@@ -259,11 +263,11 @@ export function ReportActions({
       {activeRun?.archive_db_path && (
         <button
           onClick={() => onOpenArchive(activeRun)}
-          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
+          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium narrow-pane:px-2 text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/10"
           title="Open this run's archived database"
         >
           <Database className="h-3.5 w-3.5" />
-          Open archive
+          <span className="narrow-pane:sr-only">Open archive</span>
         </button>
       )}
 
@@ -287,11 +291,11 @@ export function ReportActions({
         ) : (
           <button
             onClick={() => runDelete.arm(activeRun.bot_name)}
-            className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10"
+            className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium narrow-pane:px-2 text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10"
             title="Delete this bot run permanently"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Delete run
+            <span className="narrow-pane:sr-only">Delete run</span>
           </button>
         )
       )}
@@ -339,11 +343,11 @@ export function ReportActions({
         <button
           onClick={() => stop.request([activeExec.id])}
           disabled={stop.stoppingIds.has(activeExec.id)}
-          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium narrow-pane:px-2 text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10 disabled:opacity-50"
           title="Stop this executor"
         >
           <Square className="h-3.5 w-3.5" />
-          {stop.stoppingIds.has(activeExec.id) ? "Stopping…" : "Stop"}
+          <span className="narrow-pane:sr-only">{stop.stoppingIds.has(activeExec.id) ? "Stopping…" : "Stop"}</span>
         </button>
       )}
 
@@ -364,7 +368,7 @@ export function ReportActions({
       {liveCtrl && (
         <button
           onClick={() => setDrawer((d) => (d === "config" ? null : "config"))}
-          className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+          className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors narrow-pane:px-2 ${
             openDrawer === "config"
               ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
               : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
@@ -372,7 +376,7 @@ export function ReportActions({
           title={openDrawer === "config" ? "Hide config" : "Show config"}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
-          Config
+          <span className="narrow-pane:sr-only">Config</span>
         </button>
       )}
 
@@ -380,11 +384,11 @@ export function ReportActions({
           it belongs to every scope rather than to one. */}
       <button
         onClick={onOpenEditor}
-        className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+        className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium narrow-pane:px-2 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
         title="Open the controller & config editor"
       >
         <TerminalSquare className="h-3.5 w-3.5" />
-        Editor
+        <span className="narrow-pane:sr-only">Editor</span>
       </button>
 
       {/* The selected scope's finished history, from one executor up to a
@@ -396,10 +400,12 @@ export function ReportActions({
           disabled={deletion.pending}
           aria-label={`Delete history under ${scopeDelete.label}`}
           title={`Delete ${scopeDelete.ids.length} terminated ${scopeDelete.ids.length === 1 ? "record" : "records"} under ${scopeDelete.label}`}
-          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium narrow-pane:px-2 text-[var(--color-red)] transition-colors hover:bg-[var(--color-red)]/10 disabled:opacity-50"
         >
           <Trash2 className="h-3.5 w-3.5" />
-          {scopeDelete.ids.some((id) => deletion.deletingIds.has(id)) ? "Deleting…" : "Delete History"}
+          <span className="narrow-pane:sr-only">
+            {scopeDelete.ids.some((id) => deletion.deletingIds.has(id)) ? "Deleting…" : "Delete History"}
+          </span>
         </button>
       )}
     </div>

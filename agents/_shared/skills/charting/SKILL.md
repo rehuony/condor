@@ -69,8 +69,8 @@ Telegram image.
 ## Image export and delivery
 
 Build and export the figure with `run_code`. Save research files under
-`.condor/research/` using the [research artifact standard](../../../_defaults/research-artifacts.md)
-and its report template. Within the study directory, this exports an existing
+`data/research/` using the research artifact standard
+(`agents/_defaults/research-artifacts.md`) and its report template. Within the study directory, this exports an existing
 `fig` and prints the absolute server-local path needed by the tool:
 
 ```python

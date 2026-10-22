@@ -205,7 +205,7 @@ def test_runtime_output_never_blocks_and_a_local_pin_blocks_only_when_touched():
             "data/condor_state.pickle",
             "reports/2026-10-20/report.html",
             "agents/local/notes.md",
-            ".condor/research/topic/report.md",
+            "data/research/topic/report.md",
         ),
     )
     incoming = ["condor/updates/run.py", "handlers/admin/update.py"]

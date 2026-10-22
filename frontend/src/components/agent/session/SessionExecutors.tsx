@@ -246,17 +246,20 @@ export function SessionExecutors({
 
       {/* Executor table */}
       {!chartsOnly && (
-        <ExecutorTable
-          executors={executorInfos}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          onSort={handleSort}
-          onRowClick={(ex) => setSelectedExecutor(ex)}
-          selectedExecutorId={selectedExecutor?.id ?? null}
-          rateFormatPnl={formatPnlValue}
-          rateFormatValue={formatValue}
-          rateFormatDetailed={formatValueDetailed}
-        />
+        // The table draws no frame of its own; this card is it.
+        <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <ExecutorTable
+            executors={executorInfos}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            onRowClick={(ex) => setSelectedExecutor(ex)}
+            selectedExecutorId={selectedExecutor?.id ?? null}
+            rateFormatPnl={formatPnlValue}
+            rateFormatValue={formatValue}
+            rateFormatDetailed={formatValueDetailed}
+          />
+        </div>
       )}
 
       {/* Executor Detail Panel */}

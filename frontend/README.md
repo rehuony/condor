@@ -12,7 +12,7 @@ npm run build
 
 From the repository root, `make build` builds the dashboard and swaps the bundle
 into `frontend/dist`. For validation on a checkout serving a dashboard, use a
-separate output directory as described in the [maintenance guide](../docs/maintenance.md).
+separate output directory as described in the [maintenance guide](/docs/maintenance.md).
 
 ## File ownership
 

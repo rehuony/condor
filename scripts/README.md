@@ -34,8 +34,8 @@ another service, or restart Condor unless that is their stated action: `source-u
 changes only Git state, and `make setup` deploys Hummingbot API only when asked to,
 through that repository's own `make deploy`.
 
-New installations get `config.yml` from [`templates/config.yml`](../templates/config.yml).
+New installations get `config.yml` from [`templates/config.yml`](/templates/config.yml).
 
 When moving an entry point, update its callers, the Makefile, CI, tests, documentation,
-and messages that name it together. Keep usage in the [user guide](../docs/user-guide.md)
-and operational procedure in the [maintenance guide](../docs/maintenance.md).
+and messages that name it together. Keep usage in the [user guide](/docs/user-guide.md)
+and operational procedure in the [maintenance guide](/docs/maintenance.md).

@@ -1,6 +1,6 @@
 # User guide
 
-Using and configuring Condor after [installation](../README.md#installation). Repository
+Using and configuring Condor after [installation](/README.md#installation). Repository
 operations — validation, publication, deployment and recovery — are in the
 [maintenance guide](maintenance.md).
 
@@ -14,7 +14,7 @@ operations — validation, publication, deployment and recovery — are in the
 - **Configuration** - Manage API servers, exchange credentials, and Gateway through Telegram (`/servers`, `/keys`, `/gateway`)
 - **AI Assistant** - Natural language trading help via **`/agent`** (optional OpenAI or OpenRouter keys, or any custom OpenAI-compatible endpoint like Venice AI; MCP tools when configured)
 - **Telegram Attachments** - Send images, albums, audio, and text documents to the assistant. See [Telegram conversations](telegram-conversations.md) for formats, limits, and controls.
-- **Chart Delivery** - Authorized agents can send chart images to Telegram and attach them to dashboard conversations. See [image export and delivery](../agents/_shared/skills/charting/SKILL.md#image-export-and-delivery).
+- **Chart Delivery** - Authorized agents can send chart images to Telegram and attach them to dashboard conversations. See [image export and delivery](/agents/_shared/skills/charting/SKILL.md#image-export-and-delivery).
 - **AI Agents** - Domain agents that can be asked, delegated to, or run on a loop — each can author its own tick strategy (analysis order, decision rules, risk limits) and run it autonomously with dry-run support
 
 ## Running Condor
@@ -100,7 +100,8 @@ the browser.
 
 Hummingbot API is a separate runtime dependency, built from source at
 [rehuony/hummingbot-api](https://github.com/rehuony/hummingbot-api). `make setup` can
-deploy it next to Condor (`../hummingbot-api`) when Docker is available, or connect to
+deploy it in a `hummingbot-api` directory beside the Condor checkout (`HB_API_DIR`
+overrides it) when Docker is available, or connect to
 one that is already running here or elsewhere.
 
 To deploy it on another machine, with Docker installed and running there:
@@ -186,7 +187,7 @@ must forward WebSocket upgrades. Telegram authentication requires `CONDOR_MODE=t
 
 ### `config.yml`
 
-Created by `make setup` from [`templates/config.yml`](../templates/config.yml), then
+Created by `make setup` from [`templates/config.yml`](/templates/config.yml), then
 filled in with your admin id and the Hummingbot API connection. Servers, access and
 chat defaults are edited from `/servers`, `/admin` and the dashboard afterwards.
 
@@ -405,7 +406,7 @@ whatever it finds. The table below covers the rest.
 
 ## Development
 
-Prepare a checkout with the [installation steps](../README.md#installation), then follow
+Prepare a checkout with the [installation steps](/README.md#installation), then follow
 the [maintenance guide](maintenance.md) for branches, validation and publication. Use
 `make run-fg` for foreground debugging and `make test` for backend tests.
 

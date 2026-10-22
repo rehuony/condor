@@ -267,6 +267,8 @@ interface PerfBrowserProps {
   rateFormatPnl?: (val: number, quote: string) => string;
   rateFormatValue?: (val: number, quote: string) => string;
   rateFormatDetailed?: (val: number, quote: string) => string;
+  /** The fleet data the chart folds is still on its first load. */
+  historyLoading?: boolean;
   /**
    * The scope this browser may never rise above (FEAT-108).
    *
@@ -326,6 +328,7 @@ export function PerfBrowser({
   rateFormatPnl,
   rateFormatValue,
   rateFormatDetailed,
+  historyLoading = false,
   rootScope = FLEET_SCOPE,
   param = "scope",
   run: runProp,
@@ -389,6 +392,9 @@ export function PerfBrowser({
   // about the scope in front of you, so it is answered per visit — the cost of
   // being wrong is one click, against a squashed chart on every load.
   const [band, setBand] = useState<BandKey>(null);
+  // Where an open band's occupant draws its actions: the tab row's right end,
+  // which is always there, so a selection's toolbar adds no row of its own.
+  const [bandActions, setBandActions] = useState<HTMLDivElement | null>(null);
   const toggleBand = useCallback((next: Exclude<BandKey, null>) => {
     setBand((open) => (open === next ? null : next));
   }, []);
@@ -2088,15 +2094,40 @@ export function PerfBrowser({
     truncated,
   });
 
+  const scopeToggle = (
+    <ScopeSheetToggle
+      open={sheet.open}
+      setOpen={sheet.setOpen}
+      toggleRef={sheet.toggleRef}
+      onExpand={() => setIsCompact(false)}
+    />
+  );
+
+  // One set for both parts of the bottom band: its tab row and its content.
+  const bandProps = {
+    band,
+    toggleBand,
+    actionSlot: bandActions,
+    setActionSlot: setBandActions,
+    scopeExecutor: activeExec,
+    positionRows,
+    scopedExecutors,
+    scopedLeaves,
+    byPair,
+    byVenue,
+    currencySymbol,
+    activeCtrl,
+    stop,
+    deletion,
+    detail,
+    setDetail,
+    rateFormatPnl,
+    rateFormatValue,
+    rateFormatDetailed,
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-row bg-[var(--color-bg)] narrow-pane:flex-col">
-      <ScopeSheetToggle
-        open={sheet.open}
-        setOpen={sheet.setOpen}
-        toggleRef={sheet.toggleRef}
-        summary={`${scope.label} · ${population === "running" ? "Running" : "Terminated"}`}
-        onExpand={() => setIsCompact(false)}
-      />
       {/* Left sidebar: the scope picker */}
       <ScopeSheet open={sheet.open} onClose={() => sheet.setOpen(false)} panelRef={sheet.panelRef} compact={isCompact}>
         <ScopeFilters
@@ -2144,6 +2175,8 @@ export function PerfBrowser({
           so Back is one click and the scope is still where it was. */}
       {openArchive?.archive_db_path ? (
         <div className="flex-1 min-w-0 overflow-auto p-6">
+          {/* This view has no report header, so the scope button stands alone. */}
+          <div className="mb-3 hidden narrow-pane:block">{scopeToggle}</div>
           <ArchivedBotDetail
             dbPath={openArchive.archive_db_path}
             botName={openArchive.bot_name}
@@ -2152,8 +2185,11 @@ export function PerfBrowser({
         </div>
       ) : (
       <div className="flex flex-1 flex-col min-h-0 min-w-0">
-        {/* Top bar */}
-        <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-5 py-2.5 narrow-pane:flex-wrap narrow-pane:px-3">
+        {/* Top bar: the title asks for 18rem; when it and the actions do not
+            both fit, the actions wrap under it instead of being overlapped. A
+            narrow pane opens its scope sheet from the button at the start. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-[var(--color-border)] px-5 py-2.5 narrow-pane:px-3">
+          {scopeToggle}
           <ReportTitle
             scope={scope}
             population={population}
@@ -2218,70 +2254,58 @@ export function PerfBrowser({
 
         {/* Body: report pane (+ config drawer) */}
         <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
-          {/* The centre column. It scrolls only as a safety valve: the strip,
-              the chart's floor and an open band all fit a normal window, and on
-              a short one the reader can reach the rows that no longer do rather
-              than have them hang off the bottom of the screen. */}
-          <div className="flex flex-1 flex-col min-w-0 min-h-0 gap-3 overflow-y-auto scrollbar-thin p-4 narrow-pane:p-3 narrow-pane:pb-[calc(5rem+env(safe-area-inset-bottom))]">
-            <ScopeNotices
-              scope={scope}
-              silentBots={silentBots}
-              runWithheld={runWithheld}
-              runUnavailable={runUnavailable}
-              emptyPopulation={emptyPopulation}
-              onDeploy={() => setShowDeploy(true)}
-            />
-            <KpiStrip
-              totals={totals}
-              currencySymbol={currencySymbol}
-              runWithheld={runWithheld}
-              perHour={perHour}
-              activeCtrl={activeCtrl}
-              scopeNoun={scopeNoun}
-            />
+          {/* The centre column, and the one scroll owner here: notices, strip,
+              the fixed-height chart and the band's tab row, then an open
+              band's content below it. Nothing above the content changes size
+              when a tab opens, so the page stays where the reader left it. */}
+          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto scrollbar-thin p-4 narrow-pane:p-3 narrow-pane:pb-[calc(5rem+env(safe-area-inset-bottom))]">
+            <div className="flex flex-col gap-3">
+              <ScopeNotices
+                scope={scope}
+                silentBots={silentBots}
+                runWithheld={runWithheld}
+                runUnavailable={runUnavailable}
+                emptyPopulation={emptyPopulation}
+                onDeploy={() => setShowDeploy(true)}
+              />
+              <KpiStrip
+                totals={totals}
+                currencySymbol={currencySymbol}
+                runWithheld={runWithheld}
+                perHour={perHour}
+                activeCtrl={activeCtrl}
+                scopeNoun={scopeNoun}
+              />
 
-            <ReportChart
-              scope={scope}
-              population={population}
-              server={server}
-              activeCtrl={activeCtrl}
-              activeExec={activeExec}
-              configId={configId}
-              convert={convert}
-              currencySymbol={currencySymbol}
-              chartTitle={chartTitle}
-              execChart={execChart}
-              execHasPrice={execHasPrice}
-              execChartGroup={execChartGroup}
-              ownerChart={ownerChart}
-              ownerLines={ownerLines}
-              totals={totals}
-              chartData={chartData}
-              notice={notice}
-              runHistoryLoading={runHistoryLoading}
-              archiveOnlyController={archiveOnlyController}
-              searchParams={searchParams}
-              setSearchParams={setSearchParams}
-            />
+              <ReportChart
+                scope={scope}
+                population={population}
+                server={server}
+                activeCtrl={activeCtrl}
+                activeExec={activeExec}
+                configId={configId}
+                convert={convert}
+                currencySymbol={currencySymbol}
+                chartTitle={chartTitle}
+                execChart={execChart}
+                execHasPrice={execHasPrice}
+                execChartGroup={execChartGroup}
+                ownerChart={ownerChart}
+                ownerLines={ownerLines}
+                totals={totals}
+                chartData={chartData}
+                notice={notice}
+                runHistoryLoading={runHistoryLoading}
+                historyLoading={historyLoading}
+                archiveOnlyController={archiveOnlyController}
+                searchParams={searchParams}
+                setSearchParams={setSearchParams}
+              />
 
-            <BottomBand
-              band={band}
-              toggleBand={toggleBand}
-              positionRows={positionRows}
-              scopedExecutors={scopedExecutors}
-              scopedLeaves={scopedLeaves}
-              byPair={byPair}
-              byVenue={byVenue}
-              currencySymbol={currencySymbol}
-              activeCtrl={activeCtrl}
-              stop={stop}
-              deletion={deletion}
-              detail={detail}
-              setDetail={setDetail}
-              rateFormatPnl={rateFormatPnl}
-              rateFormatValue={rateFormatValue}
-              rateFormatDetailed={rateFormatDetailed}
-            />
+              <BottomBand part="tabs" {...bandProps} />
+            </div>
+
+            <BottomBand part="content" {...bandProps} />
           </div>
 
           <ReportDrawer
@@ -2299,7 +2323,8 @@ export function PerfBrowser({
 
       {/* The executor detail panel, in the same slot the config and logs
           drawers use: a scope-owned column, closed until a row is clicked. */}
-      {detail && (
+      {/* Not over a single-executor scope: the page already is its detail. */}
+      {detail && !activeExec && (
         <DetailPanel
           executor={detail}
           server={server}

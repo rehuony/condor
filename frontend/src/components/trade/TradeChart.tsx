@@ -7,7 +7,12 @@ import { useRates } from "@/hooks/useRates";
 import type { ConsolidatedPosition } from "@/lib/api/portfolio";
 import { candleChannelKey, candleStore } from "@/lib/candle-store";
 import type { ChartLineSlot, ExtraLine, PickSlot } from "@/components/executor/types";
-import { createOverlayTooltipView, getExecutorColor, type ExecutorOverlay } from "@/lib/executor-overlays";
+import {
+  createOverlayTooltipView,
+  getExecutorColor,
+  placeOverlayTooltip,
+  type ExecutorOverlay,
+} from "@/lib/executor-overlays";
 import { getThemeColors, pnlHexColor } from "@/lib/theme-colors";
 import { roundToPricePrecision } from "@/lib/formatters";
 import { createDragHitPrimitive, type DragTarget } from "./priceLineDrag";
@@ -455,23 +460,7 @@ export function TradeChart({
           formatPnl: convertPnlRef.current,
         });
 
-        // Position tooltip using viewport-fixed coords (rendered via portal)
-        const containerRect = containerRef.current.getBoundingClientRect();
-        const tooltipW = 280;
-        const cursorInRightHalf = param.point.x > containerRect.width / 2;
-        let left = cursorInRightHalf
-          ? containerRect.left + param.point.x - tooltipW - 16
-          : containerRect.left + param.point.x + 16;
-        if (left < 4) left = 4;
-        if (left + tooltipW > window.innerWidth - 4) left = window.innerWidth - tooltipW - 4;
-        let top = containerRect.top + param.point.y - 10;
-        if (top + tooltipH > window.innerHeight - 4) {
-          top = window.innerHeight - tooltipH - 4;
-        }
-        if (top < 4) top = 4;
-
-        tooltip.style.left = `${left}px`;
-        tooltip.style.top = `${top}px`;
+        placeOverlayTooltip(tooltip, containerRef.current.getBoundingClientRect(), param.point, tooltipH);
       });
     });
     return () => {
@@ -1261,25 +1250,8 @@ export function TradeChart({
         {createPortal(
           <div
             ref={tooltipRef}
-            style={{
-              display: "none",
-              visibility: hasPresentation ? "visible" : "hidden",
-              position: "fixed",
-              top: 0,
-              left: 0,
-              zIndex: 9999,
-              pointerEvents: "none",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 8,
-              padding: "10px 14px",
-              fontSize: 11,
-              color: "var(--color-text)",
-              width: 280,
-              lineHeight: 1.4,
-              backdropFilter: "blur(12px)",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-            }}
+            className="chart-hover-card"
+            style={{ display: "none", visibility: hasPresentation ? "visible" : "hidden" }}
           />,
           document.body,
         )}

@@ -486,8 +486,3 @@ def markdown_to_html(text: str) -> str:
     except Exception:
         escaped = html.escape(text)
         return f"<pre style='white-space:pre-wrap'>{escaped}</pre>"
-
-
-def slugify(text: str) -> str:
-    slug = re.sub(r"[^\w\s-]", "", text.lower())
-    return re.sub(r"[\s-]+", "_", slug).strip("_")[:40]

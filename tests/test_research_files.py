@@ -188,3 +188,49 @@ def test_shipped_report_template_matches_the_reader(files):
         assert data["summary"]
         assert data["created_at"] == "2026-10-10T09:30:00+00:00"
         assert data["body"].startswith("## Findings")
+
+
+def test_index_lists_standard_studies_newest_first_and_skips_the_rest(files, tmp_path):
+    study = files / "trade-cards" / "2026-10-21" / "071121-9e3bba"
+    study.mkdir(parents=True)
+    (study / "report.md").write_text(
+        '---\ntitle: "Card review"\nsummary: "Two fixes."\n'
+        'created_at: "2026-10-21T07:11:21Z"\n---\n\n# Card review\n',
+        encoding="utf-8",
+    )
+    plain = files / "trade-cards" / "2026-10-22" / "010000-aaaaaa"
+    plain.mkdir(parents=True)
+    (plain / "report.md").write_text("no frontmatter", encoding="utf-8")
+    # Not studies: a report at the wrong depth, a hidden study and a symlink.
+    (files / "loose").mkdir()
+    (files / "loose" / "report.md").write_text("# Loose", encoding="utf-8")
+    hidden = files / "x" / "2026-10-21" / ".private"
+    hidden.mkdir(parents=True)
+    (hidden / "report.md").write_text("# Hidden", encoding="utf-8")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "report.md").write_text("# Outside", encoding="utf-8")
+    (files / "x" / "2026-10-21" / "linked").symlink_to(
+        outside, target_is_directory=True
+    )
+
+    with client_for(TRADER) as client:
+        assert client.get("/api/v1/research").status_code == 403
+    with client_for(ADMIN) as client:
+        studies = client.get("/api/v1/research").json()["studies"]
+
+    assert [s["path"] for s in studies] == [
+        "trade-cards/2026-10-22/010000-aaaaaa/report.md",
+        "trade-cards/2026-10-21/071121-9e3bba/report.md",
+    ]
+    assert studies[0]["title"] == "010000-aaaaaa"
+    assert studies[1] | {"modified_at": None} == {
+        "path": "trade-cards/2026-10-21/071121-9e3bba/report.md",
+        "topic": "trade-cards",
+        "date": "2026-10-21",
+        "study": "071121-9e3bba",
+        "title": "Card review",
+        "summary": "Two fixes.",
+        "created_at": "2026-10-21T07:11:21+00:00",
+        "modified_at": None,
+    }
