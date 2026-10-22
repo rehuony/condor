@@ -68,10 +68,16 @@ cooldown. A send with an unknown outcome retains its reservation to prevent
 duplicate delivery. An unknown Telegram message ID cannot be recovered
 automatically. Pure preview does not reserve a signal.
 
+`publish` checks the live price first and raises `PlanOutdated` without
+sending or reserving when the price is already beyond the stop or TP1; the
+tracker would otherwise expire and delete that card on its first tick. A test
+card that must not fill therefore keeps the price between the stop and TP1 with
+the entry zone away from it (for a long: stop < entry zone < price < TP1).
+
 ## Owner interaction and execution rules
 
 - One Telegram photo message is edited in place. Only its owner can operate it.
-  Investment opens margin selection, then a review. `✅ 确认下单` is the order
+  `💰 Invest` opens margin selection, then a review. `✅ Place Order` is the order
   confirmation; do not add a second confirmation message.
 - Presets are **10 / 20 / 50 USDT of margin**, plus custom input. Remember the
   last selection. `/cancel` exits custom entry. The review displays actual
@@ -81,11 +87,14 @@ automatically. Pure preview does not reserve a signal.
   automatic margin addition disabled. Existing positions, orders or another
   managed group on the same symbol prevent a new group. The API verifies the
   exchange's actual margin mode and leverage before submitting orders.
-- At confirmation, a price inside the entry zone selects MARKET; otherwise
-  LIMIT uses the nearest zone edge. A marketable limit can fill immediately.
-  There is no trailing entry. Quantity and risk preflight belong to the API;
-  do not substitute fixed maintenance-margin assumptions or enlarge the budget
-  to meet a minimum order size.
+- At confirmation, a price inside the entry zone selects MARKET; a price past
+  the zone toward the targets selects a LIMIT at the zone's near edge and waits
+  for the pullback. A price past the zone toward the stop is refused rather
+  than filled outside the plan. Trend Watch puts the zone on the stop side of
+  the signal price (0.2×ATR1H wide), so no fill is worse than the planned
+  reward/risk. There is no trailing entry. Quantity and risk preflight belong
+  to the API; do not substitute fixed maintenance-margin assumptions or enlarge
+  the budget to meet a minimum order size.
 - Two executor legs divide the position between TP1 and TP2. Both use the
   absolute stop. The second leg arms its trailing protection at TP1, moves the
   stop at least to its actual entry price, then follows by the initial 1R.
@@ -94,11 +103,11 @@ automatically. Pure preview does not reserve a signal.
   At expiry, cancel remaining entry quantity and retain protection for any
   fills. Positions exit by SL, TP, trailing protection or a manual action;
   never add `time_limit` or a 48-hour forced close.
-- `平一半` means half the currently remaining position, including after TP1.
+- `Close Half` means half the currently remaining position, including after TP1.
   Close and detach actions require a second tap. Below-minimum reductions are
   refused rather than silently turned into a full close.
 - Rejection, unfilled cancellation and invalid unused proposals remove the
-  message. Completed trades retain their result. Confirmed `停止托管` cancels
+  message. Completed trades retain their result. Confirmed `🛑 Stop Managing` cancels
   outstanding managed orders, keeps the actual position, and deletes the
   message; it is not a position close. If deletion fails, remove its controls,
   display the detached state and retry deletion.
@@ -134,7 +143,8 @@ and management resume. Report this distinction when discussing recovery.
 
 ## Presentation and scanning
 
-Telegram captions, buttons and alerts use Simplified Chinese. In conversation,
+Telegram captions, buttons and alerts are English, like the rest of the UI;
+conversation replies still follow the user's language. In conversation,
 pair the chart with a concise conclusion, prices, selected margin if known,
 entry method, leverage, risk estimate, reasons and invalidation conditions.
 Keep execution amounts out of the image itself.

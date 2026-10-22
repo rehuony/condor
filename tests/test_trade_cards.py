@@ -125,8 +125,10 @@ async def test_mode_is_fixed_on_card_and_shown(setup):
     assert mock is not None
     assert execution.payload(live)["mode"] == "live"
     assert execution.payload(mock)["mode"] == "mock"
-    assert "⚡ Live" in render.caption(live)
-    assert "Mock" in render.caption(mock) and "Live" not in render.caption(mock)
+    # The mode shares the title line rather than taking a line of its own.
+    assert "⚡ Live" in render.caption(live).splitlines()[0]
+    assert "Mock" in render.caption(mock).splitlines()[0]
+    assert "Live" not in render.caption(mock)
     with pytest.raises(ValueError, match="live or mock"):
         await published(setup, mode="dry_run")
     assert setup.send_photo.await_count == 2
@@ -154,6 +156,18 @@ def test_cards_saved_as_dry_run_load_as_mock(tmp_path):
     loaded = store.CardStore(path)
     assert loaded.get("c1").mode == "mock"
     assert loaded.get("c2").mode == "live"
+
+
+@pytest.mark.asyncio
+async def test_plan_already_past_tp1_is_refused_before_sending(setup):
+    execution.current_price.return_value = Decimal("106")
+    with pytest.raises(service.PlanOutdated, match="crossed"):
+        await published(setup, signal_id="stale")
+    assert setup.send_photo.await_count == 0
+    assert store.get_store().all() == []
+    # Nothing was reserved: the same signal publishes once the price is valid.
+    execution.current_price.return_value = Decimal("100")
+    assert await published(setup, signal_id="stale") is not None
 
 
 @pytest.mark.asyncio
@@ -344,6 +358,7 @@ async def test_expired_unordered_card_deletes_without_price_and_open_card_has_no
     unopened = await published(setup)
     unopened.expires_at = 0
     store.get_store().save(unopened)
+    execution.current_price.reset_mock()  # Publishing checked the price once.
     execution.current_price.side_effect = RuntimeError("unavailable")
     await tracker.tick(setup)
     # Expired, its message deleted, so the record is gone too.
@@ -584,7 +599,14 @@ async def test_caption_reports_estimates_expiry_and_incomplete_results(setup):
     await action(setup, card, "invest")
     card = await action(setup, card, "amount", margin="10")
     text = render.caption(card)
-    assert "Loss at stop" in text and "Est\\. liquidation" in text and "fees" in text
+    assert "• Now: *100 · inside the zone*" in text
+    assert "• Entry: *Market ≈ 100*" in text
+    assert "• At stop: *\\-5\\.00 USDT*" in text and "Fees included" in text
+    # Price ran past the zone: the review says how far and what the limit needs.
+    card.quote = quote(entry_method="LIMIT", entry_price="101", current_price="104")
+    text = render.caption(card)
+    assert "• Now: *104 · 2\\.9% above the zone*" in text
+    assert "• Entry: *Limit 101 · fills after a 2\\.9% dip*" in text
     card.execution = {"close_reason": "MANUAL_CLOSE", "pnl_complete": False, "pnl": "0"}
     assert render.result_row(card) == "Manual close · PnL pending check"
     card.execution = {

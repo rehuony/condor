@@ -5,7 +5,7 @@ ordinary imports (including scanner and handler reloads) have no side effects.
 """
 
 from .models import Card, CardStatus, TradePlan
-from .service import get_card, list_cards, publish
+from .service import PlanOutdated, get_card, list_cards, publish
 from .tracker import start_tracker, stop_tracker
 
 
@@ -20,6 +20,7 @@ __all__ = [
     "TradePlan",
     "Card",
     "CardStatus",
+    "PlanOutdated",
     "publish",
     "render_chart",
     "get_card",

@@ -30,6 +30,31 @@ def number(value, signed: bool = False) -> str:
     return ("+" if signed and amount > 0 else "") + text
 
 
+def price(value) -> str:
+    """Six significant digits: enough for any tick, without float or fee noise."""
+    try:
+        amount = Decimal(str(value))
+        if not amount.is_finite():
+            return "—"
+    except (InvalidOperation, TypeError):
+        return "—"
+    if amount == 0:
+        return "0"
+    exponent = min(amount.adjusted() - 5, 0)
+    text = format(amount.quantize(Decimal(1).scaleb(exponent)), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def usdt(value, signed: bool = False) -> str:
+    try:
+        amount = Decimal(str(value))
+        if not amount.is_finite():
+            return "—"
+    except (InvalidOperation, TypeError):
+        return "—"
+    return f"{amount:+.2f}" if signed else f"{amount:.2f}"
+
+
 def result_row(card: Card) -> str:
     info = card.execution
     reason = str(info.get("close_reason") or "").upper()
@@ -57,11 +82,11 @@ def result_row(card: Card) -> str:
         return f"{label} · PnL pending check"
     try:
         risk = Decimal(str(card.quote.get("max_loss", 0)))
-        multiple = f" ({number(Decimal(str(pnl)) / risk, True)}R)" if risk > 0 else ""
+        multiple = f" ({Decimal(str(pnl)) / risk:+.2f}R)" if risk > 0 else ""
         icon = "✅" if Decimal(str(pnl)) >= 0 else "❌"
     except InvalidOperation:
         icon, multiple = "✅", ""
-    return f"{icon} {label} · {number(pnl, True)} USDT{multiple}"
+    return f"{icon} {label} · {usdt(pnl, True)} USDT{multiple}"
 
 
 def close_value(card: Card, fraction: Decimal) -> Decimal | None:
@@ -73,13 +98,13 @@ def close_value(card: Card, fraction: Decimal) -> Decimal | None:
     """
     execution = card.execution
     try:
-        price = Decimal(str(execution["current_price"]))
+        mark = Decimal(str(execution["current_price"]))
         entry = Decimal(str(execution["entry_price"]))
         remaining = Decimal(str(execution["remaining_amount"]))
     except (KeyError, InvalidOperation, TypeError):
         return None
     direction = 1 if card.plan.side == "long" else -1
-    value = direction * (price - entry) * remaining * fraction
+    value = direction * (mark - entry) * remaining * fraction
     return value if value.is_finite() else None
 
 
@@ -87,6 +112,37 @@ def close_label(card: Card, text: str, fraction: Decimal) -> str:
     value = close_value(card, fraction)
     shown = f" · {value:+.2f} USDT" if value is not None else ""
     return f"🔻 {text}{shown}"
+
+
+def _percent(part: Decimal, whole: Decimal) -> str:
+    return f"{abs(part) / whole * 100:.1f}%"
+
+
+def entry_rows(card: Card) -> list[tuple[str, str]]:
+    """Where the price is now against the zone, and where the entry fills."""
+    plan, q = card.plan, card.quote
+    try:
+        now = Decimal(str(q["current_price"]))
+        entry = Decimal(str(q["entry_price"]))
+    except (KeyError, InvalidOperation, TypeError):
+        return [("Entry", "—")]
+    if not (now.is_finite() and entry.is_finite() and now > 0):
+        return [("Entry", "—")]
+    if now > plan.entry_high:
+        where = f"{_percent(now - plan.entry_high, now)} above the zone"
+    elif now < plan.entry_low:
+        where = f"{_percent(plan.entry_low - now, now)} below the zone"
+    else:
+        where = "inside the zone"
+    if q.get("entry_method") == "MARKET":
+        fill = f"Market ≈ {price(entry)}"
+    else:
+        fill = f"Limit {price(entry)}"
+        long = plan.side == "long"
+        if (entry < now) if long else (entry > now):
+            move = "dip" if long else "rise"
+            fill += f" · fills after a {_percent(now - entry, now)} {move}"
+    return [("Now", f"{price(now)} · {where}"), ("Entry", fill)]
 
 
 def block(heading: str, rows: list[tuple[str, str]]) -> list[str]:
@@ -98,20 +154,21 @@ def caption(card: Card) -> str:
     """MarkdownV2 caption: title, plan, then the block for the card's status."""
     plan = card.plan
     side = "🟢 Long" if plan.side == "long" else "🔴 Short"
+    title = f"{plan.trading_pair} · {side} · {plan.timeframe}"
     lines = [
-        ui.bold(f"{plan.trading_pair} · {side} · {plan.timeframe}"),
+        # One line: the mode is part of what the card is, not a second heading.
         (
-            ui.italic("🧪 Mock · no real orders")
+            f"{ui.bold(title)} · {ui.italic('🧪 Mock')}"
             if card.mode == "mock"
-            else ui.bold("⚡ Live")
+            else ui.bold(f"{title} · ⚡ Live")
         ),
         "",
         *block(
             "📍 Trade plan",
             [
-                ("Entry", f"{number(plan.entry_low)} – {number(plan.entry_high)}"),
-                ("Stop", number(plan.stop_price)),
-                ("Take profit", f"{number(plan.tp1_price)} / {number(plan.tp2_price)}"),
+                ("Entry", f"{price(plan.entry_low)} – {price(plan.entry_high)}"),
+                ("Stop", price(plan.stop_price)),
+                ("Take profit", f"{price(plan.tp1_price)} / {price(plan.tp2_price)}"),
             ],
         ),
         "",
@@ -124,7 +181,12 @@ def caption(card: Card) -> str:
             rows.insert(0, ("Clarity", f"{number(plan.score)}/100"))
         lines += block("⏳ Awaiting decision", rows)
         notes.append(
-            "Pick an amount to see the risk. Nothing is ordered until you confirm."
+            "Pick an amount to see the risk. "
+            + (
+                "Mock fills use live prices; no real orders are placed."
+                if card.mode == "mock"
+                else "Nothing is ordered until you confirm."
+            )
         )
     elif card.status == CardStatus.SIZING:
         lines += block(
@@ -137,45 +199,45 @@ def caption(card: Card) -> str:
             )
     elif card.status == CardStatus.REVIEW:
         q = card.quote
-        entry = "Market" if q.get("entry_method") == "MARKET" else "Limit"
+        base = plan.trading_pair.split("-")[0]
         lines += block(
             "🧮 Order review",
             [
-                ("Entry", f"{entry} · ref {number(q.get('entry_price'))}"),
-                ("Quantity", number(q.get("quantity"))),
-                ("Margin", f"{number(q.get('margin'))} USDT · 10x"),
-                ("Notional", f"{number(q.get('notional'))} USDT"),
-                ("Loss at stop", f"{number(q.get('max_loss'))} USDT"),
-                ("Est. liquidation", number(q.get("liquidation_price"))),
+                *entry_rows(card),
                 (
-                    "Est. profit",
-                    f"{number(q.get('profit_tp1'), True)} / "
-                    f"{number(q.get('profit_tp2'), True)} USDT",
+                    "Size",
+                    f"{number(q.get('quantity'))} {base} · "
+                    f"{usdt(q.get('margin'))} USDT × 10",
                 ),
+                ("At stop", f"{usdt(-Decimal(str(q.get('max_loss', 0))), True)} USDT"),
+                (
+                    "At TP1 / TP2",
+                    f"{usdt(q.get('profit_tp1'), True)} / "
+                    f"{usdt(q.get('profit_tp2'), True)} USDT",
+                ),
+                ("Liquidation", f"≈ {price(q.get('liquidation_price'))}"),
             ],
         )
-        notes += [
-            "Half closes at each take profit; after TP1 the rest trails at 1R "
-            "breakeven, with no time limit.",
-            "Estimates include open and close fees; slippage and funding change "
-            "the result.",
-        ]
+        notes.append(
+            "Half exits at each TP; after TP1 the stop moves to breakeven. "
+            "Fees included."
+        )
     elif card.status == CardStatus.OPEN:
         e = card.execution
         rows = [
-            ("Fill price", number(e.get("entry_price"))),
+            ("Fill price", price(e.get("entry_price"))),
             ("Remaining", number(e.get("remaining_amount"))),
-            ("Price", number(e.get("current_price"))),
-            ("PnL", f"{number(e.get('pnl'), True)} USDT"),
+            ("Price", price(e.get("current_price"))),
+            ("PnL", f"{usdt(e.get('pnl'), True)} USDT"),
         ]
         liquidation = e.get("liquidation_price")
         if e.get("liquidation_price_kind") == "exchange" and liquidation is not None:
-            rows.append(("Exchange liquidation", number(liquidation)))
+            rows.append(("Exchange liquidation", price(liquidation)))
         elif card.mode == "live":
             notes.append("The exchange liquidation price is unavailable for now.")
         try:
-            price = Decimal(str(e["current_price"]))
-            distance = abs(price - plan.stop_price) / price * 100
+            mark = Decimal(str(e["current_price"]))
+            distance = abs(mark - plan.stop_price) / mark * 100
             rows.append(("To planned stop", f"{distance:.2f}%"))
         except (KeyError, InvalidOperation, ZeroDivisionError):
             pass
@@ -185,7 +247,10 @@ def caption(card: Card) -> str:
     elif card.status == CardStatus.CLOSED:
         lines.append(ui.bold(result_row(card)))
     elif card.status == CardStatus.PENDING:
-        lines.append(ui.bold("🕒 Limit order waiting to fill"))
+        rows = [("Limit", price(card.quote.get("entry_price")))]
+        if card.execution.get("current_price") is not None:
+            rows.append(("Now", price(card.execution["current_price"])))
+        lines += block("🕒 Limit order waiting to fill", rows)
         notes.append("Any unfilled part is cancelled at expiry.")
     elif card.status == CardStatus.FAILED:
         lines.append(ui.bold("❌ Trade not completed"))

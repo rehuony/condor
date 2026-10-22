@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 TTL_SECONDS = 4 * 3600
 
 
+class PlanOutdated(ValueError):
+    """The live price already invalidates the plan; nothing was published."""
+
+
 def get_card(card_id: str, *, owner_id: int) -> Card | None:
     card = get_store().get(card_id)
     return card if card and card.owner_id == owner_id else None
@@ -113,23 +117,33 @@ async def publish(
             mode,
         ]
         signal_key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    card = Card(
+        id=secrets.token_hex(6),
+        plan=plan,
+        owner_id=owner_id,
+        chat_id=chat_id,
+        server_name=server_name,
+        server_fingerprint=target_fingerprint,
+        account_name=account_name,
+        connector_name=connector_name,
+        mode=mode,
+        signal_key=signal_key,
+        expires_at=time.time() + TTL_SECONDS,
+    )
+    # The tracker expires and deletes such a card on its first tick, so sending
+    # it would report a delivery the owner never gets to act on.
+    try:
+        price = await execution.current_price(card)
+    except Exception:
+        # Same rule as the tracker: an unavailable price does not expire a card.
+        logger.warning("Trade card price unavailable at publish: %s", plan.trading_pair)
+    else:
+        if reason := invalid_reason(card, price):
+            raise PlanOutdated(f"{reason} (price {price})")
     store = get_store()
     async with store.publish_lock:
         if signal_key is not None and store.signal_reserved(signal_key):
             return None
-        card = Card(
-            id=secrets.token_hex(6),
-            plan=plan,
-            owner_id=owner_id,
-            chat_id=chat_id,
-            server_name=server_name,
-            server_fingerprint=target_fingerprint,
-            account_name=account_name,
-            connector_name=connector_name,
-            mode=mode,
-            signal_key=signal_key,
-            expires_at=time.time() + TTL_SECONDS,
-        )
         store.save(card)
     async with store.lock(card.id):
         try:

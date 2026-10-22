@@ -51,6 +51,8 @@ def _fp(path: Path, size: float) -> FontProperties:
 
 BG, INK, MUTE = "#0F1113", "#EDE8DF", "#8A8D90"
 GRN, RED = "#6DB5A0", "#D98B7A"
+#: The live price: warm, and unlike either side colour or the neutral ink.
+ACCENT = "#E8B65A"
 
 
 def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
@@ -86,6 +88,12 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
     def T(x, y, s, f, c=INK, ha="left", va="baseline"):
         return ax.text(x, y, s, fontproperties=f, color=c, ha=ha, va=va)
 
+    renderer = fig.canvas.get_renderer()
+
+    def width(text) -> float:
+        # Axes units are pixels, so a glyph extent is directly a layout width.
+        return text.get_window_extent(renderer).width
+
     base, quote = pair.split("-")
     T(62, 104, "T R A D E   P L A N", sans(26), MUTE)
     T(962, 104, "T R A D E   N O T E", sans(20), MUTE, ha="right")
@@ -96,8 +104,9 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
         serif(88 * min(1, 9 / (len(base) + len(quote) + 3))),
     )
     T(62, 292, f"Perpetual · {tf} · UTC+8", sans(28), MUTE)
-    ax.add_patch(plt.Circle((738, 228), 11, color=RED if short else GRN, lw=0))
-    T(962, 242, "SHORT" if short else "LONG", sans(32), INK, ha="right")
+    side = T(962, 242, "SHORT" if short else "LONG", sans(32), INK, ha="right")
+    dot_x = 962 - width(side) - 24
+    ax.add_patch(plt.Circle((dot_x, 228), 11, color=RED if short else GRN, lw=0))
 
     CT, CB, CL, CR = 350, 790, 60, 620
     BX0, BX1 = 640, 890
@@ -123,7 +132,11 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
             )
         )
     xl = X(len(df) - 1)
-    ax.add_patch(plt.Circle((xl, Y(px_last)), 6, fc=BG, ec=INK, lw=1.6, zorder=5))
+    # Carried across to the plan box so the price reads against the entry zone.
+    ax.plot(
+        [xl, BX1], [Y(px_last)] * 2, color=ACCENT, lw=1.0, ls=(0, (1, 3)), alpha=0.8
+    )
+    ax.add_patch(plt.Circle((xl, Y(px_last)), 6, fc=BG, ec=ACCENT, lw=1.8, zorder=5))
 
     top_p, bot_p = (stop, tp2) if short else (tp2, stop)
     ax.add_patch(
@@ -156,13 +169,14 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
     ax.plot([BX0, BX1], [Y(tp2)] * 2, color=GRN, lw=1.3, ls=dash)
     ax.plot([BX0, BX1], [Y(tp1)] * 2, color=GRN, lw=1.0, ls=dash, alpha=0.6)
     ax.plot([BX0, BX1], [Y(entry)] * 2, color=MUTE, lw=1.3, ls=dash)
-    # Keep the four right-hand labels at least 26px apart (tight short-term plans).
+    # Keep the right-hand labels at least 26px apart (tight short-term plans).
     labels = sorted(
         [
             (Y(stop), "Stop", RED),
             (Y(entry), "Entry", INK),
             (Y(tp1), "TP1", GRN),
             (Y(tp2), "TP2", GRN),
+            (Y(px_last), "Now", ACCENT),
         ]
     )
     ys = [y for y, _, _ in labels]
@@ -177,9 +191,9 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
     for i in (i for i in (2, 9, 16) if i < len(df) - 3):
         T(X(i), ty, times[i].strftime("%m-%d %H:%M"), sans(17), MUTE, ha="center")
     tl = times[-1]
-    ax.plot([xl, xl], [Y(px_last) + 14, ty - 26], color=MUTE, lw=0.8, alpha=0.5)
+    ax.plot([xl, xl], [Y(px_last) + 14, ty - 26], color=ACCENT, lw=0.8, alpha=0.5)
     T(xl, ty, tl.strftime("%m-%d %H:%M"), sans(19), INK, ha="center")
-    T(xl, ty + 26, f"Last {_px(px_last)}", sans(18), MUTE, ha="center")
+    T(xl, ty + 26, f"Last {_px(px_last)}", sans(18), ACCENT, ha="center")
 
     rng = f"{_px(lo_p)}–{_px(hi_p)}"
     cols = [
@@ -198,16 +212,18 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
         # Fit actual glyph widths; character counts vary across fonts and prices.
         right = cols[index + 1][0] if index + 1 < len(cols) else 962
         available = right - x - 16
-        width = price_text.get_window_extent(fig.canvas.get_renderer()).width
-        if width > available:
-            price_text.set_fontsize(price_text.get_fontsize() * available / width)
+        if width(price_text) > available:
+            price_text.set_fontsize(
+                price_text.get_fontsize() * available / width(price_text)
+            )
         T(x, 1078, quote, sans(22), MUTE)
 
     now = times[-1]
     ax.plot([62, 962], [1136, 1136], color=MUTE, lw=0.8, alpha=0.5)
-    T(62, 1200, "Planned reward / risk", sans(26), MUTE)
-    T(250, 1202, f"1 : {rr1:.1f} / {rr2:.1f}", serif(40))
-    T(
+    # The footer reads label → ratio → source; each starts where the last ends.
+    label = T(62, 1200, "Reward / risk", sans(26), MUTE)
+    ratio = T(62 + width(label) + 18, 1202, f"1 : {rr1:.1f} / {rr2:.1f}", serif(40))
+    source = T(
         962,
         1200,
         f"Data as of {now.strftime('%m-%d %H:%M')} · {venue_label(connector_name)}",
@@ -215,6 +231,9 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
         MUTE,
         ha="right",
     )
+    available = 962 - width(source) - 24 - (62 + width(label) + 18)
+    if width(ratio) > available:
+        ratio.set_fontsize(ratio.get_fontsize() * available / width(ratio))
 
     buf = io.BytesIO()
     fig.savefig(buf, dpi=100, facecolor=BG)

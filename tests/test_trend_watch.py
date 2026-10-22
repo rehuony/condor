@@ -53,8 +53,8 @@ def test_scan_preserves_clarity_and_closed_trigger_bar(monkeypatch):
     assert plan["score"] == 100
     assert plan["bar"] == frames["m15"].timestamp.iloc[-1]
     assert (plan["lo"], plan["hi"], plan["stop"], plan["tp1"], plan["tp2"]) == (
-        98.9,
-        99.1,
+        98.8,
+        99.0,
         97.0,
         101.0,
         103.0,

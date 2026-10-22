@@ -113,7 +113,7 @@ class Config(BaseModel):
     stop_atr: float = Field(
         title="Stop (×ATR1H)",
         default=2.0,
-        description="Stop distance = this × ATR1H from the entry midpoint",
+        description="Stop distance = this × ATR1H from the signal price",
     )
     tp1_r: float = Field(
         title="TP1 (R)",
@@ -231,13 +231,18 @@ def _universe(tickers: dict, cfg: Config) -> list[str]:
 
 
 def _plan(side: str, last: float, atr1h: float, cfg: Config) -> dict:
-    """Entry zone around the current price; stop/targets as fixed multiples of ATR1H (as backtested)."""
+    """Stop/targets as fixed multiples of ATR1H from the signal price (as backtested).
+
+    The entry zone sits on the stop side of the signal price, so a fill is never
+    worse than the plan: price past the signal price waits for a limit at it.
+    """
     sgn = 1 if side == "long" else -1
     risk = cfg.stop_atr * atr1h
+    edge = last - sgn * 0.2 * atr1h
     return dict(
         side=side,
-        lo=last - 0.1 * atr1h,
-        hi=last + 0.1 * atr1h,
+        lo=min(last, edge),
+        hi=max(last, edge),
         mid=last,
         stop=last - sgn * risk,
         tp1=last + sgn * cfg.tp1_r * risk,
@@ -511,18 +516,23 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         if config.send:
             if not context.chat_id or not context.owner_id:
                 raise ValueError("Publishing trade cards requires an owner and chat")
-            published = await trade_cards.publish(
-                trade_plan,
-                plan["df"],
-                owner_id=context.owner_id,
-                chat_id=context.chat_id,
-                server_name=resolve_server_name(context),
-                account_name="master_account",
-                connector_name=CONNECTOR,
-                bot=context.bot,
-                signal_id=f"trend_watch:{plan['type']}:{plan['tf']}:{plan['bar']}",
-                mode=config.mode,
-            )
+            try:
+                published = await trade_cards.publish(
+                    trade_plan,
+                    plan["df"],
+                    owner_id=context.owner_id,
+                    chat_id=context.chat_id,
+                    server_name=resolve_server_name(context),
+                    account_name="master_account",
+                    connector_name=CONNECTOR,
+                    bot=context.bot,
+                    signal_id=f"trend_watch:{plan['type']}:{plan['tf']}:{plan['bar']}",
+                    mode=config.mode,
+                )
+            except trade_cards.PlanOutdated as exc:
+                # Price moved past the plan since the scan; the others still go out.
+                skipped.append(f"{plan['base']}: {exc}")
+                continue
             if published is None:
                 muted.append(plan)
                 continue

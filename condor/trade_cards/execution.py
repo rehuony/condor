@@ -135,6 +135,14 @@ def user_error(reason) -> str:
         ),
         (("leverage",), "Could not confirm 10x leverage; no order was placed."),
         (
+            ("toward the stop",),
+            "The price fell through the entry zone toward the stop. Wait for it to return, or reject the card.",
+        ),
+        (
+            ("passed the stop",),
+            "The price already crossed the stop or TP1, so this plan no longer applies.",
+        ),
+        (
             ("operation", "conflict", "different request"),
             "The executor is busy with another action or the request conflicts. Refresh and try again.",
         ),
