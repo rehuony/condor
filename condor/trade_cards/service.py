@@ -73,6 +73,7 @@ async def publish(
     connector_name: str,
     bot,
     signal_id: str | None = None,
+    mode: str = "live",
 ) -> Card | None:
     """Publish one photo; None means that exact signal was already reserved.
 
@@ -91,6 +92,8 @@ async def publish(
         raise ValueError("A card requires a recipient and an explicit execution target")
     if not callable(getattr(bot, "send_photo", None)):
         raise ValueError("Trade cards require a Telegram photo sender")
+    if mode not in ("live", "mock"):
+        raise ValueError("A card's mode must be live or mock")
     manager = execution.authorize_target(owner_id, server_name)
     target_fingerprint = execution.server_fingerprint(manager, server_name)
     signal_key = None
@@ -106,6 +109,8 @@ async def publish(
             plan.timeframe,
             plan.signal_type,
             signal_id,
+            # A mock instance never mutes the live one's signals, or the reverse.
+            mode,
         ]
         signal_key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
     store = get_store()
@@ -121,6 +126,7 @@ async def publish(
             server_fingerprint=target_fingerprint,
             account_name=account_name,
             connector_name=connector_name,
+            mode=mode,
             signal_key=signal_key,
             expires_at=time.time() + TTL_SECONDS,
         )

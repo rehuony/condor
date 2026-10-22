@@ -90,6 +90,26 @@ async def test_preview_and_creation_use_exact_server_and_group_protocol(
 
 
 @pytest.mark.asyncio
+async def test_mock_card_needs_an_executor_that_lists_mock(card, monkeypatch):
+    import config_manager
+
+    manager = SimpleNamespace(
+        get_server=Mock(return_value={"host": "fixed.test", "port": 8000}),
+        has_server_access=Mock(return_value=True),
+        get_client=AsyncMock(return_value=object()),
+    )
+    card.server_fingerprint = execution.server_fingerprint(manager, "fixed")
+    card.mode = "mock"
+    monkeypatch.setattr(config_manager, "get_config_manager", lambda: manager)
+    # An executor without modes predates mock: it would trade the card live.
+    call = AsyncMock(return_value={"version": 1, "connectors": ["binance_perpetual"]})
+    monkeypatch.setattr(execution, "request", call)
+    with pytest.raises(execution.ExecutionError, match="mode"):
+        await execution.preview(card)
+    assert call.await_count == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("missing_fingerprint", [False, True])
 async def test_target_rebinding_or_missing_identity_stops_before_any_request(
     card, monkeypatch, missing_fingerprint

@@ -100,6 +100,11 @@ def caption(card: Card) -> str:
     side = "🟢 Long" if plan.side == "long" else "🔴 Short"
     lines = [
         ui.bold(f"{plan.trading_pair} · {side} · {plan.timeframe}"),
+        (
+            ui.italic("🧪 Mock · no real orders")
+            if card.mode == "mock"
+            else ui.bold("⚡ Live")
+        ),
         "",
         *block(
             "📍 Trade plan",
@@ -166,7 +171,7 @@ def caption(card: Card) -> str:
         liquidation = e.get("liquidation_price")
         if e.get("liquidation_price_kind") == "exchange" and liquidation is not None:
             rows.append(("Exchange liquidation", number(liquidation)))
-        else:
+        elif card.mode == "live":
             notes.append("The exchange liquidation price is unavailable for now.")
         try:
             price = Decimal(str(e["current_price"]))

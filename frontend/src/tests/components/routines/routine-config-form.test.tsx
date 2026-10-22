@@ -146,4 +146,19 @@ describe("RoutineConfigForm", () => {
     expect(control("Saved Controller").textContent).toBe("temporarily_unavailable_config");
     expect(onChange).toHaveBeenCalledExactlyOnceWith("new_controller", "available_config");
   });
+
+  it("offers a choice field's fixed options without loading any", async () => {
+    await render({
+      mode: { type: "Literal", default: "live", description: "Execution mode.", options: ["live", "mock"] },
+    });
+
+    const select = control("Mode");
+    expect(select.textContent).toBe("live");
+    await act(async () => select.click());
+    const mock = [...document.querySelectorAll('[role="option"]')].find((item) => item.textContent === "mock");
+    await act(async () => (mock as HTMLElement).click());
+
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("mode", "mock");
+    expect(getRoutineFieldOptions).not.toHaveBeenCalled();
+  });
 });

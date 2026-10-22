@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib
+import json
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -117,10 +118,42 @@ async def test_publish_deduplicates_concurrent_signals_and_scopes_target(setup):
 
 
 @pytest.mark.asyncio
-async def test_cards_name_no_execution_mode(setup):
-    card = await published(setup)
-    assert "mode" not in execution.payload(card)
-    assert "Dry run" not in render.caption(card) and "Live" not in render.caption(card)
+async def test_mode_is_fixed_on_card_and_shown(setup):
+    live = await published(setup, signal_id="bar")
+    mock = await published(setup, signal_id="bar", mode="mock")
+    # The same signal publishes once per mode, so a mock run never mutes live.
+    assert mock is not None
+    assert execution.payload(live)["mode"] == "live"
+    assert execution.payload(mock)["mode"] == "mock"
+    assert "⚡ Live" in render.caption(live)
+    assert "Mock" in render.caption(mock) and "Live" not in render.caption(mock)
+    with pytest.raises(ValueError, match="live or mock"):
+        await published(setup, mode="dry_run")
+    assert setup.send_photo.await_count == 2
+
+
+def test_cards_saved_as_dry_run_load_as_mock(tmp_path):
+    from tests.support.trade_cards import plan
+
+    record = Card(
+        id="c1",
+        plan=plan(),
+        owner_id=7,
+        chat_id=7,
+        server_name="fixed",
+        account_name="master_account",
+        connector_name="binance_perpetual",
+        status=CardStatus.DETACHED,
+        expires_at=1,
+    ).model_dump(mode="json")
+    legacy = {**record, "mode": "dry_run"}
+    unnamed = {**record, "id": "c2"}
+    del unnamed["mode"]
+    path = tmp_path / "trade_cards.json"
+    path.write_text(json.dumps({"version": 1, "cards": {"c1": legacy, "c2": unnamed}}))
+    loaded = store.CardStore(path)
+    assert loaded.get("c1").mode == "mock"
+    assert loaded.get("c2").mode == "live"
 
 
 @pytest.mark.asyncio

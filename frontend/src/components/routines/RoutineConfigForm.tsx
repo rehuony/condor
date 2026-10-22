@@ -163,6 +163,16 @@ export function RoutineConfigForm({ fields, values, onChange }: Props) {
                       value={values[key]}
                       onChange={(v) => onChange(key, v)}
                     />
+                  ) : field.options ? (
+                    <MenuSelect
+                      size="field"
+                      id={id}
+                      describedBy={descriptionId}
+                      label={field.title ?? formatSlug(key)}
+                      value={String(values[key] ?? field.default ?? "")}
+                      onChange={(v) => onChange(key, v)}
+                      options={field.options.map((opt) => ({ value: opt, label: opt }))}
+                    />
                   ) : field.type === "int" || field.type === "float" ? (
                     <NumberField
                       id={id}

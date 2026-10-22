@@ -14,6 +14,8 @@ export interface RoutineFieldInfo {
   title?: string;
   widget?: "select";
   options_from?: string;
+  /** The fixed choices of a ``Literal`` field. */
+  options?: string[];
 }
 
 export interface RoutineInfo {

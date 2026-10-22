@@ -112,7 +112,7 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
         bot=SimpleNamespace(),
         server_name="pinned-server",
     )
-    result = await scanner.run(scanner.Config(send=send), context)
+    result = await scanner.run(scanner.Config(send=send, mode="mock"), context)
     assert result.silent
     get_client.assert_awaited_once_with(-100, user_data={}, server="pinned-server")
     report.save.assert_awaited_once()
@@ -124,6 +124,7 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
         assert publish.await_args.kwargs["owner_id"] == 7
         assert publish.await_args.kwargs["chat_id"] == -100
         assert publish.await_args.kwargs["server_name"] == "pinned-server"
+        assert publish.await_args.kwargs["mode"] == "mock"
         assert publish.await_args.kwargs["signal_id"].startswith(
             "trend_watch:pullback:1H:"
         )
@@ -145,6 +146,7 @@ def test_config_keeps_only_tunable_parameters():
         "stop_atr",
         "tp1_r",
         "tp2_r",
+        "mode",
         "send",
     ]
 

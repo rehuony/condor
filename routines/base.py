@@ -12,7 +12,7 @@ import logging
 import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -515,6 +515,8 @@ class RoutineInfo:
             }
             if field_info.title:
                 entry["title"] = field_info.title
+            if get_origin(annotation) is Literal:
+                entry["options"] = [str(option) for option in get_args(annotation)]
             # Pass through widget hints from json_schema_extra
             extra = field_info.json_schema_extra
             if isinstance(extra, dict):

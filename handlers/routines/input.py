@@ -65,6 +65,8 @@ async def _process_config(update: Update, context: Context, text: str) -> None:
                 value = float(value)
             elif field_type == "bool":
                 value = value.lower() in ("true", "yes", "1", "on")
+            elif "options" in fields[key] and value not in fields[key]["options"]:
+                raise ValueError(value)
         except ValueError:
             errors.append(f"Invalid: {key}")
             continue

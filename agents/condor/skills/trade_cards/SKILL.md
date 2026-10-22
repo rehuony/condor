@@ -54,9 +54,11 @@ card = await publish(
 )
 ```
 
-Every card trades live; there is no simulated mode. Publishing does not place
-an order: the owner chooses a margin and confirms the review on the card.
-Each card keeps its server/account identity. Never silently switch its trading
+`mode` is `live` (the default) or `mock`. Use `mode="mock"` when the user wants
+to test the flow without real orders; Trend Watch takes it from its `mode`
+setting. Publishing does not place an order: the owner chooses a margin and
+confirms the review on the card. Each card keeps its mode and server/account
+identity. Never turn a mock card into a live one or silently switch its trading
 target.
 
 Automated sources supply a stable `signal_id` describing the signal type,
@@ -124,7 +126,9 @@ the position as closed. The service can replay the exact persisted request and
 operation ID against the same API; it must never create a new identity to retry
 an unknown result. Read the API's actual group state after recovery.
 
-Condor restarts do not stop API-managed positions;
+Mock uses live prices but a separate simulated broker in the executor and
+performs no exchange writes. It exercises interaction and state transitions,
+not real fills or slippage. Condor restarts do not stop API-managed positions;
 Hummingbot API downtime interrupts its software protection until reconciliation
 and management resume. Report this distinction when discussing recovery.
 

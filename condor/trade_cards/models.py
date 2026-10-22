@@ -135,6 +135,9 @@ class Card(BaseModel):
     server_fingerprint: str | None = None
     account_name: str
     connector_name: str
+    #: ``mock`` fills against live prices in the executor and never touches the
+    #: exchange. Fixed at publish time; a card never changes mode.
+    mode: Literal["live", "mock"] = "live"
     status: CardStatus = CardStatus.PROPOSED
     created_at: float = Field(default_factory=time.time)
     expires_at: float
@@ -157,6 +160,14 @@ class Card(BaseModel):
     last_render: str = ""
     #: When the message was last confirmed to still exist in the chat.
     last_checked: float = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_mode(cls, data):
+        """Records saved before ``mock`` was named call it ``dry_run``."""
+        if isinstance(data, dict) and data.get("mode") == "dry_run":
+            return {**data, "mode": "mock"}
+        return data
 
     def transition(self, status: CardStatus) -> None:
         if status == self.status:

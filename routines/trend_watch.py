@@ -15,6 +15,7 @@ import logging
 import math
 import time
 import uuid
+from typing import Literal
 
 import pandas as pd
 import pandas_ta as ta
@@ -125,6 +126,11 @@ class Config(BaseModel):
         description="TP2 at this multiple of the stop distance",
     )
     # Delivery
+    mode: Literal["live", "mock"] = Field(
+        title="Mode",
+        default="live",
+        description="live places real orders; mock fills at live prices without touching the exchange",
+    )
     send: bool = Field(
         title="Publish cards",
         default=True,
@@ -515,6 +521,7 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
                 connector_name=CONNECTOR,
                 bot=context.bot,
                 signal_id=f"trend_watch:{plan['type']}:{plan['tf']}:{plan['bar']}",
+                mode=config.mode,
             )
             if published is None:
                 muted.append(plan)
