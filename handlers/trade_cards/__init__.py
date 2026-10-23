@@ -1,15 +1,22 @@
 """Telegram adapter for the independent trade-card service."""
 
-from condor.preferences import get_trade_card_margin, set_trade_card_margin
+import asyncio
+
 from condor.telegram.types import Context, Update
 from condor.trade_cards import get_card
 from condor.trade_cards.execution import ExecutionError
 from condor.trade_cards.models import CardStatus
-from condor.trade_cards.service import act, show_input_error
+from condor.trade_cards.service import act
 from handlers import clear_all_input_states
 from utils.auth import restricted
 
 INPUT_KEY = "trade_card_amount_input"
+#: A button may be answered once. An action that finishes within this many
+#: seconds answers with its refusal as a popup; a slower one answers at once and
+#: its refusal is only on the card, where every refusal is also written.
+ANSWER_WITHIN = 5
+#: Typed input goes to the step the card is on.
+INPUT_ACTIONS = {CardStatus.LEVERAGE: "leverage", CardStatus.SIZING: "amount"}
 
 
 @restricted
@@ -29,71 +36,81 @@ async def trade_cards_callback_handler(update: Update, context: Context) -> None
     ):
         await query.answer("Only the card's recipient can use it.", show_alert=True)
         return
-    await query.answer()
-    margin = None
-    if action in {"m10", "m20", "m50", "last"}:
-        margin = card.margin if action == "last" else action[1:]
+    value = None
+    if action in {"m10", "m20", "m50", "mmin"}:
+        value = card.limits.get("min_margin") if action == "mmin" else action[1:]
         action = "amount"
-    elif action == "invest":
-        margin = get_trade_card_margin(context.user_data)
+    elif action in {"l10", "l25", "l50", "lmax"}:
+        value = (
+            str(card.limits.get("max_leverage", "")) if action == "lmax" else action[1:]
+        )
+        action = "leverage"
     if action in {"invest", "custom"}:
         clear_all_input_states(context)
-    try:
-        card = await act(
+    task = asyncio.ensure_future(
+        act(
             card_id,
             action,
             owner_id=owner_id,
             chat_id=chat_id,
             message_id=query.message.message_id,
             bot=context.bot,
-            margin=margin,
+            value=value,
         )
+    )
+    done, _ = await asyncio.wait({task}, timeout=ANSWER_WITHIN)
+    if not done:
+        await query.answer()
+    refusal = None
+    try:
+        card = await task
     except (ValueError, ExecutionError) as exc:
-        await query.answer(str(exc)[:190], show_alert=True)
+        refusal = str(exc)
+    finally:
+        if done:
+            if refusal:
+                await query.answer(refusal[:190], show_alert=True)
+            else:
+                await query.answer()
+    if refusal:
         return
-    if action == "custom" and card.status == CardStatus.SIZING and card.custom_input:
+    if action == "custom" and card.status in INPUT_ACTIONS and card.custom_input:
         context.user_data[INPUT_KEY] = {
             "card_id": card.id,
             "chat_id": card.chat_id,
             "message_id": card.message_id,
         }
-    elif action != "noop":
+    else:
         context.user_data.pop(INPUT_KEY, None)
-    if action == "amount" and card.status == CardStatus.REVIEW:
-        set_trade_card_margin(context.user_data, card.margin)
 
 
 async def trade_cards_message_handler(update: Update, context: Context) -> bool:
     pending = context.user_data.get(INPUT_KEY)
     if not pending or pending.get("chat_id") != update.effective_chat.id:
         return False
+    owner_id = update.effective_user.id
+    current = get_card(pending["card_id"], owner_id=owner_id)
+    action = INPUT_ACTIONS.get(current.status) if current else None
+    if action is None:
+        context.user_data.pop(INPUT_KEY, None)
+        return False
     try:
-        card = await act(
+        await act(
             pending["card_id"],
-            "amount",
-            owner_id=update.effective_user.id,
+            action,
+            owner_id=owner_id,
             chat_id=update.effective_chat.id,
             message_id=pending.get("message_id"),
             bot=context.bot,
-            margin=update.message.text,
+            value=update.message.text,
         )
-    except (ValueError, ExecutionError) as exc:
-        current = get_card(pending["card_id"], owner_id=update.effective_user.id)
-        if current is None or current.status != CardStatus.SIZING:
+    except (ValueError, ExecutionError):
+        # The reason is on the card; the input stays armed for another try.
+        current = get_card(pending["card_id"], owner_id=owner_id)
+        if current is None or not current.custom_input:
             context.user_data.pop(INPUT_KEY, None)
-        else:
-            await show_input_error(
-                current.id,
-                str(exc),
-                owner_id=update.effective_user.id,
-                chat_id=update.effective_chat.id,
-                message_id=pending.get("message_id"),
-                bot=context.bot,
-            )
         return True
     context.user_data.pop(INPUT_KEY, None)
-    if card.status == CardStatus.REVIEW:
-        set_trade_card_margin(context.user_data, card.margin)
     return True
 
 

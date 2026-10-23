@@ -245,10 +245,6 @@ class GeneralPrefs(TypedDict, total=False):
     active_server: Optional[str]
 
 
-class TradeCardPrefs(TypedDict, total=False):
-    last_margin: str
-
-
 class GatewayPrefs(TypedDict, total=False):
     """Gateway-related preferences including wallet network settings."""
 
@@ -389,7 +385,6 @@ class UserPreferences(TypedDict, total=False):
     voice: VoicePrefs
     trading_agent: TradingAgentPrefs
     notes: Dict[str, str]
-    trade_cards: TradeCardPrefs
 
 
 # ============================================
@@ -448,7 +443,6 @@ def _get_default_preferences() -> UserPreferences:
             "default_risk_limits": {},
         },
         "notes": {},
-        "trade_cards": {"last_margin": "10"},
     }
 
 
@@ -523,26 +517,6 @@ def get_clob_prefs(user_data: Dict) -> CLOBPrefs:
     """
     _initialize_preferences(user_data)
     return deepcopy(user_data[USER_PREFERENCES_KEY]["clob"])
-
-
-def get_trade_card_margin(user_data: Dict) -> str:
-    """The last successfully previewed USDT margin, shared across cards."""
-    from condor.trade_cards.sizing import margin_amount
-
-    _initialize_preferences(user_data)
-    try:
-        return margin_amount(
-            user_data[USER_PREFERENCES_KEY]["trade_cards"]["last_margin"]
-        )
-    except (ValueError, KeyError):
-        return "10"
-
-
-def set_trade_card_margin(user_data: Dict, amount: str) -> None:
-    from condor.trade_cards.sizing import margin_amount
-
-    with _mutate(user_data, "trade_cards") as prefs:
-        prefs["last_margin"] = margin_amount(amount)
 
 
 def get_dex_prefs(user_data: Dict) -> DEXPrefs:

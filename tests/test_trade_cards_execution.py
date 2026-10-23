@@ -8,7 +8,7 @@ import pytest
 
 from condor.trade_cards import execution
 from condor.trade_cards.models import Card
-from tests.support.trade_cards import plan, quote
+from tests.support.trade_cards import limits, plan, quote
 
 
 @pytest.fixture
@@ -63,22 +63,32 @@ async def test_preview_and_creation_use_exact_server_and_group_protocol(
     )
     card.server_fingerprint = execution.server_fingerprint(manager, "fixed")
     monkeypatch.setattr(config_manager, "get_config_manager", lambda: manager)
+    capabilities = {
+        "version": 1,
+        "connectors": ["binance_perpetual"],
+        "features": ["leverage", "limits"],
+    }
     call = AsyncMock(
         side_effect=[
-            {
-                "version": 1,
-                "connectors": ["binance_perpetual"],
-            },
+            capabilities,
+            limits(leverage=25),
+            capabilities,
             quote(),
             {"id": card.id, "status": "OPEN"},
         ]
     )
     monkeypatch.setattr(execution, "request", call)
+    assert (await execution.limits(card, 25))["leverage"] == 25
+    body = call.await_args.kwargs["json"]
+    assert body["leverage"] == 25 and "margin" not in body
+    card.leverage = 25
     result = await execution.preview(card)
     assert result["quantity"] == "1"
     card.create_payload = execution.payload(card)
     await execution.open_group(card)
     assert [args.args[1:3] for args in call.await_args_list] == [
+        ("get", "/executors/position-groups/capabilities"),
+        ("post", "/executors/position-groups/limits"),
         ("get", "/executors/position-groups/capabilities"),
         ("post", "/executors/position-groups/preview"),
         ("put", "/executors/position-groups/abc"),
@@ -86,6 +96,7 @@ async def test_preview_and_creation_use_exact_server_and_group_protocol(
     assert all(args.args[0] is client for args in call.await_args_list)
     assert all(args.args == ("fixed",) for args in manager.get_client.await_args_list)
     assert call.await_args.kwargs["json"] == card.create_payload
+    assert card.create_payload["leverage"] == 25
     assert call.await_args.kwargs["unsupported"] is None
 
 

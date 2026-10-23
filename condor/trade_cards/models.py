@@ -27,6 +27,8 @@ class TradePlan(BaseModel):
     timeframe: str = "1H"
     signal_type: str = ""
     score: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    #: The price the signal fired at; the card measures the live price against it.
+    signal_price: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def ordered_prices(self):
@@ -57,6 +59,7 @@ class TradePlan(BaseModel):
 
 class CardStatus(StrEnum):
     PROPOSED = "PROPOSED"
+    LEVERAGE = "LEVERAGE"
     SIZING = "SIZING"
     REVIEW = "REVIEW"
     PLACING = "PLACING"
@@ -72,7 +75,9 @@ class CardStatus(StrEnum):
     FAILED = "FAILED"
 
 
-UNORDERED = frozenset({CardStatus.PROPOSED, CardStatus.SIZING, CardStatus.REVIEW})
+UNORDERED = frozenset(
+    {CardStatus.PROPOSED, CardStatus.LEVERAGE, CardStatus.SIZING, CardStatus.REVIEW}
+)
 HIDDEN = frozenset(
     {CardStatus.REJECTED, CardStatus.EXPIRED, CardStatus.CANCELLED, CardStatus.DETACHED}
 )
@@ -88,13 +93,21 @@ EXECUTING = frozenset(
 )
 _TRANSITIONS = {
     CardStatus.PROPOSED: {
-        CardStatus.SIZING,
+        CardStatus.LEVERAGE,
         CardStatus.REJECTED,
         CardStatus.EXPIRED,
         CardStatus.FAILED,
     },
-    CardStatus.SIZING: {
+    CardStatus.LEVERAGE: {
         CardStatus.PROPOSED,
+        CardStatus.SIZING,
+        CardStatus.REJECTED,
+        CardStatus.EXPIRED,
+    },
+    CardStatus.SIZING: {
+        # PROPOSED: a card saved in SIZING before leverage was chosen.
+        CardStatus.PROPOSED,
+        CardStatus.LEVERAGE,
         CardStatus.REVIEW,
         CardStatus.REJECTED,
         CardStatus.EXPIRED,
@@ -146,8 +159,18 @@ class Card(BaseModel):
     delivery_status: Literal["pending", "sent", "unknown", "failed"] = "pending"
     message_deleted: bool = False
     delete_failed: bool = False
+    leverage: int = Field(default=10, ge=1)
     margin: str = "10"
+    #: Leverage range and margin bounds at ``leverage``, refreshed with the card.
+    limits: dict = Field(default_factory=dict)
     quote: dict = Field(default_factory=dict)
+    #: The latest live price and when it was read, for an unordered card.
+    live: dict = Field(default_factory=dict)
+    #: Why the chosen settings cannot be ordered right now; disables the order button.
+    blocked: str = ""
+    #: When the live data was last refreshed, and the 15m bar the chart shows.
+    refreshed_at: float = 0
+    chart_bar: int = 0
     execution: dict = Field(default_factory=dict)
     create_payload: dict | None = None
     pending_action: str | None = None

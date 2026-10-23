@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from condor.preferences import get_trade_card_margin, set_trade_card_margin
 from condor.trade_cards import (
     CardStatus,
     execution,
@@ -21,9 +20,9 @@ from condor.trade_cards import (
     store,
     tracker,
 )
-from condor.trade_cards.models import Card
+from condor.trade_cards.models import UNORDERED, Card
 from condor.trade_cards.sizing import margin_amount
-from tests.support.trade_cards import group, plan, quote
+from tests.support.trade_cards import group, limits, plan, quote
 
 
 @pytest.fixture
@@ -42,6 +41,11 @@ def setup(monkeypatch):
         ),
     )
     monkeypatch.setattr(execution, "preview", AsyncMock(return_value=quote()))
+    monkeypatch.setattr(
+        execution,
+        "limits",
+        AsyncMock(side_effect=lambda card, leverage: limits(leverage=leverage)),
+    )
     monkeypatch.setattr(
         execution, "current_price", AsyncMock(return_value=Decimal("100"))
     )
@@ -64,14 +68,15 @@ def setup(monkeypatch):
         send_photo=AsyncMock(return_value=SimpleNamespace(message_id=11)),
         edit_message_caption=AsyncMock(),
         edit_message_reply_markup=AsyncMock(),
+        edit_message_media=AsyncMock(),
         delete_message=AsyncMock(),
     )
     return bot
 
 
-async def published(bot, **kwargs):
+async def published(bot, plan_changes=None, **kwargs):
     return await publish(
-        plan(),
+        plan(**(plan_changes or {})),
         [],
         owner_id=7,
         chat_id=7,
@@ -92,7 +97,8 @@ async def action(bot, card, action_name, **kwargs):
 async def reviewed(bot):
     card = await published(bot)
     await action(bot, card, "invest")
-    return await action(bot, card, "amount", margin="10")
+    await action(bot, card, "leverage", value="10")
+    return await action(bot, card, "amount", value="10")
 
 
 @pytest.mark.asyncio
@@ -505,7 +511,7 @@ async def test_closed_settlement_recovers_without_reopening_and_retries_failed_e
     await tracker.tick(setup)
     closed = get_card(card.id, owner_id=7)
     assert closed.status == CardStatus.CLOSED
-    assert "PnL pending check" in render.caption(closed)
+    assert "• PnL: *pending check*" in render.caption(closed)
     monkeypatch.setattr(store, "_store", None)
     execution.read_group.side_effect = execution.ExecutionError("missing", status=404)
     await tracker.tick(setup)
@@ -530,7 +536,7 @@ async def test_closed_settlement_recovers_without_reopening_and_retries_failed_e
     settled = get_card(card.id, owner_id=7)
     assert settled.status == CardStatus.CLOSED
     assert settled.execution["pnl_complete"] is True
-    assert "+4.78 USDT" in render.result_row(settled)
+    assert "+4.78 USDT" in render.result(settled)[1]
     setup.edit_message_caption.side_effect = None
     await tracker.tick(setup)
     assert "\\+4\\.78 USDT" in setup.edit_message_caption.await_args.kwargs["caption"]
@@ -550,9 +556,9 @@ async def test_closed_result_keeps_photo_and_unchanged_tick_does_not_edit(setup)
     await tracker.tick(setup)
     closed = get_card(card.id, owner_id=7)
     assert closed.status == CardStatus.CLOSED
-    kb = render.keyboard(closed)
-    assert len(kb.inline_keyboard) == len(kb.inline_keyboard[0]) == 1
-    assert kb.inline_keyboard[0][0].callback_data == f"tc:noop:{card.id}"
+    # The outcome is in the caption; a closed card keeps no buttons.
+    assert render.keyboard(closed) is None
+    assert setup.edit_message_caption.await_args.kwargs["reply_markup"] is None
     assert "TP2" in render.caption(closed)
     count = setup.edit_message_caption.await_count
     await tracker.tick(setup)
@@ -564,14 +570,6 @@ async def test_closed_result_keeps_photo_and_unchanged_tick_does_not_edit(setup)
 def test_invalid_margin(value):
     with pytest.raises(ValueError):
         margin_amount(value)
-
-
-def test_preference_remembers_custom_margin_without_clearing_other_sections():
-    prefs = {}
-    assert get_trade_card_margin(prefs) == "10"
-    set_trade_card_margin(prefs, "12.50")
-    assert get_trade_card_margin(prefs) == "12.5"
-    assert "clob" in prefs["user_preferences"]
 
 
 def test_transitions_reject_reopening_terminal_card():
@@ -597,25 +595,24 @@ async def test_caption_reports_estimates_expiry_and_incomplete_results(setup):
     proposed = render.caption(card)
     assert "• Clarity: *87/100*" in proposed and "UTC\\+8" in proposed
     await action(setup, card, "invest")
-    card = await action(setup, card, "amount", margin="10")
+    await action(setup, card, "leverage", value="10")
+    card = await action(setup, card, "amount", value="10")
     text = render.caption(card)
-    assert "• Now: *100 · inside the zone*" in text
     assert "• Entry: *Market ≈ 100*" in text
     assert "• At stop: *\\-5\\.00 USDT*" in text and "Fees included" in text
     # Price ran past the zone: the review says how far and what the limit needs.
     card.quote = quote(entry_method="LIMIT", entry_price="101", current_price="104")
     text = render.caption(card)
-    assert "• Now: *104 · 2\\.9% above the zone*" in text
-    assert "• Entry: *Limit 101 · fills after a 2\\.9% dip*" in text
+    assert "• Entry: *Limit 101 · 2\\.9% dip*" in text
     card.execution = {"close_reason": "MANUAL_CLOSE", "pnl_complete": False, "pnl": "0"}
-    assert render.result_row(card) == "Manual close · PnL pending check"
+    assert render.result(card) == ("Manual close", "pending check")
     card.execution = {
         "close_reason": "TAKE_PROFIT",
         "pnl": "3",
         "pnl_complete": True,
         "legs": [{"level_id": f"{card.id}:2", "close_reason": "TAKE_PROFIT"}],
     }
-    assert "TP2" in render.result_row(card)
+    assert "TP2" in render.result(card)[0]
 
 
 @pytest.mark.asyncio
@@ -660,7 +657,7 @@ async def test_live_liquidation_and_negative_net_target_profit_are_not_fabricate
 
     card = await reviewed(setup)
     card.quote = validate_quote(quote(profit_tp1="-0.02"))
-    assert "*\\-0\\.02 / " in render.caption(card)
+    assert "• At TP1: *\\-0\\.02 USDT*" in render.caption(card)
     card.status = CardStatus.OPEN
     card.execution = group(
         card,
@@ -668,8 +665,24 @@ async def test_live_liquidation_and_negative_net_target_profit_are_not_fabricate
         liquidation_price_kind="exchange",
         pnl_complete=False,
     )
-    assert "• Exchange liquidation: *93*" in render.caption(card)
+    assert "• Liquidation: *93*" in render.caption(card)
     assert "PnL is not fully reconciled yet" in render.caption(card)
+    # An estimate is marked ≈; after TP1 the card shows the trailing stop and what is left.
+    card.execution = group(
+        card,
+        liquidation_price="93",
+        liquidation_price_kind="estimate",
+        remaining_amount="0.5",
+        legs=[
+            {"remaining_amount": "0", "close_reason": "TAKE_PROFIT"},
+            {"remaining_amount": "0.5", "trailing_stop": "100.4"},
+        ],
+    )
+    text = render.caption(card)
+    assert "• Liquidation: *≈ 93*" in text
+    assert "• Margin: *10\\.00 USDT × 10 isolated*" in text
+    assert "• Stop: *100\\.4 · " in text
+    assert "• Left: *0\\.5 SOL · trailing*" in text
 
 
 @pytest.mark.asyncio
@@ -748,12 +761,21 @@ async def test_real_telegram_routes_keep_custom_input_on_original_photo_and_clea
         await tap("invest", user_id=8)
         assert get_card(card.id, owner_id=7).status == CardStatus.PROPOSED
         await tap("invest")
+        assert get_card(card.id, owner_id=7).status == CardStatus.LEVERAGE
         await tap("custom")
         state = app.store.get(7)
         assert state["trade_card_amount_input"]["card_id"] == card.id
         sent_before = sum(
             method == "sendMessage" for method, _ in app.bot.session.requests
         )
+        await app.feed(message_update(app.bot, {"text": "99"}))
+        assert not errors
+        assert "from 1x to 20x" in get_card(card.id, owner_id=7).note
+        await app.feed(message_update(app.bot, {"text": "15"}))
+        card_now = get_card(card.id, owner_id=7)
+        assert (card_now.status, card_now.leverage) == (CardStatus.SIZING, 15)
+        assert "trade_card_amount_input" not in state
+        await tap("custom")
         await app.feed(message_update(app.bot, {"text": "not a number"}))
         assert not errors
         assert (
@@ -761,11 +783,12 @@ async def test_real_telegram_routes_keep_custom_input_on_original_photo_and_clea
             == sent_before
         )
         assert "Enter a valid" in get_card(card.id, owner_id=7).note
+        await app.feed(message_update(app.bot, {"text": "1"}))
+        assert "from 5.00 to 500.00" in get_card(card.id, owner_id=7).note
         await app.feed(message_update(app.bot, {"text": "12.5"}))
         assert get_card(card.id, owner_id=7).status == CardStatus.REVIEW
-        assert get_trade_card_margin(state) == "12.5"
         assert "trade_card_amount_input" not in state
-        await tap("invest")
+        await tap("back")
         await tap("custom")
         await tap("back")
         assert get_card(card.id, owner_id=7).status == CardStatus.SIZING
@@ -801,6 +824,14 @@ async def test_real_telegram_routes_keep_custom_input_on_original_photo_and_clea
         ]
         assert len(photos) == 1
         assert all(fields["message_id"] == str(card.message_id) for fields in edits)
+        # Each tap is answered exactly once, refusals included.
+        answers = [
+            fields
+            for method, fields in app.bot.session.requests
+            if method == "answerCallbackQuery"
+        ]
+        assert len(answers) == 9
+        assert answers[0].get("show_alert") in ("true", True)
     finally:
         await app.close()
 
@@ -839,6 +870,70 @@ async def test_every_card_caption_is_valid_markdown_v2(setup):
     card.status = CardStatus.OPEN
     card.confirm_action = "close"
     assert_valid(render.caption(card))
+
+
+@pytest.mark.asyncio
+async def test_card_rows_fit_one_phone_line(setup):
+    """Titles and rows stay within a phone's caption width (about 33 characters);
+    only the italic notes below them are prose that may wrap."""
+    import re
+    import unicodedata
+
+    def width(line):
+        text = re.sub(r"\\(.)", r"\1", line).replace("*", "")
+        return sum(2 if unicodedata.east_asian_width(c) == "W" else 1 for c in text)
+
+    card = await reviewed(setup)
+    card.plan = plan(
+        entry_low="2390.75",
+        entry_high="2401.25",
+        stop_price="2376.81",
+        tp1_price="2434.91",
+        tp2_price="2469.77",
+        signal_price="2400.42",
+    )
+    card.leverage, card.mode = 25, "mock"
+    card.live = {"price": "2389.01", "at": 1792758000}
+    card.limits = limits(max_leverage=73, min_margin="1.73", max_margin="101.18")
+    card.quote = quote(
+        quantity="0.104",
+        entry_price="2401.25",
+        current_price="2420.01",
+        entry_method="LIMIT",
+        margin="9.98",
+        max_loss="2.69",
+        profit_tp1="1.67",
+        profit_tp2="3.49",
+        liquidation_price="2314.74",
+    )
+    legs = [
+        {"remaining_amount": "0", "close_reason": "TAKE_PROFIT"},
+        {"remaining_amount": "0.052", "trailing_stop": "2401.05"},
+    ]
+    for status in (*UNORDERED, CardStatus.OPEN, CardStatus.CLOSED):
+        card.status, card.note, card.blocked = status, "", ""
+        card.execution = group(
+            card,
+            "CLOSED" if status == CardStatus.CLOSED else "OPEN",
+            entry_price="2401.05",
+            filled_amount="0.104",
+            remaining_amount="0.052",
+            current_price="2399.47",
+            pnl="-12.34",
+            liquidation_price="2315.4801",
+            liquidation_price_kind="estimate",
+            close_reason="MANUAL_CLOSE",
+            legs=legs,
+        )
+        rows = [
+            line
+            for line in render.caption(card).splitlines()
+            if line and not line.startswith("_")
+        ]
+        assert not [l for l in rows if width(l) > 33], (
+            status,
+            [(width(l), l) for l in rows if width(l) > 33],
+        )
 
 
 @pytest.mark.asyncio
@@ -897,3 +992,97 @@ async def test_a_finished_card_whose_message_was_deleted_is_forgotten(setup):
     assert not service.chart_path(card.id).exists()
     # The signal stays reserved: the same trigger cannot publish again.
     assert await published(setup, signal_id="pullback:777") is None
+
+
+def _buttons(card):
+    return [
+        b.callback_data.split(":")[1]
+        for row in render.keyboard(card).inline_keyboard
+        for b in row
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_executor_refusal_stays_on_the_card(setup):
+    card = await published(setup)
+    await action(setup, card, "invest")
+    await action(setup, card, "leverage", value="10")
+    execution.preview.side_effect = execution.ExecutionError(
+        execution.user_error(
+            "The selected margin is too small for two valid equal-size legs"
+        )
+    )
+    with pytest.raises(execution.ExecutionError):
+        await action(setup, card, "amount", value="10")
+    card = get_card(card.id, owner_id=7)
+    assert card.status == CardStatus.SIZING
+    assert "below this pair's minimum" in card.note
+    assert "below this pair" in setup.edit_message_caption.await_args.kwargs["caption"]
+    # One alert, set apart from the rows; it replaces the not-orderable reason.
+    card.blocked = "Price is past the entry zone toward the stop"
+    text = render.caption(card)
+    assert "\n\n_⚠️ " in text and text.count("⚠️") == 1
+    assert "Not orderable" not in text
+    # Refreshing supersedes the refusal instead of stacking under it.
+    card = await action(setup, card, "refresh")
+    assert card.note == "" and "⚠️" not in render.caption(card)
+
+
+@pytest.mark.asyncio
+async def test_leverage_choices_follow_the_pair_and_set_the_margin_range(setup):
+    card = await published(setup)
+    card = await action(setup, card, "invest")
+    assert card.status == CardStatus.LEVERAGE and card.leverage == 10
+    # 20x is the most this pair allows with the liquidation beyond the stop.
+    assert _buttons(card) == ["l10", "lmax", "custom", "back"]
+    assert "1x – 20x" in render.caption(card)
+    with pytest.raises(ValueError, match="from 1x to 20x"):
+        await action(setup, card, "leverage", value="25")
+    execution.limits.side_effect = lambda card, leverage: limits(
+        leverage=leverage, min_margin="12.50"
+    )
+    card = await action(setup, card, "leverage", value="20")
+    assert (card.status, card.leverage, card.margin) == (CardStatus.SIZING, 20, "12.5")
+    # Presets under the minimum are hidden; the minimum has its own button.
+    assert _buttons(card) == ["mmin", "m20", "m50", "custom", "back"]
+    card = await action(setup, card, "amount", value="20")
+    assert execution.preview.await_args.args[0].leverage == 20
+    assert "USDT × 20" in render.caption(card)
+
+
+@pytest.mark.asyncio
+async def test_live_refresh_blocks_and_restores_the_order_button(setup, monkeypatch):
+    card = await reviewed(setup)
+    assert "confirm" in _buttons(card)
+    clock = [service.time.time() + service.LIVE_SECONDS]
+    monkeypatch.setattr(service.time, "time", lambda: clock[0])
+    execution.preview.side_effect = execution.ExecutionError(
+        "Price is past the entry zone toward the stop; wait for it to return"
+    )
+    execution.current_price.return_value = Decimal("98")
+    await tracker.tick(setup)
+    card = get_card(card.id, owner_id=7)
+    assert card.status == CardStatus.REVIEW and "toward the stop" in card.blocked
+    assert "confirm" not in _buttons(card) and card.live["price"] == "98"
+    clock[0] += service.LIVE_SECONDS
+    execution.preview.side_effect = None
+    await tracker.tick(setup)
+    card = get_card(card.id, owner_id=7)
+    assert card.blocked == "" and "confirm" in _buttons(card)
+
+
+@pytest.mark.asyncio
+async def test_proposed_card_shows_live_price_and_redraws_each_bar(setup, monkeypatch):
+    card = await published(setup, plan_changes={"signal_price": "100"})
+    execution.current_price.return_value = Decimal("97")
+    monkeypatch.setattr(execution, "candles", AsyncMock(return_value=[]))
+    clock = [service.time.time() + service.CHART_BAR_SECONDS]
+    monkeypatch.setattr(service.time, "time", lambda: clock[0])
+    await tracker.tick(setup)
+    card = get_card(card.id, owner_id=7)
+    text = render.caption(card)
+    assert "97 · \\-3\\.00% vs signal" in text
+    assert "No · 2\\.1% below zone" in text
+    setup.edit_message_media.assert_awaited_once()
+    await tracker.tick(setup)
+    setup.edit_message_media.assert_awaited_once()

@@ -19,6 +19,7 @@ from condor.telegram.errors import (
     is_not_modified,
 )
 from condor.telegram.transport import as_input_file
+from condor.telegram.types import InputMediaPhoto
 
 from . import execution, render
 from .models import (
@@ -31,7 +32,7 @@ from .models import (
     TradePlan,
     management_actions,
 )
-from .sizing import margin_amount
+from .sizing import check_leverage, check_margin, leverage_value, margin_amount
 from .store import get_store
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ async def publish(
     else:
         if reason := invalid_reason(card, price):
             raise PlanOutdated(f"{reason} (price {price})")
+        _see_price(card, price)
     store = get_store()
     async with store.publish_lock:
         if signal_key is not None and store.signal_reserved(signal_key):
@@ -183,6 +185,7 @@ async def publish(
             raise RuntimeError(f"{card.note} ({card.id})") from exc
         card.message_id = message.message_id
         card.delivery_status = "sent"
+        card.chart_bar = int(time.time() // CHART_BAR_SECONDS)
         card.last_render = _render_key(card)
         store.save(card)
         return card
@@ -352,6 +355,9 @@ def _apply_group(card: Card, group: dict) -> None:
             "The executor's trade record cannot be confirmed; it is being checked."
         )
     card.execution = group
+    if group.get("price_available", True) and group.get("current_price"):
+        # When the open position's price was last seen, for its card heading.
+        card.live = {"price": str(group["current_price"]), "at": time.time()}
     status = CardStatus(group["status"])
     if (
         status == CardStatus.CLOSED
@@ -475,6 +481,147 @@ async def _settle_closed(card: Card) -> None:
     get_store().save(card)
 
 
+async def _show(card: Card, bot) -> None:
+    try:
+        await update_message(card, bot)
+    except Exception:
+        # Telegram is a view, never the execution transaction.
+        logger.warning("Could not update trade card message: %s", card.id)
+
+
+def _see_price(card: Card, value) -> Decimal:
+    price = Decimal(str(value))
+    card.live = {"price": str(price), "at": time.time()}
+    card.refreshed_at = card.live["at"]
+    return price
+
+
+async def _fetch_limits(card: Card, leverage: int) -> dict:
+    limits = await execution.limits(card, leverage)
+    _see_price(card, limits["current_price"])
+    card.blocked = limits.get("blocked") or ""
+    return limits
+
+
+async def _fetch_quote(card: Card) -> None:
+    card.quote = await execution.preview(card)
+    _see_price(card, card.quote["current_price"])
+    card.blocked = ""
+
+
+async def _apply(card: Card, action: str, value: str | None, bot) -> None:
+    store = get_store()
+    if action == "refresh" and card.status in EXECUTING:
+        await _reconcile(card)
+    elif card.status in UNORDERED:
+        if reason := invalid_reason(card):
+            card.note = reason
+            card.transition(CardStatus.EXPIRED)
+        elif action == "reject":
+            card.transition(CardStatus.REJECTED)
+        elif action == "refresh":
+            # A new look at the market supersedes the last refusal.
+            card.note = ""
+            await _refresh_live(card)
+        elif action == "invest" and card.status == CardStatus.PROPOSED:
+            limits = await _fetch_limits(card, card.leverage)
+            # Every card starts at 10x, or the highest leverage the pair allows below it.
+            card.leverage = max(1, min(10, limits["max_leverage"]))
+            card.limits = limits
+            card.transition(CardStatus.LEVERAGE)
+            card.custom_input = False
+            card.note = ""
+        elif action == "leverage" and card.status == CardStatus.LEVERAGE:
+            leverage = leverage_value(value or "")
+            if card.limits:  # cards saved before leverage was chosen have none
+                check_leverage(leverage, card.limits)
+            limits = await _fetch_limits(card, leverage)
+            check_leverage(leverage, limits)
+            card.leverage, card.limits = leverage, limits
+            card.margin = margin_amount(limits["min_margin"])
+            card.transition(CardStatus.SIZING)
+            card.custom_input = False
+            card.note = ""
+        elif action == "amount" and card.status == CardStatus.SIZING:
+            margin = margin_amount(value or card.margin)
+            if card.limits:  # the executor's preview checks it either way
+                check_margin(margin, card.limits)
+            card.margin = margin
+            await _fetch_quote(card)
+            if reason := invalid_reason(card, Decimal(card.live["price"])):
+                card.note = reason
+                card.transition(CardStatus.EXPIRED)
+            else:
+                card.transition(CardStatus.REVIEW)
+                card.custom_input = False
+                card.note = ""
+        elif action == "back" and card.status != CardStatus.PROPOSED:
+            if card.custom_input:
+                card.custom_input = False
+            else:
+                card.transition(
+                    {
+                        CardStatus.LEVERAGE: CardStatus.PROPOSED,
+                        CardStatus.SIZING: CardStatus.LEVERAGE,
+                        CardStatus.REVIEW: CardStatus.SIZING,
+                    }[card.status]
+                )
+                card.blocked = ""
+            card.note = ""
+        elif action in {"custom", "cancel_custom"} and card.status in {
+            CardStatus.LEVERAGE,
+            CardStatus.SIZING,
+        }:
+            card.custom_input = action == "custom"
+            if card.custom_input:
+                store.allow_custom_input(card.id)
+            card.note = ""
+        elif action == "confirm" and card.status == CardStatus.REVIEW:
+            # Preview itself cannot place an order. Capability and quote
+            # errors therefore leave REVIEW available for a later retry.
+            await _fetch_quote(card)
+            if reason := invalid_reason(card, Decimal(card.live["price"])):
+                card.note = reason
+                card.transition(CardStatus.EXPIRED)
+            else:
+                card.create_payload = execution.payload(card)
+                card.transition(CardStatus.PLACING)
+                card.note = ""
+                store.save(card)
+                await _show(card, bot)
+                try:
+                    _apply_group(card, await execution.open_group(card))
+                except execution.ExecutionError as exc:
+                    card.transition(CardStatus.RECONCILING)
+                    card.note = str(exc)
+                    # A definitive schema/risk rejection did not create a
+                    # group; unknown failures must never return to REVIEW.
+                    if exc.status in {400, 422} or exc.code == "SYMBOL_BUSY":
+                        card.transition(CardStatus.REVIEW)
+                        card.create_payload = None
+        else:
+            raise ValueError("The card changed. Use the buttons it shows now.")
+    elif action == "cancel_entry" and action in management_actions(card):
+        await _command(card, action)
+    elif allowed := management_actions(card):
+        if action in allowed:
+            card.confirm_action = action
+            card.confirm_until = time.time() + 30
+        elif action == "back":
+            card.confirm_action = None
+        elif (
+            action.startswith("yes_")
+            and card.confirm_action == action[4:]
+            and action[4:] in allowed
+            and time.time() <= card.confirm_until
+        ):
+            await _command(card, action[4:])
+        else:
+            raise ValueError("The confirmation expired. Choose again.")
+    else:
+        raise ValueError("The card is busy or has ended. Refresh to check its status.")
+
+
 async def act(
     card_id: str,
     action: str,
@@ -483,107 +630,94 @@ async def act(
     chat_id: int,
     message_id: int | None,
     bot,
-    margin: str | None = None,
+    value: str | None = None,
 ) -> Card:
-    """Telegram-facing action boundary. Every mutation holds the same card lock."""
+    """Telegram-facing action boundary. Every mutation holds the same card lock.
+
+    A refused action leaves its reason on the card, so it stays visible after
+    any popup is gone; the error is raised again for the caller to show.
+    """
     store = get_store()
     async with store.lock(card_id):
         card = _authorize(card_id, owner_id, chat_id, message_id)
-        if action == "noop":
-            return card
-        if action == "refresh" and card.status in EXECUTING:
-            await _reconcile(card)
-        elif card.status in UNORDERED:
-            if reason := invalid_reason(card):
-                card.note = reason
-                card.transition(CardStatus.EXPIRED)
-            elif action == "reject":
-                card.transition(CardStatus.REJECTED)
-            elif action == "invest":
-                card.transition(CardStatus.SIZING)
-                if margin is not None:
-                    card.margin = margin_amount(margin)
-                card.custom_input = False
-                card.note = ""
-            elif action == "back" and card.status == CardStatus.SIZING:
-                if not card.custom_input:
-                    card.transition(CardStatus.PROPOSED)
-                card.custom_input = False
-                card.note = ""
-            elif (
-                action in {"custom", "cancel_custom"}
-                and card.status == CardStatus.SIZING
-            ):
-                card.custom_input = action == "custom"
-                if card.custom_input:
-                    store.allow_custom_input(card.id)
-                card.note = ""
-            elif action == "amount" and card.status == CardStatus.SIZING:
-                card.margin = margin_amount(margin or card.margin)
-                card.quote = await execution.preview(card)
-                price = Decimal(str(card.quote["current_price"]))
-                if reason := invalid_reason(card, price):
-                    card.note = reason
-                    card.transition(CardStatus.EXPIRED)
-                else:
-                    card.transition(CardStatus.REVIEW)
-                    card.custom_input = False
-                    card.note = ""
-            elif action == "confirm" and card.status == CardStatus.REVIEW:
-                # Preview itself cannot place an order. Capability and quote
-                # errors therefore leave REVIEW available for a later retry.
-                card.quote = await execution.preview(card)
-                if reason := invalid_reason(
-                    card, Decimal(str(card.quote["current_price"]))
-                ):
-                    card.note = reason
-                    card.transition(CardStatus.EXPIRED)
-                else:
-                    card.create_payload = execution.payload(card)
-                    card.transition(CardStatus.PLACING)
-                    card.note = ""
-                    store.save(card)
-                    try:
-                        await update_message(card, bot)
-                    except Exception:
-                        # Telegram is a view, never the execution transaction.
-                        logger.warning("Could not show placing state: %s", card.id)
-                    try:
-                        _apply_group(card, await execution.open_group(card))
-                    except execution.ExecutionError as exc:
-                        card.transition(CardStatus.RECONCILING)
-                        card.note = str(exc)
-                        # A definitive schema/risk rejection did not create a
-                        # group; unknown failures must never return to REVIEW.
-                        if exc.status in {400, 422} or exc.code == "SYMBOL_BUSY":
-                            card.transition(CardStatus.REVIEW)
-                            card.create_payload = None
-            else:
-                raise ValueError("The card changed. Use the buttons it shows now.")
-        elif action == "cancel_entry" and action in management_actions(card):
-            await _command(card, action)
-        elif allowed := management_actions(card):
-            if action in allowed:
-                card.confirm_action = action
-                card.confirm_until = time.time() + 30
-            elif action == "back":
-                card.confirm_action = None
-            elif (
-                action.startswith("yes_")
-                and card.confirm_action == action[4:]
-                and action[4:] in allowed
-                and time.time() <= card.confirm_until
-            ):
-                await _command(card, action[4:])
-            else:
-                raise ValueError("The confirmation expired. Choose again.")
-        else:
-            raise ValueError(
-                "The card is busy or has ended. Refresh to check its status."
-            )
+        try:
+            await _apply(card, action, value, bot)
+        except (ValueError, execution.ExecutionError) as exc:
+            card.note = str(exc)[:240]
+            store.save(card)
+            await _show(card, bot)
+            raise
         store.save(card)
         await update_message(card, bot)
         return card
+
+
+#: How often an unordered card re-reads its price, limits or quote.
+LIVE_SECONDS = 60
+#: The chart is redrawn once per closed bar of this length.
+CHART_BAR_SECONDS = 900
+
+
+async def _refresh_live(card: Card) -> None:
+    """Re-read what the card shows for its step; an outage never expires it."""
+    try:
+        if card.status == CardStatus.REVIEW:
+            try:
+                await _fetch_quote(card)
+            except (ValueError, execution.ExecutionError) as exc:
+                # The quote the card shows is stale: no order until it is valid again.
+                card.blocked = str(exc)[:240]
+                _see_price(card, await execution.current_price(card))
+        elif card.status in {CardStatus.LEVERAGE, CardStatus.SIZING}:
+            try:
+                card.limits = await _fetch_limits(card, card.leverage)
+            except (ValueError, execution.ExecutionError) as exc:
+                card.blocked = str(exc)[:240]
+                _see_price(card, await execution.current_price(card))
+        else:
+            _see_price(card, await execution.current_price(card))
+    except Exception:
+        # Unavailable price is not zero and cannot expire a card.
+        logger.warning("Trade card price unavailable: %s", card.id)
+        card.refreshed_at = time.time()
+        return
+    if reason := invalid_reason(card, Decimal(card.live["price"])):
+        card.note = reason
+        card.transition(CardStatus.EXPIRED)
+
+
+async def _redraw_chart(card: Card, bot) -> None:
+    """Draw the card's chart again with the bars closed since it was sent."""
+    from .chart import render_chart
+
+    card.chart_bar = int(time.time() // CHART_BAR_SECONDS)
+    try:
+        candles = await execution.candles(card)
+        png = await asyncio.to_thread(
+            render_chart, candles, card.plan, card.connector_name
+        )
+        chart_path(card.id).write_bytes(png)
+        await bot.edit_message_media(
+            chat_id=card.chat_id,
+            message_id=card.message_id,
+            media=InputMediaPhoto(
+                media=as_input_file(png, filename=f"trade-{card.id}.png"),
+                caption=render.caption(card),
+                parse_mode="MarkdownV2",
+            ),
+            reply_markup=render.keyboard(card),
+        )
+    except BadRequest as exc:
+        if _gone(exc):
+            card.message_deleted = True
+        elif not is_not_modified(exc):
+            logger.warning("Trade card chart redraw failed: %s", card.id)
+        return
+    except Exception:
+        logger.warning("Trade card chart redraw failed: %s", card.id)
+        return
+    card.last_render = _render_key(card)
+    card.last_checked = time.time()
 
 
 async def refresh_card(card_id: str, bot) -> None:
@@ -593,17 +727,12 @@ async def refresh_card(card_id: str, bot) -> None:
         if card is None:
             return
         if card.status in UNORDERED:
-            reason = invalid_reason(card)
-            if not reason:
-                try:
-                    reason = invalid_reason(card, await execution.current_price(card))
-                except Exception:
-                    # Unavailable price is not zero and cannot expire a card.
-                    logger.warning("Trade card price unavailable: %s", card.id)
-            if reason:
+            if reason := invalid_reason(card):
                 card.note = reason
                 card.transition(CardStatus.EXPIRED)
-                store.save(card)
+            elif time.time() - card.refreshed_at >= LIVE_SECONDS:
+                await _refresh_live(card)
+            store.save(card)
         elif card.status in EXECUTING:
             await _reconcile(card)
             if (
@@ -620,17 +749,13 @@ async def refresh_card(card_id: str, bot) -> None:
         if card.confirm_action and time.time() > card.confirm_until:
             card.confirm_action = None
             store.save(card)
-        await update_message(card, bot)
-
-
-async def show_input_error(
-    card_id: str, message: str, *, owner_id: int, chat_id: int, message_id: int, bot
-) -> None:
-    """Show custom-amount validation in the existing photo, under its lock."""
-    store = get_store()
-    async with store.lock(card_id):
-        card = _authorize(card_id, owner_id, chat_id, message_id)
-        if card.status == CardStatus.SIZING:
-            card.note = message
+        if (
+            card.message_id
+            and not card.message_deleted
+            and card.status in UNORDERED | EXECUTING
+            and card.chart_bar
+            and time.time() // CHART_BAR_SECONDS > card.chart_bar
+        ):
+            await _redraw_chart(card, bot)
             store.save(card)
-            await update_message(card, bot)
+        await update_message(card, bot)

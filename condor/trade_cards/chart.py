@@ -73,7 +73,8 @@ def _draw_card(df: pd.DataFrame, plan: TradePlan, connector_name: str) -> bytes:
             plan.tp2_price,
         ),
     )
-    entry = (lo_p + hi_p) / 2
+    # The plan's R is measured from the signal price; older plans have only a zone.
+    entry = float(plan.signal_price) if plan.signal_price else (lo_p + hi_p) / 2
     risk = abs(entry - stop)
     rr1, rr2 = abs(tp1 - entry) / risk, abs(tp2 - entry) / risk
     above_c, below_c = (RED, GRN) if short else (GRN, RED)

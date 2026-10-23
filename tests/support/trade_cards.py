@@ -36,6 +36,24 @@ def quote(**changes) -> dict:
     }
 
 
+def limits(**changes) -> dict:
+    return {
+        "leverage": 10,
+        "max_leverage": 20,
+        "exchange_max_leverage": 50,
+        "stop_safe_max_leverage": 20,
+        "min_margin": "5.00",
+        "max_margin": "500.00",
+        "available_balance": "500",
+        "entry_type": "MARKET",
+        "entry_price": "100",
+        "current_price": "100",
+        "mark_price": "100",
+        "blocked": None,
+        **changes,
+    }
+
+
 def group(card, status="OPEN", **changes) -> dict:
     return {
         **quote(),

@@ -17,7 +17,7 @@ import aiohttp
 from condor.fetchers.raw_api import ApiRouteUnsupported, request
 
 from .models import Card
-from .sizing import validate_quote
+from .sizing import validate_limits, validate_quote
 
 PREFIX = "/executors/position-groups"
 logger = logging.getLogger(__name__)
@@ -94,6 +94,14 @@ def user_error(reason) -> str:
     text = str(reason).lower()
     mappings = (
         (
+            ("too small",),
+            "The margin is below this pair's minimum at this leverage. Increase the margin or the leverage.",
+        ),
+        (
+            ("maximum leverage", "leverage risk bracket"),
+            "This leverage or position size is above what the pair allows. Lower the leverage or the margin.",
+        ),
+        (
             (
                 "min_notional",
                 "minimum notional",
@@ -133,7 +141,7 @@ def user_error(reason) -> str:
             ("isolated", "margin mode", "margin_type", "margintype"),
             "Could not confirm isolated margin mode; no order was placed.",
         ),
-        (("leverage",), "Could not confirm 10x leverage; no order was placed."),
+        (("leverage",), "Could not confirm the chosen leverage; no order was placed."),
         (
             ("toward the stop",),
             "The price fell through the entry zone toward the stop. Wait for it to return, or reject the card.",
@@ -224,24 +232,37 @@ def payload(card: Card) -> dict:
         "tp1_price": str(plan.tp1_price),
         "tp2_price": str(plan.tp2_price),
         "margin": card.margin,
-        "leverage": 10,
+        "leverage": card.leverage,
         "mode": card.mode,
         "entry_expires_at": card.expires_at,
     }
 
 
-async def preview(card: Card) -> dict:
+async def _require_capabilities(card: Card) -> None:
     capabilities = await _request(card, "GET", "/capabilities")
     # An executor that lists no modes predates mock and trades live only.
     if (
         capabilities.get("version") != 1
         or card.mode not in capabilities.get("modes", ["live"])
         or card.connector_name not in capabilities.get("connectors", [])
+        or not {"leverage", "limits"} <= set(capabilities.get("features", []))
     ):
         raise ExecutionError(
-            "The executor does not support this card mode or exchange. Update the executor first.",
+            "The executor does not support this card mode, exchange or leverage choice. Update the executor first.",
             status=501,
         )
+
+
+async def limits(card: Card, leverage: int) -> dict:
+    """Leverage range and margin bounds at ``leverage``; reads only."""
+    await _require_capabilities(card)
+    body = {**payload(card), "leverage": leverage}
+    del body["margin"]
+    return validate_limits(await _request(card, "POST", "/limits", body))
+
+
+async def preview(card: Card) -> dict:
+    await _require_capabilities(card)
     result = validate_quote(await _request(card, "POST", "/preview", payload(card)))
     liquidation = Decimal(str(result["liquidation_price"]))
     if (card.plan.side == "long" and liquidation >= card.plan.stop_price) or (
@@ -268,6 +289,23 @@ async def command(card: Card) -> dict:
         f"/{card.id}/commands",
         {"operation_id": card.operation_id, "action": card.pending_action},
     )
+
+
+async def candles(card: Card) -> list[dict]:
+    """The plan timeframe's recent candles, the forming one last."""
+    client = await _client(card)
+    rows = await asyncio.wait_for(
+        client.market_data.get_candles_last_days(
+            card.connector_name,
+            card.plan.trading_pair,
+            days=2,
+            interval=card.plan.timeframe.lower(),
+        ),
+        timeout=20,
+    )
+    if isinstance(rows, dict):
+        rows = rows.get("data") or rows.get("candles") or []
+    return list(rows or [])
 
 
 async def current_price(card: Card) -> Decimal:

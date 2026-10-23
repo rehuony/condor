@@ -4,10 +4,13 @@ The scanner owns market selection, closed-candle signals, clarity scoring and
 reports. Trade Cards owns rendering, publication deduplication, interaction and
 execution; its executor supports Binance USDT perpetuals only, so that is the
 only market scanned. The 4H breakout signal was retired: it was negative R in
-and out of sample. The clarity threshold remains 80, with no card-count or
-cooldown cap.
-Historical validation used a 48-hour observation horizon; live positions have no
-time-based exit. The preserved study is under data/research/trend-watch-clarity/.
+and out of sample; so was the shallow 1H EMA9 pullback, which multiplied cards
+without edge. Cards need clarity 80, a pair and side waits for its previous card
+to end, and at most two cards per side are in play. The plan (1.5×ATR1H stop,
+1.5R/3R targets, a 0.6×ATR1H entry zone) comes from the 2026-10-23 study under
+data/research/trend-watch-signal/; earlier ones are under trend-watch-clarity/.
+Backtests used a 72-hour observation horizon; live positions have no time-based
+exit.
 """
 
 import asyncio
@@ -23,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from condor import paths, trade_cards
 from condor.reports import ReportBuilder
-from condor.trade_cards.models import TradePlan
+from condor.trade_cards.models import TERMINAL, TradePlan
 from condor.trade_cards.render import venue_label
 from config_manager import get_client
 from routines.base import RoutineContext, RoutineResult, resolve_server_name
@@ -112,20 +115,31 @@ class Config(BaseModel):
     # Plan
     stop_atr: float = Field(
         title="Stop (×ATR1H)",
-        default=2.0,
+        default=1.5,
         description="Stop distance = this × ATR1H from the signal price",
+    )
+    entry_atr: float = Field(
+        title="Entry zone (×ATR1H)",
+        default=0.6,
+        description="Entry zone width on the stop side of the signal price; a price past it toward the stop is not entered",
     )
     tp1_r: float = Field(
         title="TP1 (R)",
-        default=1.0,
+        default=1.5,
         description="TP1 at this multiple of the stop distance",
     )
     tp2_r: float = Field(
         title="TP2 (R)",
-        default=2.0,
+        default=3.0,
         description="TP2 at this multiple of the stop distance",
     )
     # Delivery
+    max_same_side: int = Field(
+        title="Max cards per side",
+        default=2,
+        ge=1,
+        description="At most this many long (or short) cards in play at once; a pair and side also waits for its previous card to end",
+    )
     mode: Literal["live", "mock"] = Field(
         title="Mode",
         default="live",
@@ -238,7 +252,7 @@ def _plan(side: str, last: float, atr1h: float, cfg: Config) -> dict:
     """
     sgn = 1 if side == "long" else -1
     risk = cfg.stop_atr * atr1h
-    edge = last - sgn * 0.2 * atr1h
+    edge = last - sgn * cfg.entry_atr * atr1h
     return dict(
         side=side,
         lo=min(last, edge),
@@ -452,8 +466,19 @@ def _trade_plan(plan: dict) -> TradePlan:
         tp2_price=str(plan["tp2"]),
         timeframe=plan["tf"],
         signal_type=plan["type"],
+        signal_price=str(plan["mid"]),
         score=plan["score"],
     )
+
+
+def _limited(plan: dict, active: list, cfg: Config) -> str | None:
+    """Why a qualified plan is held back by the cards still in play, if it is."""
+    same_side = [card for card in active if card.plan.side == plan["side"]]
+    if any(card.plan.trading_pair == plan["pair"] for card in same_side):
+        return "a card for this pair and side is still active"
+    if len(same_side) >= cfg.max_same_side:
+        return f"{len(same_side)} {plan['side']} cards are already active"
+    return None
 
 
 def _summary(head: str, verdict: str, sections: list[tuple[str, list[str]]]) -> str:
@@ -509,6 +534,17 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     candidates = sorted(
         (r["plan"] for r in results if r["plan"]), key=lambda plan: -plan["score"]
     )
+    # Cards still in play, so a pair and side waits for its previous card to end
+    # and one side cannot pile up (the same market move bet several times).
+    active = (
+        [
+            card
+            for card in trade_cards.list_cards(owner_id=context.owner_id)
+            if card.status not in TERMINAL and card.connector_name == CONNECTOR
+        ]
+        if config.send and context.owner_id
+        else []
+    )
     muted, cards = [], []
     for plan in candidates:
         trade_plan = _trade_plan(plan)
@@ -516,6 +552,9 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         if config.send:
             if not context.chat_id or not context.owner_id:
                 raise ValueError("Publishing trade cards requires an owner and chat")
+            if reason := _limited(plan, active, config):
+                muted.append((plan, reason))
+                continue
             try:
                 published = await trade_cards.publish(
                     trade_plan,
@@ -534,8 +573,9 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
                 skipped.append(f"{plan['base']}: {exc}")
                 continue
             if published is None:
-                muted.append(plan)
+                muted.append((plan, "a card was already sent for this trigger bar"))
                 continue
+            active.append(published)
         else:
             # A preview does not reserve a signal or mutate any trading state.
             png = await asyncio.to_thread(
@@ -556,7 +596,6 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
     hits = sum(r["hit"] for r in results)
     # Closest to a card: highest clarity first (see _gap)
     near = sorted((r for r in results if r["gap"]), key=lambda r: r["gap"]["rank"])
-    muted_why = "a card was already sent for this trigger bar"
 
     # ── report ──
     builder = ReportBuilder(f"Trend Watch · {venue_label(CONNECTOR)}")
@@ -611,10 +650,10 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         for r in results
         if r["blocked"]
     ]
-    blocked_rows += [_row(p, muted_why) for p in muted]
+    blocked_rows += [_row(p, why) for p, why in muted]
     if blocked_rows:
         builder.markdown(
-            "**Triggered without a card** (clarity too low / already sent for this bar)"
+            "**Triggered without a card** (a filter failed, or a card limit applied)"
         )
         builder.table(blocked_rows, cols)
     builder.markdown(
@@ -622,8 +661,11 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
         f"② price within {config.pullback_atr:.2f}×ATR1H of the 1H EMA21, with a pullback "
         f"or bounce to near EMA21 in the last 3 1H bars → ③ a green 15m close above "
         f"(red close below) EMA9 → ④ trend clarity ≥ {config.min_score:g} (mean of 1H "
-        f"efficiency ratio, 1H trend strength and 4H alignment). No card cap; one card "
-        f"per trigger bar"
+        f"efficiency ratio, 1H trend strength and 4H alignment). Plan: stop "
+        f"{config.stop_atr:g}×ATR1H, TP1/TP2 {config.tp1_r:g}R/{config.tp2_r:g}R, entry zone "
+        f"{config.entry_atr:g}×ATR1H on the stop side. Limits: a pair and side waits for its "
+        f"previous card to end; at most {config.max_same_side} cards per side; one card per "
+        f"trigger bar"
     )
 
     def _status(r):
@@ -693,8 +735,11 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
                     [line for r in near[:3] for line in _closest_lines(r)],
                 ),
                 (
-                    f"Skipped — {muted_why}",
-                    [f"• {p['base']} {SIDE_NAME[p['side']]}" for p in muted],
+                    "Skipped by card limits",
+                    [
+                        f"• {p['base']} {SIDE_NAME[p['side']]}: {why}"
+                        for p, why in muted
+                    ],
                 ),
                 ("Not scanned", not_scanned),
             ],
@@ -707,8 +752,11 @@ async def run(config: Config, context: RoutineContext) -> str | RoutineResult:
             [
                 ("Cards", [f"• {p['caption']}" for p in cards]),
                 (
-                    f"Skipped — {muted_why}",
-                    [f"• {p['base']} {SIDE_NAME[p['side']]}" for p in muted],
+                    "Skipped by card limits",
+                    [
+                        f"• {p['base']} {SIDE_NAME[p['side']]}: {why}"
+                        for p, why in muted
+                    ],
                 ),
                 ("Previews", [f"• {p['card']}" for p in cards if p.get("card")]),
                 ("Not scanned", not_scanned),

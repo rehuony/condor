@@ -53,12 +53,13 @@ def test_scan_preserves_clarity_and_closed_trigger_bar(monkeypatch):
     assert plan["score"] == 100
     assert plan["bar"] == frames["m15"].timestamp.iloc[-1]
     assert (plan["lo"], plan["hi"], plan["stop"], plan["tp1"], plan["tp2"]) == (
-        98.8,
+        98.4,
         99.0,
-        97.0,
-        101.0,
-        103.0,
+        97.5,
+        101.25,
+        103.5,
     )
+    assert scanner._trade_plan(plan).signal_price == 99
     frames["h4"]["ema20"] = 96.0
     blocked = scanner._scan_pair(scanner.Config(), "SOL-USDT", frames)
     assert blocked["plan"] is None
@@ -82,7 +83,7 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
     monkeypatch, tmp_path, send
 ):
     monkeypatch.setattr(scanner.time, "time", lambda: 2_000_000_000)
-    pairs = ["SOL-USDT", "ETH-USDT", "BTC-USDT"]
+    pairs = ["SOL-USDT", "ETH-USDT", "BTC-USDT", "DOGE-USDT"]
     client = SimpleNamespace(
         market_data=SimpleNamespace(
             get_tickers=AsyncMock(
@@ -96,7 +97,14 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
     monkeypatch.setattr(
         scanner, "_fetch_pair", AsyncMock(side_effect=lambda *_: signal_frames())
     )
-    publish = AsyncMock(side_effect=[object(), None, object()])
+    publish = AsyncMock(
+        side_effect=lambda plan, *_, **__: (
+            SimpleNamespace(plan=plan, status="PROPOSED")
+            if plan.trading_pair != "ETH-USDT"
+            else None
+        )
+    )
+    monkeypatch.setattr(scanner.trade_cards, "list_cards", Mock(return_value=[]))
     render = Mock(return_value=b"preview")
     monkeypatch.setattr(scanner.trade_cards, "publish", publish)
     monkeypatch.setattr(scanner.trade_cards, "render_chart", render)
@@ -112,15 +120,19 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
         bot=SimpleNamespace(),
         server_name="pinned-server",
     )
-    result = await scanner.run(scanner.Config(send=send, mode="mock"), context)
+    config = scanner.Config(send=send, mode="mock", max_same_side=2)
+    result = await scanner.run(config, context)
     assert result.silent
     get_client.assert_awaited_once_with(-100, user_data={}, server="pinned-server")
     report.save.assert_awaited_once()
     scanner.ReportBuilder.assert_called_once_with("Trend Watch · Binance Perp")
     if send:
+        # SOL and BTC are sent, ETH's signal was already reserved, and DOGE
+        # would be a third long card while two is the configured limit.
         assert publish.await_count == 3
         assert "Result: 2 cards" in result.text
-        assert "a card was already sent for this trigger bar" in result.text
+        assert "ETH Long: a card was already sent for this trigger bar" in result.text
+        assert "DOGE Long: 2 long cards are already active" in result.text
         assert publish.await_args.kwargs["owner_id"] == 7
         assert publish.await_args.kwargs["chat_id"] == -100
         assert publish.await_args.kwargs["server_name"] == "pinned-server"
@@ -132,9 +144,9 @@ async def test_run_delegates_publication_and_preview_has_no_side_effects(
         assert not list(tmp_path.rglob("*.png"))
     else:
         publish.assert_not_awaited()
-        assert render.call_count == 3
-        assert "Result: 3 cards" in result.text
-        assert len(list(tmp_path.rglob("*.png"))) == 3
+        assert render.call_count == 4
+        assert "Result: 4 cards" in result.text
+        assert len(list(tmp_path.rglob("*.png"))) == 4
 
 
 def test_config_keeps_only_tunable_parameters():
@@ -144,8 +156,10 @@ def test_config_keeps_only_tunable_parameters():
         "min_score",
         "pullback_atr",
         "stop_atr",
+        "entry_atr",
         "tp1_r",
         "tp2_r",
+        "max_same_side",
         "mode",
         "send",
     ]
@@ -186,3 +200,15 @@ def test_fields_carry_readable_titles_for_the_config_form():
     fields = get_routine("trend_watch").get_fields()
     assert fields["pullback_atr"]["title"] == "Pullback (×ATR1H)"
     assert fields["send"]["title"] == "Publish cards"
+
+
+def test_a_pair_and_side_waits_for_its_previous_card():
+    plan = {"pair": "SOL-USDT", "side": "long"}
+    card = lambda pair, side: SimpleNamespace(  # noqa: E731
+        plan=SimpleNamespace(trading_pair=pair, side=side)
+    )
+    config = scanner.Config()
+    assert "still active" in scanner._limited(plan, [card("SOL-USDT", "long")], config)
+    assert scanner._limited(plan, [card("SOL-USDT", "short")], config) is None
+    two = [card("BTC-USDT", "long"), card("ETH-USDT", "long")]
+    assert "2 long cards" in scanner._limited(plan, two, config)
