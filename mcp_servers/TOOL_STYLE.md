@@ -52,8 +52,8 @@ the gate can classify on its own:
   wallets are changed by the server owner in Condor.
 - **A read tool must be safe by name.** If a name can be both, it is two tools.
 - Every gated name must resolve to a really-registered tool, and every gated literal to
-  a real member of that tool's `Literal` — `tests/test_dangerous_gate_names_resolve.py`
-  asserts exactly this, and `tests/test_acp_permission_gate.py` makes a newly registered
+  a real member of that tool's `Literal` — `tests/mcp/test_dangerous_gate_names_resolve.py`
+  asserts exactly this, and `tests/agents/test_acp_permission_gate.py` makes a newly registered
   action-gated tool fail CI until it is classified.
 
 ## The docstring

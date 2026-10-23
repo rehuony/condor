@@ -16,7 +16,7 @@ So the index is **derived from the code it documents** and read on demand:
     snap = await call_routine("portfolio_snapshot")   # compose, don't reimplement
 
 Curation is one dict (``_CATALOG``) in one file; a new fetcher appears the
-moment it is written, and ``tests/test_primitives_catalog.py`` fails CI if it
+moment it is written, and ``tests/routines/test_primitives_catalog.py`` fails CI if it
 lands without a docstring or a typed signature.
 
 Primitives are **imported, not bound**. A routine must be able to write the

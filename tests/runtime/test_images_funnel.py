@@ -1,6 +1,6 @@
 """A picture reaches the model as a picture (FEAT-098) — the funnel half.
 
-``tests/test_attachments_store.py`` pins where the bytes live. This pins what
+``tests/agents/test_attachments_store.py`` pins where the bytes live. This pins what
 the *model* is handed, at :func:`condor.runtime.client.prompt`, because that one
 funnel is what every surface crosses: proving the content blocks here proves them
 for the dashboard, for MCP, and for whichever surface learns to attach next.

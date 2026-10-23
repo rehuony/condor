@@ -11,7 +11,7 @@ bot a person deployed from Telegram was a record with no deed after the cut, and
 A handler is the dashboard's case exactly: no tool call to fold, but arguments
 already in hand, so it states its verb and its line directly in the vocabulary
 the log already speaks. One helper rather than a ``deeds`` import per handler,
-because the enumeration test in ``tests/test_deeds.py`` reads handler sources
+because the enumeration test in ``tests/agents/test_deeds.py`` reads handler sources
 looking for exactly this call -- a new deploy path that does not make it fails
 the suite.
 

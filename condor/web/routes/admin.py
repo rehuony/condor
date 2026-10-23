@@ -19,7 +19,7 @@ client believes it is.
 
 **This module is not hot-reloaded**: ``condor/reload.py`` does not cover
 ``condor/web/routes/*.py``, so a change here needs a full bot restart. The route
-logic is pinned by ``tests/test_admin_people_routes.py`` for exactly that reason.
+logic is pinned by ``tests/web/test_admin_people_routes.py`` for exactly that reason.
 """
 
 from __future__ import annotations

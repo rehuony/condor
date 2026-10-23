@@ -335,7 +335,7 @@ def test_the_tick_feeds_the_prompt_from_its_own_bound_state():
 
 # The other half of ARCH-276 -- that wiring the read side did not widen the
 # tick's tool profile -- is pinned by test_the_tick_seat_cannot_reach_control_agent
-# in tests/test_dangerous_gate_names_resolve.py.
+# in tests/mcp/test_dangerous_gate_names_resolve.py.
 
 
 # ── Timeout policy ──

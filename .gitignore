@@ -1,230 +1,75 @@
-# Byte-compiled / optimized / DLL files
+# ── Python: bytecode, builds and tool caches ──
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-/lib/
-/lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
-MANIFEST
-
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
+.eggs/
+wheels/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
 .coverage
 .coverage.*
-.cache
-nosetests.xml
+htmlcov/
 coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
+.cache
 *.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
 
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/#use-with-ide
-.pdm.toml
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-# Every .env variant, not just the bare name. A `.env.bak-telegram` written by a
-# config switcher carried a live OpenRouter key into a commit, and GitHub push
-# protection is what caught it — the bare pattern below did not.
-.env.*
-*.bak-telegram
+# ── Environments and secrets ──
 .venv
-env/
 venv/
-ENV/
-env.bak/
-venv.bak/
+env/
+.env
+# Every .env variant, not just the bare name: a `.env.bak-telegram` written by
+# a config switcher once carried a live OpenRouter key into a commit.
+.env.*
+!.env.example
+*.bak-telegram
 
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-# Telegram Bot Persistence
-condor_bot_data.pickle
-condor_bot_data.pickle.bak
-.DS_Store
-
-# Claude Code local settings (user-specific overrides)
-.claude/settings.local.json
-
-# Local config and data. The setup template is source, not runtime state.
+# ── Local config and runtime data (this deployment's, not the codebase's) ──
+# The setup template is source, not runtime state.
 config.yml
 config.yml.bak
 !templates/config.yml
 audit_log.yml
 data/
-
-# Per-assistant runtime stores (FEAT-003): definitions are committed, stores are not.
-# assistants/{name}/AGENT.md is tracked; assistants/{name}/store/ is runtime.
+# One root for everything this deployment knows about its users (FEAT-051).
+.condor/
+# Retired runtime locations; keep any old local data out of version control.
+condor/.runtime/
+condor_bot_data.pickle
+condor_bot_data.pickle.bak
+/reports/
+# Per-assistant stores are runtime; assistants/{name}/AGENT.md is tracked.
 assistants/*/store/
 
-# Node
+# ── Frontend ──
 node_modules/
-/improvements/
-/features/
+# build_frontend swaps dist.new into place and keeps dist.old as a rollback;
+# `dist/` above matches neither, and a dirty tree can block an update.
+frontend/dist.new/
+frontend/dist.old/
 
-# Routine reports from before they moved under data/
-/reports/
-
-# Runtime store: one root for everything this deployment knows about its users
-# (FEAT-051) — conversations, delegations, loop scratch state, and local runtime data.
-# Durable across restarts, but it is this deployment's data, not the codebase's.
-.condor/
-# Retired runtime location; keep any old local data out of version control.
-condor/.runtime/
-
-# agents/ is the tracked library; local definitions and runtime data live under
-# .condor/agents/. Keep library edits visible in git status.
-
-# Editor and AI-assistant workspace config: local to each developer's setup,
-# not repo policy. .claude/settings.local.json is already covered above.
+# ── Editors, AI assistants and OS ──
 .idea/
 .cursor/
 .gemini/
 .claude/
 frontend/.claude/
-
-# Playwright MCP scratch: page snapshots, screenshots and console logs written
-# during frontend debugging sessions. Pure session artifacts.
+.codegraph/
 .playwright-mcp/
+.DS_Store
 
-# Screenshots dropped at the repo root by a debugging session. The dashboard's
-# own images live under frontend/; nothing at the root is ever referenced.
+# ── Local scratch ──
+/improvements/
+/features/
+# Screenshots from debugging sessions; the dashboard's images live in frontend/.
 /*.png
-
-# Working notes on Gateway defects, edited by more than one session at a time.
-# Tracking it made every `git add -A` sweep whichever session was mid-edit into the other
-# one's commit — which is how 1529d04 came to carry a message describing work it does not
-# contain. Kept on disk, out of the index.
+# Gateway defect notes edited by several sessions at once; tracking it let
+# `git add -A` sweep one session's edits into another's commit (1529d04).
 GATEWAY_ISSUES.md
-
-# The dashboard is built into dist.new and swapped into place, keeping dist.old
-# as a rollback (see build_frontend). `dist/` above does not match either name,
-# and an unignored scratch directory would make every mid-build tree dirty --
-# which is itself something repo_blocks() can refuse an update over.
-frontend/dist.new/
-frontend/dist.old/

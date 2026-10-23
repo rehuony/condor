@@ -7,7 +7,7 @@ and its line directly, in the vocabulary the log already speaks, and the two
 kinds of row join without anything downstream learning a new shape.
 
 One helper rather than a ``deeds`` import in every route module, because the
-enumeration test in ``tests/test_deeds.py`` reads route sources looking
+enumeration test in ``tests/agents/test_deeds.py`` reads route sources looking
 for exactly this call: a new mutating route that does not make it fails the
 suite, which is the whole answer to "somebody adds a sixth door and nobody
 wires it".

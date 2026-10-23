@@ -167,7 +167,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 - Interactive screens, prompts and notices use `MarkdownV2`; AI replies, routine reports and delegation results keep standard Markdown on the rich `send_text` path
 - Build them with `utils/telegram_ui.py`: `title`/`section`/`bullet`/`numbered`/`hint`, `notice(kind, …)`, `prompt(…)` (ends with the `/cancel` hint), and the canonical buttons (`back_button`, `close_button`, `cancel_button`, `refresh_button`, `pager_row`, `action_button`)
-- The UI is English only; `tests/test_telegram_style.py` enforces that and the navigation labels
+- The UI is English only; `tests/telegram/test_telegram_style.py` enforces that and the navigation labels
 - Use `escape_markdown_v2()` from `utils/telegram_formatters.py` for user data
 - Error messages: `format_error_message()` from `utils/telegram_formatters.py`
 - Menus never capture typed text: a "next message is the answer" input is armed by a button (e.g. ⌨️ Quick Trade) and is bound to the chat it was armed in

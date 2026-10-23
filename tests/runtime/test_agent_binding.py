@@ -128,7 +128,7 @@ def test_ownerless_session_argv_matches_the_env_fallback(monkeypatch):
     and ``--user-id`` on argv (here) — and argv is resolved first
     (mcp_servers/condor/settings.py), so an ``or 0`` fallback of our own would
     override the chat-id fallback the env channel computes and pinned by
-    ``tests/test_agents.py::test_extra_env_falls_back_to_chat_id``. Down there
+    ``tests/agents/test_agents.py::test_extra_env_falls_back_to_chat_id``. Down there
     the value is a principal: it mints the web JWT, subjects the server-access
     and admin checks, and roots the memory store — user 0 would be a phantom
     store shared by every ownerless session (SEC-180).

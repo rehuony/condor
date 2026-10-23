@@ -117,6 +117,34 @@ def _research_url(href: str) -> str:
     return WEB_URL.rstrip("/") + quote(href, safe="/%?=&#+:@")
 
 
+_RESEARCH_PATH = re.compile(r"(?:^|/)(?:data/)?research/(\S+)\Z")
+
+
+def _research_path(text: str) -> str | None:
+    """``/research/...`` for a research file or study folder named as a path.
+
+    Matches the repo-relative ``data/research/...``, an absolute path into it,
+    and the dashboard's own ``/research/...``. A study folder
+    (``<topic>/<date>/<time-id>``) opens its ``report.md``; any other folder has
+    no page to open.
+    """
+    text = text.strip()
+    if not text.startswith(("data/research/", "/research/")) and (
+        "/data/research/" not in text
+    ):
+        return None
+    match = _RESEARCH_PATH.search(text)
+    if not match:
+        return None
+    relative = match.group(1).rstrip("/")
+    parts = relative.split("/")
+    if "." not in parts[-1]:
+        if len(parts) != 3:
+            return None
+        relative += "/report.md"
+    return "/research/" + relative
+
+
 def render_markdown(
     text: str,
     max_len: int = MAX_MESSAGE_LEN,
@@ -224,6 +252,16 @@ def render_html(
                     paragraph.append(child.extract())
             replacement.append(paragraph)
         table.replace_with(replacement)
+    # Answers name research as a code path more often than as a link; make that
+    # path the dashboard link the research rules ask for.
+    for code in soup.find_all("code"):
+        if code.find_parent(["pre", "a"]) is not None:
+            continue
+        href = _research_url(_research_path(code.get_text()) or "")
+        if href.startswith(("http://", "https://")):
+            link = soup.new_tag("a", href=href)
+            link.string = code.get_text()
+            code.replace_with(link)
 
     runs: list[tuple[str, tuple[tuple[str, str], ...]]] = []
 

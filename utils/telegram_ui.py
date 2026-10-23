@@ -9,7 +9,7 @@ Text builders escape what they are given; pass ``raw=True`` only for a fragment
 that is already MarkdownV2 (for example a value that carries its own ``code``
 entity). Buttons come from the same vocabulary: navigation labels are fixed
 strings and actions lead with one emoji from :data:`ACTION_EMOJI`.
-``tests/test_telegram_style.py`` holds the source to these labels.
+``tests/telegram/test_telegram_style.py`` holds the source to these labels.
 """
 
 from __future__ import annotations

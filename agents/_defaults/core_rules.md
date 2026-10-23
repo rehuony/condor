@@ -23,8 +23,9 @@
   same subject. Follow
   `agents/_defaults/research-artifacts.md` and its report template for layout,
   metadata and links. Pass the destination and standard to delegated researchers.
-  Share descriptive `/research/<relative-path>/report.md` links, never local
-  filesystem paths. Preserve existing artifacts and references when updating them.
+  Share it as a Markdown link with a descriptive title,
+  `[title](/research/<relative-path>/report.md)`, never as a local filesystem
+  path. Preserve existing artifacts and references when updating them.
 - **Never end a turn with a background task outstanding.** If you launch a Bash
   command with `run_in_background`, collect its output before you answer. Prefer
   a foreground command with a generous `timeout` — a task that finishes after
