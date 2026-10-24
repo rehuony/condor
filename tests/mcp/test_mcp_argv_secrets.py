@@ -247,3 +247,57 @@ def test_hummingbot_settings_read_credentials_from_env(monkeypatch):
     assert hb_server.settings.api_password == API_PASSWORD
     assert hb_server.settings.api_url == "http://10.0.0.5:8000"
     assert hb_server.settings.server_name == "prod"
+
+
+# ── the Claude bridge puts mcpServers on the `claude` argv (--mcp-config) ──
+
+
+def _acp_client(command):
+    from condor.acp.client import ACPClient
+
+    return ACPClient(
+        command=command,
+        working_dir="/tmp",
+        mcp_servers=[
+            {
+                "name": "mcp-hummingbot",
+                "command": "uv",
+                "args": ["run", "python", "-m", "mcp_servers.hummingbot_api"],
+                "env": [{"name": "HUMMINGBOT_API_PASSWORD", "value": API_PASSWORD}],
+            },
+            {
+                "name": "condor",
+                "command": "uv",
+                "args": ["run", "python", "-m", "mcp_servers.condor"],
+                "env": [{"name": "TELEGRAM_BOT_TOKEN", "value": BOT_TOKEN}],
+            },
+        ],
+        extra_env={"CONDOR_CHAT_ID": "42"},
+    )
+
+
+def test_claude_bridge_never_sees_mcp_secrets_in_session_new():
+    import json
+
+    client = _acp_client("claude-agent-acp")
+    sent = json.dumps(client._session_new_params())
+    for secret in (BOT_TOKEN, API_PASSWORD):
+        assert secret not in sent
+    assert [s["name"] for s in client._session_new_params()["mcpServers"]] == [
+        "mcp-hummingbot",
+        "condor",
+    ]
+
+
+def test_claude_bridge_receives_mcp_secrets_in_its_own_environment():
+    env = _acp_client("claude-agent-acp")._process_env()
+    assert env["HUMMINGBOT_API_PASSWORD"] == API_PASSWORD
+    assert env["TELEGRAM_BOT_TOKEN"] == BOT_TOKEN
+    assert env["CONDOR_CHAT_ID"] == "42"
+
+
+def test_other_bridges_keep_per_server_env():
+    client = _acp_client("npx @agentclientprotocol/codex-acp")
+    servers = client._session_new_params()["mcpServers"]
+    assert _env_of(servers[0])["HUMMINGBOT_API_PASSWORD"] == API_PASSWORD
+    assert "HUMMINGBOT_API_PASSWORD" not in client._process_env()

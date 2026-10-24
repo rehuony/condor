@@ -629,21 +629,42 @@ class ACPClient:
         (FEAT-025, measured both ways against bridge 0.21.0). A bridge that
         ignores ``_meta`` simply drops it; the handshake is unaffected.
         """
+        mcp_servers = self.mcp_servers
+        if self._hoists_mcp_env():
+            mcp_servers = [{**server, "env": []} for server in mcp_servers]
         params: dict[str, Any] = {
             "cwd": self.working_dir,
-            "mcpServers": self.mcp_servers,
+            "mcpServers": mcp_servers,
         }
         if self.system_prompt:
             params["_meta"] = {"systemPrompt": {"append": self.system_prompt}}
         return params
 
-    async def start(self) -> None:
-        """Spawn subprocess, run ACP handshake (initialize + session/new)."""
+    def _hoists_mcp_env(self) -> bool:
+        """Whether per-server MCP ``env`` must move into the bridge's own env.
+
+        ``claude-agent-acp`` serialises ``mcpServers`` -- ``env`` values included
+        -- into ``claude --mcp-config <json>``, a world-readable argv. Its stdio
+        MCP children inherit ``claude``'s environment, whose ``/proc`` entry only
+        this user can read, so the secrets travel there instead.
+        """
+        return "claude-agent-acp" in self.command
+
+    def _process_env(self) -> dict[str, str]:
         env = dict(os.environ)
         for var in _CLAUDE_SESSION_ENV_VARS:
             env.pop(var, None)
         if self.extra_env:
             env.update(self.extra_env)
+        if self._hoists_mcp_env():
+            for server in self.mcp_servers:
+                for entry in server.get("env", []):
+                    env[str(entry["name"])] = str(entry["value"])
+        return env
+
+    async def start(self) -> None:
+        """Spawn subprocess, run ACP handshake (initialize + session/new)."""
+        env = self._process_env()
 
         self._process = await asyncio.create_subprocess_shell(
             self.command,
